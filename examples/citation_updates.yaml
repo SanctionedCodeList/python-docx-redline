@@ -1,0 +1,38 @@
+# Example: Batch Citation Updates
+# Update procedural posture parentheticals for multiple citations
+
+document: brief.docx
+author: Research Attorney
+output: brief_updated.docx
+
+# Pattern for adding parentheticals to citations
+edits:
+  - type: insert_tracked
+    text: " (granting summary judgment)"
+    after: "(D. Mass. 2023)"
+    scope:
+      contains: "Smith v. Jones"
+
+  - type: insert_tracked
+    text: " (denying motion to dismiss)"
+    after: "(S.D.N.Y. 2022)"
+    scope:
+      contains: "Doe v. Corporation"
+
+  - type: insert_tracked
+    text: " (affirming on appeal)"
+    after: "(2d Cir. 2024)"
+    scope:
+      contains: "Brown v. Board"
+
+  # Update case name format
+  - type: replace_tracked
+    find: "US v."
+    replace: "United States v."
+
+  # Add missing pinpoint cites
+  - type: replace_tracked
+    find: "123 F.3d 456"
+    replace: "123 F.3d 456, 459"
+    scope:
+      contains: "establishes the test"

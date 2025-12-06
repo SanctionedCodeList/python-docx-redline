@@ -1,0 +1,34 @@
+# Example: Simple Document Edits
+# Demonstrates common edit operations
+
+document: contract.docx
+author: Legal Team
+output: contract_revised.docx
+
+edits:
+  # Replace party names
+  - type: replace_tracked
+    find: "ACME Corporation"
+    replace: "ACME Industries LLC"
+
+  # Update dates
+  - type: replace_tracked
+    find: "December 31, 2024"
+    replace: "December 31, 2025"
+    scope: "Termination Date"
+
+  # Add clarification
+  - type: insert_tracked
+    text: " (including weekends and holidays)"
+    after: "within 30 days"
+
+  # Insert new paragraph
+  - type: insert_paragraph
+    text: "This agreement may be terminated by either party with 90 days written notice."
+    after_heading: "Termination"
+    track: true
+
+  # Delete obsolete section
+  - type: delete_section
+    heading: "COVID-19 Provisions"
+    track: true

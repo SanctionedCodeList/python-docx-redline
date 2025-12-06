@@ -1,0 +1,105 @@
+# Example: Surgical Edits from Client Feedback
+# This file demonstrates the YAML-based edit specification format
+
+document: 2025-12-02_MTD_client_comments.docx
+author: Hancock, Parker
+initials: PH
+output: 2025-12-06_MTD_FINAL.docx
+
+# Preprocessing steps (run before edits)
+preprocessing:
+  - accept_all_changes
+  - delete_all_comments
+
+# List of edits to apply
+edits:
+  # Edit 1: Change "records" to "compiles their property ownership data"
+  - type: replace_tracked
+    find: "records their property ownership"
+    replace: "compiles their property ownership data"
+    scope:
+      contains: "It claims merely"
+      section: "Introduction"
+
+  # Edit 2: Add property-records theme paragraph
+  - type: insert_paragraph
+    text: "This case is about property records, not property owners. BatchLeads aggregates public information about real estate—deed histories, tax assessments, transaction prices—and makes it searchable for investors, brokers, and lenders. The owners' names appear because they are part of the property data, not because Defendants seek to exploit them for promotional purposes."
+    after: "mismatch between the allegations and the law"
+    track: true
+
+  # Edit 3: Add perceived endorsement examples
+  - type: insert_tracked
+    text: " (e.g., putting a celebrity's face on a billboard or using an athlete's voice to sell cars)"
+    after: "for example,"
+    scope:
+      contains: "perceived endorsement"
+      section: "Argument"
+
+  # Edit 4: Clarify Huston interprets IRPA
+  - type: insert_tracked
+    text: " (interpreting IRPA)"
+    after: "(7th Cir. 2022)"
+    scope:
+      contains: "Huston"
+      not_in: ["Table of Authorities"]
+
+  # Edit 5: Add Vrdolyak procedural parenthetical
+  - type: insert_tracked
+    text: " (granting motion to dismiss)"
+    after: "(N.D. Ill. 2016)"
+    scope:
+      contains: "Vrdolyak"
+      section: "Argument"
+
+  # Edit 6: Add Callahan procedural parenthetical
+  - type: insert_tracked
+    text: " (dismissing with prejudice)"
+    after: "(N.D. Cal. Mar. 1, 2021)"
+    scope:
+      contains: "Callahan"
+      section: "Argument"
+
+  # Edit 7: Add statutory elements framework
+  - type: insert_tracked
+    text: " Although each of the four statutes varies in detail, all require proof of three core elements: (1) the defendant used a protected attribute of the plaintiff's identity; (2) the use was for an advertising or commercial purpose; and (3) the plaintiff did not consent. See 765 ILCS 1075/30(a); Cal. Civ. Code § 3344(a); Ind. Code § 32-36-1-8(a); Ala. Code § 6-5-772(a). The Complaint fails on all three."
+    after: "constitutes the product being sold."
+    scope: "Section B"
+
+  # Edit 8: Expand VersusLaw with Lexis/Westlaw analogy
+  - type: insert_tracked
+    text: " VersusLaw operated a subscription-based legal database—similar to Westlaw or Lexis—that aggregated public court records and made them searchable for paying subscribers. The parallel to BatchLeads is nearly exact: both services compile public records containing incidental personal information and sell subscription access. Plaintiffs' theory, taken to its logical conclusion, would impose liability on the entire legal research industry every time a subscriber searches a case by party name."
+    after: "aff'd, 512 F. App'x 635 (7th Cir. 2013)."
+    scope:
+      contains: "Nieman v. VersusLaw"
+
+  # Edit 9: Distinguish attorney directory analogy
+  - type: replace_tracked
+    find: "BatchLeads functions like the attorney directory in Vrdolyak and the historical records database in Callahan."
+    replace: "BatchLeads stands even further from right-of-publicity concerns than the attorney directory in Vrdolyak. There, users searched for attorneys by name—the product was a directory of people. Here, users search for properties by address, and the owner's name is incidental data attached to the property record."
+    scope: "Section B.1"
+
+  # Edit 10: Delete Enhanced Damages Section
+  - type: delete_section
+    heading: "Enhanced Damages Fail as a Matter of Law"
+    track: true
+    update_toc: true
+
+  # Edit 11: Add Futility Argument to Conclusion
+  - type: insert_paragraphs
+    texts:
+      - "The Court should dismiss with prejudice because the Complaint's defects are legal, not factual, and no amendment could cure them. Under Seventh Circuit precedent, leave to amend should be denied when \"it appears to a certainty that the plaintiff cannot state a claim upon which relief can be granted.\" Barry Aviation Inc. v. Land O'Lakes Mun. Airport Comm'n, 377 F.3d 682, 687 (7th Cir. 2004). Futility is established when the complaint fails not for want of facts, but because the plaintiff's legal theory is foreclosed by statute or precedent. See Runnion ex rel. Runnion v. Girl Scouts of Greater Chi. & Nw. Ind., 786 F.3d 510, 519 (7th Cir. 2015)."
+      - "That is precisely the situation here. Plaintiffs' claims fail not because they neglected to allege facts that investigation might uncover, but because the facts they allege—database access through a free trial—do not state a claim under any right-of-publicity statute as a matter of law. No amendment can transform database access into advertising because that is not Defendants' business model; the free trial provides time-limited access to the same property reports that paying subscribers receive."
+      - "Controlling precedent forecloses Plaintiffs' theory. Vrdolyak, 206 F. Supp. 3d 1384, dismissed an IRPA claim on the pleadings without leave to amend where profiles were the product, not advertisements. Callahan, 2021 WL 783524, dismissed with prejudice after plaintiffs failed to cure defects on amendment. Nieman v. VersusLaw, 2012 WL 3201931, dismissed with prejudice and was affirmed by the Seventh Circuit. Claims survive only where plaintiffs allege specific promotional exploitation absent here—\"unlock\" buttons paired with subscription offers, Lukis, 454 F. Supp. 3d at 754–55; targeted emails and pop-ups, Fry, 2023 WL 2631387, at *6–7; or conversion prompts adjacent to identity teasers, Camacho, 2022 WL 3093306, at *6–8. The Complaint does not—and cannot truthfully—allege any of these features. Amendment would be futile."
+    before: "The Court should dismiss all counts with prejudice."
+    track: true
+
+# Validation options
+validation:
+  strict: true          # Fail on any validation error
+  check_toc: true       # Verify TOC is valid
+  check_references: true # Verify all references exist
+
+# Output options
+output_options:
+  create_backup: true   # Create .bak file before overwriting
+  validate_before_save: true
