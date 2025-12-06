@@ -20,6 +20,8 @@ __all__ = [
     "TextNotFoundError",
     "AmbiguousTextError",
     "ValidationError",
+    "TextSearch",
+    "TextSpan",
 ]
 
 # Import error classes
@@ -29,6 +31,9 @@ from .errors import (
     TextNotFoundError,
     ValidationError,
 )
+
+# Import text search
+from .text_search import TextSearch, TextSpan
 
 # Package will be populated as we build out the modules
 # from .document import Document
