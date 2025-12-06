@@ -22,6 +22,13 @@ __all__ = [
     "ValidationError",
 ]
 
+# Import error classes
+from .errors import (
+    AmbiguousTextError,
+    DocxRedlineError,
+    TextNotFoundError,
+    ValidationError,
+)
+
 # Package will be populated as we build out the modules
 # from .document import Document
-# from .errors import DocxRedlineError, TextNotFoundError, AmbiguousTextError, ValidationError
