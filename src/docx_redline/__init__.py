@@ -22,6 +22,7 @@ __all__ = [
     "ValidationError",
     "TextSearch",
     "TextSpan",
+    "TrackedXMLGenerator",
 ]
 
 # Import error classes
@@ -34,6 +35,9 @@ from .errors import (
 
 # Import text search
 from .text_search import TextSearch, TextSpan
+
+# Import XML generation
+from .tracked_xml import TrackedXMLGenerator
 
 # Package will be populated as we build out the modules
 # from .document import Document
