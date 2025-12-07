@@ -26,6 +26,8 @@ __all__ = [
 ]
 
 # Import error classes
+# Import document class
+from .document import Document
 from .errors import (
     AmbiguousTextError,
     DocxRedlineError,
@@ -38,6 +40,3 @@ from .text_search import TextSearch, TextSpan
 
 # Import XML generation
 from .tracked_xml import TrackedXMLGenerator
-
-# Import document class
-from .document import Document

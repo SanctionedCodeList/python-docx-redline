@@ -14,9 +14,6 @@ Algorithm Note:
 from dataclasses import dataclass
 from typing import Any
 
-from lxml import etree
-
-
 # Word namespace
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
