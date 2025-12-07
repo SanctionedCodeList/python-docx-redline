@@ -147,22 +147,9 @@ def test_text_not_found():
 
 def test_ambiguous_text():
     """Test AmbiguousTextError when multiple matches are found."""
-    # Create a document with duplicate text
+    # Create a document with duplicate text (compact XML to avoid whitespace issues)
     duplicate_doc = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>
-    <w:p>
-      <w:r>
-        <w:t>Section 1: Introduction</w:t>
-      </w:r>
-    </w:p>
-    <w:p>
-      <w:r>
-        <w:t>Section 2: Introduction</w:t>
-      </w:r>
-    </w:p>
-  </w:body>
-</w:document>"""
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Section 1: Introduction</w:t></w:r></w:p><w:p><w:r><w:t>Section 2: Introduction</w:t></w:r></w:p></w:body></w:document>"""
 
     docx_path = create_test_docx(duplicate_doc)
 
@@ -191,6 +178,163 @@ def test_context_manager():
         docx_path.unlink()
 
 
+def test_delete_tracked():
+    """Test tracked deletion."""
+    docx_path = create_test_docx()
+    output_path = docx_path.parent / "output.docx"
+
+    try:
+        doc = Document(docx_path, author="TestAuthor")
+
+        # Delete "test document"
+        doc.delete_tracked("test document")
+
+        # Save the document
+        doc.save(output_path)
+
+        # Verify the output file was created
+        assert output_path.exists()
+
+        # Load and verify the modified document
+        doc2 = Document(output_path)
+
+        # Check for the deletion element
+        deletions = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}del"
+        )
+        assert len(deletions) > 0, "No deletion elements found"
+
+        # Verify the deleted text
+        deleted_text = "".join(deletions[0].itertext())
+        assert "test document" in deleted_text
+
+    finally:
+        # Cleanup
+        docx_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+
+def test_replace_tracked():
+    """Test tracked replacement."""
+    docx_path = create_test_docx()
+    output_path = docx_path.parent / "output.docx"
+
+    try:
+        doc = Document(docx_path, author="TestAuthor")
+
+        # Replace "test document" with "sample file"
+        doc.replace_tracked("test document", "sample file")
+
+        # Save the document
+        doc.save(output_path)
+
+        # Verify the output file was created
+        assert output_path.exists()
+
+        # Load and verify the modified document
+        doc2 = Document(output_path)
+
+        # Check for deletion element
+        deletions = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}del"
+        )
+        assert len(deletions) > 0, "No deletion elements found"
+
+        # Check for insertion element
+        insertions = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ins"
+        )
+        assert len(insertions) > 0, "No insertion elements found"
+
+        # Verify the deleted text
+        deleted_text = "".join(deletions[0].itertext())
+        assert "test document" in deleted_text
+
+        # Verify the inserted text
+        inserted_text = "".join(insertions[0].itertext())
+        assert "sample file" in inserted_text
+
+    finally:
+        # Cleanup
+        docx_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+
+def test_delete_partial_run():
+    """Test deleting text that's part of a longer run."""
+    # Create document with longer text in single run (compact XML to avoid whitespace issues)
+    partial_doc = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>This is a very long sentence with specific words.</w:t></w:r></w:p></w:body></w:document>"""
+
+    docx_path = create_test_docx(partial_doc)
+    output_path = docx_path.parent / "output.docx"
+
+    try:
+        doc = Document(docx_path)
+
+        # Delete just "specific words" which is in the middle of the run
+        doc.delete_tracked("specific words")
+
+        # Save and reload
+        doc.save(output_path)
+        doc2 = Document(output_path)
+
+        # Check for deletion
+        deletions = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}del"
+        )
+        assert len(deletions) > 0
+
+        # Verify we still have the before and after text
+        all_text = "".join(doc2.xml_root.itertext())
+        assert "very long sentence with" in all_text
+
+    finally:
+        docx_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+
+def test_replace_across_multiple_runs():
+    """Test replacing text that spans multiple runs."""
+    # Create document with text split across runs (compact XML to avoid whitespace issues)
+    multi_run_doc = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>This is </w:t></w:r><w:r><w:t>fragmented</w:t></w:r><w:r><w:t> text here.</w:t></w:r></w:p></w:body></w:document>"""
+
+    docx_path = create_test_docx(multi_run_doc)
+    output_path = docx_path.parent / "output.docx"
+
+    try:
+        doc = Document(docx_path)
+
+        # Replace text that spans across runs
+        doc.replace_tracked("fragmented text", "unified content")
+
+        # Save and reload
+        doc.save(output_path)
+        doc2 = Document(output_path)
+
+        # Check for both deletion and insertion
+        deletions = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}del"
+        )
+        insertions = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ins"
+        )
+
+        assert len(deletions) > 0
+        assert len(insertions) > 0
+
+        deleted_text = "".join(deletions[0].itertext())
+        inserted_text = "".join(insertions[0].itertext())
+
+        assert "fragmented text" in deleted_text
+        assert "unified content" in inserted_text
+
+    finally:
+        docx_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     # Run a simple smoke test
     print("Running smoke test...")
@@ -199,6 +343,18 @@ if __name__ == "__main__":
 
     test_insert_tracked_basic()
     print("✓ Insert tracked works")
+
+    test_delete_tracked()
+    print("✓ Delete tracked works")
+
+    test_replace_tracked()
+    print("✓ Replace tracked works")
+
+    test_delete_partial_run()
+    print("✓ Delete partial run works")
+
+    test_replace_across_multiple_runs()
+    print("✓ Replace across multiple runs works")
 
     test_text_not_found()
     print("✓ TextNotFoundError works")

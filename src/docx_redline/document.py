@@ -176,6 +176,119 @@ class Document:
         # Insert after the matched text
         self._insert_after_match(match, insertion_element)
 
+    def delete_tracked(
+        self, text: str, author: str | None = None
+    ) -> None:
+        """Delete text with tracked changes.
+
+        This method searches for the specified text in the document and marks
+        it as a tracked deletion.
+
+        Args:
+            text: The text to delete
+            author: Optional author override (uses document author if None)
+
+        Raises:
+            TextNotFoundError: If the text is not found
+            AmbiguousTextError: If multiple occurrences of text are found
+        """
+        # Get all paragraphs in the document
+        paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+
+        # Search for the text to delete
+        matches = self._text_search.find_text(text, paragraphs)
+
+        if not matches:
+            raise TextNotFoundError(
+                text,
+                suggestions=[
+                    "Check for typos in the search text",
+                    "Try searching for a shorter or more unique phrase",
+                    "Verify the text exists in the document",
+                ],
+            )
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(text, matches)
+
+        # We have exactly one match
+        match = matches[0]
+
+        # Generate the deletion XML
+        deletion_xml = self._xml_generator.create_deletion(text, author)
+
+        # Parse the deletion XML with namespace context
+        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns:w="{WORD_NAMESPACE}"
+      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+    {deletion_xml}
+</root>"""
+        root = etree.fromstring(wrapped_xml.encode("utf-8"))
+        deletion_element = root[0]  # Get the first child (the actual deletion)
+
+        # Replace the matched text with deletion
+        self._replace_match_with_element(match, deletion_element)
+
+    def replace_tracked(
+        self, find: str, replace: str, author: str | None = None
+    ) -> None:
+        """Find and replace text with tracked changes.
+
+        This method searches for text and replaces it with new text, showing
+        both the deletion of the old text and insertion of the new text as
+        tracked changes.
+
+        Args:
+            find: Text to find
+            replace: Replacement text
+            author: Optional author override (uses document author if None)
+
+        Raises:
+            TextNotFoundError: If the 'find' text is not found
+            AmbiguousTextError: If multiple occurrences of 'find' text are found
+        """
+        # Get all paragraphs in the document
+        paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+
+        # Search for the text to replace
+        matches = self._text_search.find_text(find, paragraphs)
+
+        if not matches:
+            raise TextNotFoundError(
+                find,
+                suggestions=[
+                    "Check for typos in the search text",
+                    "Try searching for a shorter or more unique phrase",
+                    "Verify the text exists in the document",
+                ],
+            )
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(find, matches)
+
+        # We have exactly one match
+        match = matches[0]
+
+        # Generate deletion XML for the old text
+        deletion_xml = self._xml_generator.create_deletion(find, author)
+
+        # Generate insertion XML for the new text
+        insertion_xml = self._xml_generator.create_insertion(replace, author)
+
+        # Parse both XMLs with namespace context
+        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns:w="{WORD_NAMESPACE}"
+      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+    {deletion_xml}
+    {insertion_xml}
+</root>"""
+        root = etree.fromstring(wrapped_xml.encode("utf-8"))
+        deletion_element = root[0]  # First child (deletion)
+        insertion_element = root[1]  # Second child (insertion)
+
+        # Replace the matched text with deletion + insertion
+        self._replace_match_with_elements(match, [deletion_element, insertion_element])
+
     def _insert_after_match(self, match: Any, insertion_element: Any) -> None:
         """Insert an XML element after a matched text span.
 
@@ -194,6 +307,236 @@ class Document:
 
         # Insert the new element after the end run
         paragraph.insert(run_index + 1, insertion_element)
+
+    def _replace_match_with_element(self, match: Any, replacement_element: Any) -> None:
+        """Replace matched text with a single XML element.
+
+        This handles the complexity of text potentially spanning multiple runs.
+        The matched runs are removed and replaced with the new element.
+
+        Args:
+            match: TextSpan object representing the text to replace
+            replacement_element: The lxml Element to insert in place of matched text
+        """
+        paragraph = match.paragraph
+
+        # If the match is within a single run
+        if match.start_run_index == match.end_run_index:
+            run = match.runs[match.start_run_index]
+            run_text = "".join(run.itertext())
+
+            # If the match is the entire run, replace the run
+            if match.start_offset == 0 and match.end_offset == len(run_text):
+                run_index = list(paragraph).index(run)
+                paragraph.remove(run)
+                paragraph.insert(run_index, replacement_element)
+            else:
+                # Match is partial - need to split the run
+                self._split_and_replace_in_run(
+                    paragraph, run, match.start_offset, match.end_offset, replacement_element
+                )
+        else:
+            # Match spans multiple runs - remove all matched runs and insert replacement
+            start_run = match.runs[match.start_run_index]
+            start_run_index = list(paragraph).index(start_run)
+
+            # Remove all runs in the match
+            for i in range(match.start_run_index, match.end_run_index + 1):
+                run = match.runs[i]
+                if run in paragraph:
+                    paragraph.remove(run)
+
+            # Insert replacement at the position of the first removed run
+            paragraph.insert(start_run_index, replacement_element)
+
+    def _replace_match_with_elements(
+        self, match: Any, replacement_elements: list[Any]
+    ) -> None:
+        """Replace matched text with multiple XML elements.
+
+        Used for replace_tracked which needs both deletion and insertion elements.
+
+        Args:
+            match: TextSpan object representing the text to replace
+            replacement_elements: List of lxml Elements to insert in place of matched text
+        """
+        paragraph = match.paragraph
+
+        # Similar to _replace_match_with_element but inserts multiple elements
+        if match.start_run_index == match.end_run_index:
+            run = match.runs[match.start_run_index]
+            run_text = "".join(run.itertext())
+
+            # If the match is the entire run, replace the run
+            if match.start_offset == 0 and match.end_offset == len(run_text):
+                run_index = list(paragraph).index(run)
+                paragraph.remove(run)
+                # Insert elements in order
+                for i, elem in enumerate(replacement_elements):
+                    paragraph.insert(run_index + i, elem)
+            else:
+                # Match is partial - need to split the run
+                self._split_and_replace_in_run_multiple(
+                    paragraph,
+                    run,
+                    match.start_offset,
+                    match.end_offset,
+                    replacement_elements,
+                )
+        else:
+            # Match spans multiple runs
+            start_run = match.runs[match.start_run_index]
+            start_run_index = list(paragraph).index(start_run)
+
+            # Remove all runs in the match
+            for i in range(match.start_run_index, match.end_run_index + 1):
+                run = match.runs[i]
+                if run in paragraph:
+                    paragraph.remove(run)
+
+            # Insert all replacement elements at the position of the first removed run
+            for i, elem in enumerate(replacement_elements):
+                paragraph.insert(start_run_index + i, elem)
+
+    def _split_and_replace_in_run(
+        self,
+        paragraph: Any,
+        run: Any,
+        start_offset: int,
+        end_offset: int,
+        replacement_element: Any,
+    ) -> None:
+        """Split a run and replace a portion with a new element.
+
+        Args:
+            paragraph: The paragraph containing the run
+            run: The run to split
+            start_offset: Character offset where match starts
+            end_offset: Character offset where match ends (exclusive)
+            replacement_element: Element to insert in place of matched text
+        """
+        # Get the full text of the run
+        text_elements = list(run.iter(f"{{{WORD_NAMESPACE}}}t"))
+        if not text_elements:
+            return
+
+        # For simplicity, we'll work with the first text element
+        # (Word typically has one w:t per run)
+        text_elem = text_elements[0]
+        run_text = text_elem.text or ""
+
+        # Split into before, match, after
+        before_text = run_text[:start_offset]
+        after_text = run_text[end_offset:]
+
+        run_index = list(paragraph).index(run)
+
+        # Build new elements
+        new_elements = []
+
+        # Add before text if it exists
+        if before_text:
+            before_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+            # Copy run properties if they exist
+            run_props = run.find(f"{{{WORD_NAMESPACE}}}rPr")
+            if run_props is not None:
+                before_run.append(etree.fromstring(etree.tostring(run_props)))
+            before_t = etree.SubElement(before_run, f"{{{WORD_NAMESPACE}}}t")
+            if before_text and (before_text[0].isspace() or before_text[-1].isspace()):
+                before_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            before_t.text = before_text
+            new_elements.append(before_run)
+
+        # Add replacement element
+        new_elements.append(replacement_element)
+
+        # Add after text if it exists
+        if after_text:
+            after_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+            # Copy run properties if they exist
+            run_props = run.find(f"{{{WORD_NAMESPACE}}}rPr")
+            if run_props is not None:
+                after_run.append(etree.fromstring(etree.tostring(run_props)))
+            after_t = etree.SubElement(after_run, f"{{{WORD_NAMESPACE}}}t")
+            if after_text and (after_text[0].isspace() or after_text[-1].isspace()):
+                after_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            after_t.text = after_text
+            new_elements.append(after_run)
+
+        # Remove original run
+        paragraph.remove(run)
+
+        # Insert new elements
+        for i, elem in enumerate(new_elements):
+            paragraph.insert(run_index + i, elem)
+
+    def _split_and_replace_in_run_multiple(
+        self,
+        paragraph: Any,
+        run: Any,
+        start_offset: int,
+        end_offset: int,
+        replacement_elements: list[Any],
+    ) -> None:
+        """Split a run and replace a portion with multiple new elements.
+
+        Args:
+            paragraph: The paragraph containing the run
+            run: The run to split
+            start_offset: Character offset where match starts
+            end_offset: Character offset where match ends (exclusive)
+            replacement_elements: Elements to insert in place of matched text
+        """
+        # Get the full text of the run
+        text_elements = list(run.iter(f"{{{WORD_NAMESPACE}}}t"))
+        if not text_elements:
+            return
+
+        text_elem = text_elements[0]
+        run_text = text_elem.text or ""
+
+        # Split into before, match, after
+        before_text = run_text[:start_offset]
+        after_text = run_text[end_offset:]
+
+        run_index = list(paragraph).index(run)
+
+        # Build new elements
+        new_elements = []
+
+        # Add before text if it exists
+        if before_text:
+            before_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+            run_props = run.find(f"{{{WORD_NAMESPACE}}}rPr")
+            if run_props is not None:
+                before_run.append(etree.fromstring(etree.tostring(run_props)))
+            before_t = etree.SubElement(before_run, f"{{{WORD_NAMESPACE}}}t")
+            if before_text and (before_text[0].isspace() or before_text[-1].isspace()):
+                before_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            before_t.text = before_text
+            new_elements.append(before_run)
+
+        # Add all replacement elements
+        new_elements.extend(replacement_elements)
+
+        # Add after text if it exists
+        if after_text:
+            after_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+            run_props = run.find(f"{{{WORD_NAMESPACE}}}rPr")
+            if run_props is not None:
+                after_run.append(etree.fromstring(etree.tostring(run_props)))
+            after_t = etree.SubElement(after_run, f"{{{WORD_NAMESPACE}}}t")
+            if after_text and (after_text[0].isspace() or after_text[-1].isspace()):
+                after_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            after_t.text = after_text
+            new_elements.append(after_run)
+
+        # Remove original run
+        paragraph.remove(run)
+
+        # Insert new elements
+        for i, elem in enumerate(new_elements):
+            paragraph.insert(run_index + i, elem)
 
     def save(self, output_path: str | Path | None = None) -> None:
         """Save the document to a file.
