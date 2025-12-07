@@ -39,5 +39,5 @@ from .text_search import TextSearch, TextSpan
 # Import XML generation
 from .tracked_xml import TrackedXMLGenerator
 
-# Package will be populated as we build out the modules
-# from .document import Document
+# Import document class
+from .document import Document
