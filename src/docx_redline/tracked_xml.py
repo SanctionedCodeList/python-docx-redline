@@ -62,20 +62,21 @@ class TrackedXMLGenerator:
 
         # Handle xml:space for leading/trailing whitespace
         xml_space = (
-            ' xml:space="preserve"'
-            if (text and (text[0].isspace() or text[-1].isspace()))
-            else ""
+            ' xml:space="preserve"' if (text and (text[0].isspace() or text[-1].isspace())) else ""
         )
 
         # Escape XML special characters
         escaped_text = self._escape_xml(text)
 
         # Generate the OOXML
-        xml = f"""<w:ins w:id="{change_id}" w:author="{author}" w:date="{timestamp}" w16du:dateUtc="{timestamp}">
-  <w:r w:rsidR="{self.rsid}">
-    <w:t{xml_space}>{escaped_text}</w:t>
-  </w:r>
-</w:ins>"""
+        xml = (
+            f'<w:ins w:id="{change_id}" w:author="{author}" '
+            f'w:date="{timestamp}" w16du:dateUtc="{timestamp}">\n'
+            f'  <w:r w:rsidR="{self.rsid}">\n'
+            f"    <w:t{xml_space}>{escaped_text}</w:t>\n"
+            f"  </w:r>\n"
+            f"</w:ins>"
+        )
 
         return xml
 
@@ -96,9 +97,7 @@ class TrackedXMLGenerator:
 
         # Handle xml:space for leading/trailing whitespace
         xml_space = (
-            ' xml:space="preserve"'
-            if (text and (text[0].isspace() or text[-1].isspace()))
-            else ""
+            ' xml:space="preserve"' if (text and (text[0].isspace() or text[-1].isspace())) else ""
         )
 
         # Escape XML special characters
@@ -106,11 +105,14 @@ class TrackedXMLGenerator:
 
         # Generate the OOXML
         # Note: deletions use <w:delText> instead of <w:t>
-        xml = f"""<w:del w:id="{change_id}" w:author="{author}" w:date="{timestamp}" w16du:dateUtc="{timestamp}">
-  <w:r w:rsidDel="{self.rsid}">
-    <w:delText{xml_space}>{escaped_text}</w:delText>
-  </w:r>
-</w:del>"""
+        xml = (
+            f'<w:del w:id="{change_id}" w:author="{author}" '
+            f'w:date="{timestamp}" w16du:dateUtc="{timestamp}">\n'
+            f'  <w:r w:rsidDel="{self.rsid}">\n'
+            f"    <w:delText{xml_space}>{escaped_text}</w:delText>\n"
+            f"  </w:r>\n"
+            f"</w:del>"
+        )
 
         return xml
 

@@ -10,14 +10,12 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from lxml import etree
 
 from docx_redline import (
     AmbiguousTextError,
     Document,
     TextNotFoundError,
 )
-
 
 # Minimal Word document XML structure
 MINIMAL_DOCUMENT_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -335,34 +333,109 @@ def test_replace_across_multiple_runs():
         output_path.unlink(missing_ok=True)
 
 
-if __name__ == "__main__":
-    # Run a simple smoke test
-    print("Running smoke test...")
-    test_document_load_docx()
-    print("✓ Document loading works")
+def test_accept_all_changes():
+    """Test accepting all tracked changes."""
+    docx_path = create_test_docx()
+    output_path = docx_path.parent / "output.docx"
 
-    test_insert_tracked_basic()
-    print("✓ Insert tracked works")
+    try:
+        doc = Document(docx_path)
 
-    test_delete_tracked()
-    print("✓ Delete tracked works")
+        # Add some tracked changes
+        doc.insert_tracked("NEW TEXT", after="This is")
+        doc.delete_tracked("test document")
+        doc.save(output_path)
 
-    test_replace_tracked()
-    print("✓ Replace tracked works")
+        # Reload and verify tracked changes exist
+        doc2 = Document(output_path)
+        insertions_before = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ins"
+        )
+        deletions_before = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}del"
+        )
+        assert len(insertions_before) > 0
+        assert len(deletions_before) > 0
 
-    test_delete_partial_run()
-    print("✓ Delete partial run works")
+        # Accept all changes
+        doc2.accept_all_changes()
+        doc2.save(output_path)
 
-    test_replace_across_multiple_runs()
-    print("✓ Replace across multiple runs works")
+        # Reload and verify no tracked changes remain
+        doc3 = Document(output_path)
+        insertions_after = doc3.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ins"
+        )
+        deletions_after = doc3.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}del"
+        )
+        assert len(insertions_after) == 0, "Insertions should be unwrapped"
+        assert len(deletions_after) == 0, "Deletions should be removed"
 
-    test_text_not_found()
-    print("✓ TextNotFoundError works")
+        # Verify the inserted text is still present
+        all_text = "".join(doc3.xml_root.itertext())
+        assert "NEW TEXT" in all_text, "Inserted text should remain after accepting"
 
-    test_ambiguous_text()
-    print("✓ AmbiguousTextError works")
+    finally:
+        docx_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
 
-    test_context_manager()
-    print("✓ Context manager works")
 
-    print("\nAll smoke tests passed! ✓")
+def test_delete_all_comments():
+    """Test deleting all comments from document."""
+    # Create document with comment markers
+    doc_with_comments = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Text before comment</w:t></w:r><w:commentRangeStart w:id="0"/><w:r><w:t>Commented text</w:t></w:r><w:commentRangeEnd w:id="0"/><w:r><w:rPr><w:rStyle w:val="CommentReference"/></w:rPr><w:commentReference w:id="0"/></w:r><w:r><w:t>Text after comment</w:t></w:r></w:p></w:body></w:document>"""
+
+    docx_path = create_test_docx(doc_with_comments)
+    output_path = docx_path.parent / "output.docx"
+
+    try:
+        doc = Document(docx_path)
+
+        # Verify comment markers exist
+        comment_starts_before = doc.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}commentRangeStart"
+        )
+        comment_ends_before = doc.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}commentRangeEnd"
+        )
+        comment_refs_before = doc.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}commentReference"
+        )
+
+        assert len(comment_starts_before) > 0
+        assert len(comment_ends_before) > 0
+        assert len(comment_refs_before) > 0
+
+        # Delete all comments
+        doc.delete_all_comments()
+        doc.save(output_path)
+
+        # Reload and verify no comment markers remain
+        doc2 = Document(output_path)
+        comment_starts_after = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}commentRangeStart"
+        )
+        comment_ends_after = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}commentRangeEnd"
+        )
+        comment_refs_after = doc2.xml_root.findall(
+            ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}commentReference"
+        )
+
+        assert len(comment_starts_after) == 0
+        assert len(comment_ends_after) == 0
+        assert len(comment_refs_after) == 0
+
+        # Verify the commented text is still present
+        all_text = "".join(doc2.xml_root.itertext())
+        assert "Commented text" in all_text
+
+    finally:
+        docx_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+
+# Run tests with: pytest tests/test_document.py -v
+# Or from project root: .venv/bin/pytest tests/ -v

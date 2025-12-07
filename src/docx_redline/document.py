@@ -17,7 +17,6 @@ from .errors import AmbiguousTextError, TextNotFoundError, ValidationError
 from .text_search import TextSearch
 from .tracked_xml import TrackedXMLGenerator
 
-
 # Word namespace
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NSMAP = {"w": WORD_NAMESPACE}
@@ -121,9 +120,7 @@ class Document:
                 shutil.rmtree(self._temp_dir)
             raise ValidationError(f"Failed to extract .docx file: {e}") from e
 
-    def insert_tracked(
-        self, text: str, after: str, author: str | None = None
-    ) -> None:
+    def insert_tracked(self, text: str, after: str, author: str | None = None) -> None:
         """Insert text with tracked changes after a specific location.
 
         This method searches for the 'after' text in the document and inserts
@@ -176,9 +173,7 @@ class Document:
         # Insert after the matched text
         self._insert_after_match(match, insertion_element)
 
-    def delete_tracked(
-        self, text: str, author: str | None = None
-    ) -> None:
+    def delete_tracked(self, text: str, author: str | None = None) -> None:
         """Delete text with tracked changes.
 
         This method searches for the specified text in the document and marks
@@ -229,9 +224,7 @@ class Document:
         # Replace the matched text with deletion
         self._replace_match_with_element(match, deletion_element)
 
-    def replace_tracked(
-        self, find: str, replace: str, author: str | None = None
-    ) -> None:
+    def replace_tracked(self, find: str, replace: str, author: str | None = None) -> None:
         """Find and replace text with tracked changes.
 
         This method searches for text and replaces it with new text, showing
@@ -349,9 +342,7 @@ class Document:
             # Insert replacement at the position of the first removed run
             paragraph.insert(start_run_index, replacement_element)
 
-    def _replace_match_with_elements(
-        self, match: Any, replacement_elements: list[Any]
-    ) -> None:
+    def _replace_match_with_elements(self, match: Any, replacement_elements: list[Any]) -> None:
         """Replace matched text with multiple XML elements.
 
         Used for replace_tracked which needs both deletion and insertion elements.
@@ -538,6 +529,78 @@ class Document:
         for i, elem in enumerate(new_elements):
             paragraph.insert(run_index + i, elem)
 
+    def accept_all_changes(self) -> None:
+        """Accept all tracked changes in the document.
+
+        This removes all tracked change markup:
+        - <w:ins> elements are unwrapped (content kept, wrapper removed)
+        - <w:del> elements are completely removed (deleted content discarded)
+
+        This is typically used as a preprocessing step before making new edits.
+        """
+        # Find all insertion elements
+        insertions = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}ins"))
+
+        for ins in insertions:
+            parent = ins.getparent()
+            if parent is None:
+                continue
+
+            # Get the position of the insertion element
+            ins_index = list(parent).index(ins)
+
+            # Move all children of <w:ins> to its parent
+            for child in list(ins):
+                parent.insert(ins_index, child)
+                ins_index += 1
+
+            # Remove the <w:ins> wrapper
+            parent.remove(ins)
+
+        # Find and remove all deletion elements
+        deletions = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del"))
+
+        for del_elem in deletions:
+            parent = del_elem.getparent()
+            if parent is not None:
+                parent.remove(del_elem)
+
+    def delete_all_comments(self) -> None:
+        """Delete all comments from the document.
+
+        This removes all comment-related elements:
+        - <w:commentRangeStart> - Comment range start markers
+        - <w:commentRangeEnd> - Comment range end markers
+        - <w:commentReference> - Comment reference markers
+        - Runs containing comment references
+
+        This is typically used as a preprocessing step before making new edits.
+        """
+        # Remove comment range markers
+        for elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentRangeStart")):
+            parent = elem.getparent()
+            if parent is not None:
+                parent.remove(elem)
+
+        for elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentRangeEnd")):
+            parent = elem.getparent()
+            if parent is not None:
+                parent.remove(elem)
+
+        # Remove comment references
+        # Comment references are typically in their own runs, so we'll remove the whole run
+        for elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentReference")):
+            parent = elem.getparent()
+            if parent is not None:
+                # If parent is a run, remove the run
+                if parent.tag == f"{{{WORD_NAMESPACE}}}r":
+                    grandparent = parent.getparent()
+                    if grandparent is not None:
+                        grandparent.remove(parent)
+                else:
+                    # Otherwise just remove the reference
+                    parent.remove(elem)
+
     def save(self, output_path: str | Path | None = None) -> None:
         """Save the document to a file.
 
@@ -564,9 +627,7 @@ class Document:
                 )
 
                 # Create a new .docx ZIP file
-                with zipfile.ZipFile(
-                    output_path, "w", zipfile.ZIP_DEFLATED
-                ) as zip_ref:
+                with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zip_ref:
                     # Add all files from temp directory
                     for file in self._temp_dir.rglob("*"):
                         if file.is_file():
