@@ -224,6 +224,8 @@ def find_all(self, text, scope=None):
 
 **Solution**: Build a virtual text stream
 
+**Note**: For an alternative approach using single-character run normalization, see [Eric White's Algorithm](ERIC_WHITE_ALGORITHM.md). Our character map approach is more efficient for read-only searches, while Eric White's approach is better for complex replacements spanning multiple runs with different formatting.
+
 ```python
 class TextSearch:
     def find_text(self, text: str, paragraphs: list) -> list[TextSpan]:

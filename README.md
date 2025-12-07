@@ -39,6 +39,7 @@ See the `docs/` directory for complete API documentation:
 - [API Reference](docs/PROPOSED_API.md)
 - [Implementation Notes](docs/IMPLEMENTATION_NOTES.md)
 - [Quick Reference](docs/QUICK_REFERENCE.md)
+- [Eric White's Algorithm](docs/ERIC_WHITE_ALGORITHM.md) - Reference for text replacement algorithms in DOCX
 
 ## Development
 

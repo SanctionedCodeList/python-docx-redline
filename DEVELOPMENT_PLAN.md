@@ -115,6 +115,7 @@ Build the core functionality to enable surgical document edits without writing X
 - **API Spec**: `docs/PROPOSED_API.md`
 - **Implementation Guide**: `docs/IMPLEMENTATION_NOTES.md`
 - **Quick Reference**: `docs/QUICK_REFERENCE.md`
+- **Eric White's Algorithm**: `docs/ERIC_WHITE_ALGORITHM.md` - Text replacement algorithms for DOCX
 - **Real Example**: `examples/surgical_edits.yaml`
 
 ## Track Progress

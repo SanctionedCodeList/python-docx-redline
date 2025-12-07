@@ -3,6 +3,12 @@ Text search functionality for finding text in Word documents.
 
 This module handles the core algorithm for finding text that may be fragmented
 across multiple <w:r> (run) elements in the OOXML structure.
+
+Algorithm Note:
+    This implementation uses a character map approach for efficient read-only
+    text searching. For an alternative approach using single-character run
+    normalization (better for complex replacements), see Eric White's algorithm
+    documented in docs/ERIC_WHITE_ALGORITHM.md.
 """
 
 from dataclasses import dataclass
