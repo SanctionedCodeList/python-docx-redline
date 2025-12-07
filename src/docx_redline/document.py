@@ -14,6 +14,7 @@ from typing import Any
 from lxml import etree
 
 from .errors import AmbiguousTextError, TextNotFoundError, ValidationError
+from .suggestions import SuggestionGenerator
 from .text_search import TextSearch
 from .tracked_xml import TrackedXMLGenerator
 
@@ -142,14 +143,9 @@ class Document:
         matches = self._text_search.find_text(after, paragraphs)
 
         if not matches:
-            raise TextNotFoundError(
-                after,
-                suggestions=[
-                    "Check for typos in the search text",
-                    "Try searching for a shorter or more unique phrase",
-                    "Verify the text exists in the document",
-                ],
-            )
+            # Generate smart suggestions
+            suggestions = SuggestionGenerator.generate_suggestions(after, paragraphs)
+            raise TextNotFoundError(after, suggestions=suggestions)
 
         if len(matches) > 1:
             raise AmbiguousTextError(after, matches)
@@ -194,14 +190,9 @@ class Document:
         matches = self._text_search.find_text(text, paragraphs)
 
         if not matches:
-            raise TextNotFoundError(
-                text,
-                suggestions=[
-                    "Check for typos in the search text",
-                    "Try searching for a shorter or more unique phrase",
-                    "Verify the text exists in the document",
-                ],
-            )
+            # Generate smart suggestions
+            suggestions = SuggestionGenerator.generate_suggestions(text, paragraphs)
+            raise TextNotFoundError(text, suggestions=suggestions)
 
         if len(matches) > 1:
             raise AmbiguousTextError(text, matches)
@@ -247,14 +238,9 @@ class Document:
         matches = self._text_search.find_text(find, paragraphs)
 
         if not matches:
-            raise TextNotFoundError(
-                find,
-                suggestions=[
-                    "Check for typos in the search text",
-                    "Try searching for a shorter or more unique phrase",
-                    "Verify the text exists in the document",
-                ],
-            )
+            # Generate smart suggestions
+            suggestions = SuggestionGenerator.generate_suggestions(find, paragraphs)
+            raise TextNotFoundError(find, suggestions=suggestions)
 
         if len(matches) > 1:
             raise AmbiguousTextError(find, matches)

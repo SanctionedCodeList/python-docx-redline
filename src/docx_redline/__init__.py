@@ -23,6 +23,7 @@ __all__ = [
     "TextSearch",
     "TextSpan",
     "TrackedXMLGenerator",
+    "SuggestionGenerator",
 ]
 
 # Import error classes
@@ -34,6 +35,9 @@ from .errors import (
     TextNotFoundError,
     ValidationError,
 )
+
+# Import suggestion generator
+from .suggestions import SuggestionGenerator
 
 # Import text search
 from .text_search import TextSearch, TextSpan
