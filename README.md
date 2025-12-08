@@ -42,14 +42,23 @@ doc.save("contract_edited.docx")
 
 ## Features
 
+**Phase 1 - Text Operations:**
 - ✅ **Insert, delete, and replace text** with tracked changes
 - ✅ **Smart text search** - handles text fragmented across multiple XML runs
 - ✅ **Scope filtering** - limit operations to specific sections or paragraphs
+- ✅ **Helpful error messages** - suggestions for common issues (curly quotes, whitespace, etc.)
+
+**Phase 2 - Structural Operations:**
+- ✅ **Insert complete paragraphs** - add new paragraphs with styles and formatting
+- ✅ **Insert multiple paragraphs** - efficiently add multiple paragraphs at once
+- ✅ **Delete entire sections** - remove sections by heading with tracked changes
+- ✅ **Section and Paragraph wrappers** - convenient API for document structure
+
+**General:**
 - ✅ **Batch operations** - apply multiple edits efficiently
 - ✅ **YAML/JSON support** - define edits in configuration files
-- ✅ **Helpful error messages** - suggestions for common issues (curly quotes, whitespace, etc.)
 - ✅ **Type hints** - full type annotation support
-- ✅ **Thoroughly tested** - comprehensive test suite
+- ✅ **Thoroughly tested** - 154 tests with 91% coverage
 
 ## Installation
 
@@ -87,6 +96,44 @@ doc.delete_tracked("for any reason")
 
 # Save the modified document
 doc.save("contract_edited.docx")
+```
+
+### Structural Operations (Phase 2)
+
+Add, remove, and reorganize document structure with tracked changes:
+
+```python
+from docx_redline import Document
+
+doc = Document("contract.docx")
+
+# Insert a new paragraph with a specific style
+doc.insert_paragraph(
+    "New Section Heading",
+    after="Introduction content",
+    style="Heading1",
+    track=True
+)
+
+# Insert multiple paragraphs at once
+doc.insert_paragraphs(
+    [
+        "First key point",
+        "Second key point",
+        "Third key point"
+    ],
+    after="New Section Heading",
+    track=True
+)
+
+# Delete an entire section by its heading
+doc.delete_section("Outdated Provisions", track=True)
+
+# Mix structural and text operations
+doc.replace_tracked("old term", "new term")
+doc.insert_paragraph("Amendments", after="Section 5", style="Heading1", track=True)
+
+doc.save("contract_restructured.docx")
 ```
 
 ### Using Scopes
@@ -155,6 +202,7 @@ Define edits in a YAML file for repeatable workflows:
 ```yaml
 # edits.yaml
 edits:
+  # Phase 1: Text operations
   - type: insert_tracked
     text: " (as amended)"
     after: "Agreement dated"
@@ -168,6 +216,24 @@ edits:
     text: "subject to approval"
     scope:
       contains: "termination"
+
+  # Phase 2: Structural operations
+  - type: insert_paragraph
+    text: "Compliance"
+    after: "Section 5"
+    style: "Heading1"
+    track: true
+
+  - type: insert_paragraphs
+    texts:
+      - "All parties shall comply with applicable laws."
+      - "This includes federal, state, and local regulations."
+    after: "Compliance"
+    track: true
+
+  - type: delete_section
+    heading: "Deprecated Clause"
+    track: true
 ```
 
 ```python
@@ -188,6 +254,15 @@ Mark text for deletion with tracked changes.
 
 #### `replace_tracked(find, replace, author=None, scope=None)`
 Replace text with tracked changes (combines delete + insert).
+
+#### `insert_paragraph(text, after=None, before=None, style=None, track=False, author=None, scope=None)`
+Insert a complete paragraph with optional style and tracked changes.
+
+#### `insert_paragraphs(texts, after=None, before=None, styles=None, track=False, author=None, scope=None)`
+Insert multiple paragraphs at once. Styles can be a single style for all paragraphs or a list matching texts.
+
+#### `delete_section(heading, track=False, author=None, scope=None)`
+Delete an entire section (heading and all content until next heading) with tracked changes.
 
 #### `apply_edits(edits, stop_on_error=False)`
 Apply multiple edits in sequence. Returns `list[EditResult]`.
@@ -333,15 +408,21 @@ pre-commit run --all-files
 
 ## Project Status
 
-**Phase 1 MVP: Complete** ✅
-
-Core functionality implemented:
+**Phase 1 - Text Operations: Complete** ✅
 - ✅ Text search with fragmentation handling
 - ✅ Tracked changes (insert/delete/replace)
 - ✅ Scope system for filtering
 - ✅ Error handling with smart suggestions
 - ✅ Batch operations
 - ✅ YAML/JSON file support
+
+**Phase 2 - Structural Operations: Complete** ✅
+- ✅ Insert paragraphs with styles and formatting
+- ✅ Insert multiple paragraphs efficiently
+- ✅ Delete entire sections with tracked changes
+- ✅ Section and Paragraph wrapper classes
+- ✅ Full integration with batch/YAML workflows
+- ✅ Comprehensive integration tests
 
 ## Contributing
 
