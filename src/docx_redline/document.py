@@ -419,6 +419,120 @@ class Document:
         # new_p is always the actual paragraph element (whether tracked or not)
         return Paragraph(new_p)
 
+    def insert_paragraphs(
+        self,
+        texts: list[str],
+        after: str | None = None,
+        before: str | None = None,
+        style: str | None = None,
+        track: bool = True,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+    ) -> list["Paragraph"]:
+        """Insert multiple paragraphs with tracked changes.
+
+        This is more efficient than calling insert_paragraph() multiple times
+        as it maintains proper ordering and positioning.
+
+        Args:
+            texts: List of text content for new paragraphs
+            after: Text to search for as insertion point (insert after this)
+            before: Text to search for as insertion point (insert before this)
+            style: Paragraph style for all paragraphs (e.g., 'Normal', 'Heading1')
+            track: Whether to track these insertions (default True)
+            author: Optional author override (uses document author if None)
+            scope: Limit search scope for anchor text
+
+        Returns:
+            List of created Paragraph objects
+
+        Raises:
+            ValueError: If neither 'after' nor 'before' is specified, or both are
+            TextNotFoundError: If anchor text is not found
+            AmbiguousTextError: If multiple occurrences of anchor text are found
+        """
+        from docx_redline.models.paragraph import Paragraph as ParagraphClass
+
+        if not texts:
+            return []
+
+        # Insert the first paragraph to find the anchor position
+        first_para = self.insert_paragraph(
+            texts[0],
+            after=after,
+            before=before,
+            style=style,
+            track=track,
+            author=author,
+            scope=scope,
+        )
+
+        created_paragraphs = [first_para]
+
+        # Get the actual element that was inserted (might be wrapped in w:ins)
+        parent = first_para.element.getparent()
+
+        # For tracked insertions, parent will be w:ins, so get its parent
+        if parent is not None and parent.tag == f"{{{WORD_NAMESPACE}}}ins":
+            insertion_wrapper = parent
+            parent = insertion_wrapper.getparent()
+            if parent is None:
+                raise ValueError("Insertion wrapper has no parent")
+            insertion_index = list(parent).index(insertion_wrapper)
+        else:
+            parent = first_para.element.getparent()
+            if parent is None:
+                raise ValueError("First paragraph has no parent")
+            insertion_index = list(parent).index(first_para.element)
+
+        # Insert remaining paragraphs after the first one
+        for i, text in enumerate(texts[1:], start=1):
+            # Create new paragraph element
+            new_p = etree.Element(f"{{{WORD_NAMESPACE}}}p")
+
+            # Add style if specified
+            if style:
+                p_pr = etree.SubElement(new_p, f"{{{WORD_NAMESPACE}}}pPr")
+                p_style = etree.SubElement(p_pr, f"{{{WORD_NAMESPACE}}}pStyle")
+                p_style.set(f"{{{WORD_NAMESPACE}}}val", style)
+
+            # Add text content
+            run = etree.SubElement(new_p, f"{{{WORD_NAMESPACE}}}r")
+            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+            t.text = text
+
+            # If tracked, wrap the paragraph in w:ins
+            if track:
+                from datetime import datetime, timezone
+
+                author_name = author if author is not None else self.author
+                timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                change_id = self._xml_generator.next_change_id
+                self._xml_generator.next_change_id += 1
+
+                # Create w:ins element to wrap the paragraph
+                ins = etree.Element(f"{{{WORD_NAMESPACE}}}ins")
+                ins.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+                ins.set(f"{{{WORD_NAMESPACE}}}author", author_name)
+                ins.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+                ins.set(
+                    "{http://schemas.microsoft.com/office/word/2023/wordml/word16du}dateUtc",
+                    timestamp,
+                )
+
+                # Move the paragraph inside the w:ins element
+                ins.append(new_p)
+                element_to_insert = ins
+            else:
+                element_to_insert = new_p
+
+            # Insert after the previous paragraph
+            parent.insert(insertion_index + i, element_to_insert)
+
+            created_paragraphs.append(ParagraphClass(new_p))
+
+        return created_paragraphs
+
     def _insert_after_match(self, match: Any, insertion_element: Any) -> None:
         """Insert an XML element after a matched text span.
 

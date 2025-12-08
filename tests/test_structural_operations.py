@@ -314,4 +314,154 @@ def test_insert_paragraph_returns_paragraph_object():
         doc_path.unlink()
 
 
+# Tests for insert_paragraphs()
+
+
+def test_insert_paragraphs_basic():
+    """Test inserting multiple paragraphs at once."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        texts = ["Para 1", "Para 2", "Para 3"]
+        paras = doc.insert_paragraphs(texts, after="First paragraph")
+
+        assert len(paras) == 3
+        assert paras[0].text == "Para 1"
+        assert paras[1].text == "Para 2"
+        assert paras[2].text == "Para 3"
+
+    finally:
+        doc_path.unlink()
+
+
+def test_insert_paragraphs_ordering():
+    """Test that paragraphs are inserted in correct order."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        texts = ["First new", "Second new", "Third new"]
+        doc.insert_paragraphs(texts, after="First paragraph")
+
+        # Get all paragraph texts
+        all_paras = list(doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        all_texts = ["".join(p.itertext()) for p in all_paras]
+
+        # Find the inserted paragraphs
+        first_idx = next(i for i, t in enumerate(all_texts) if "First new" in t)
+        second_idx = next(i for i, t in enumerate(all_texts) if "Second new" in t)
+        third_idx = next(i for i, t in enumerate(all_texts) if "Third new" in t)
+
+        # They should be in order
+        assert first_idx < second_idx < third_idx
+
+    finally:
+        doc_path.unlink()
+
+
+def test_insert_paragraphs_with_style():
+    """Test inserting multiple paragraphs with a style."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        texts = ["Heading A", "Heading B"]
+        paras = doc.insert_paragraphs(texts, after="First paragraph", style="Heading2")
+
+        assert paras[0].style == "Heading2"
+        assert paras[1].style == "Heading2"
+
+    finally:
+        doc_path.unlink()
+
+
+def test_insert_paragraphs_empty_list():
+    """Test inserting empty list returns empty list."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        paras = doc.insert_paragraphs([], after="First paragraph")
+
+        assert paras == []
+
+    finally:
+        doc_path.unlink()
+
+
+def test_insert_paragraphs_single():
+    """Test inserting single paragraph via insert_paragraphs."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        paras = doc.insert_paragraphs(["Single para"], after="First paragraph")
+
+        assert len(paras) == 1
+        assert paras[0].text == "Single para"
+
+    finally:
+        doc_path.unlink()
+
+
+def test_insert_paragraphs_before():
+    """Test inserting paragraphs before anchor."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        texts = ["Before 1", "Before 2"]
+        paras = doc.insert_paragraphs(texts, before="Third paragraph")
+
+        assert len(paras) == 2
+
+        # Verify ordering
+        all_paras = list(doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        all_texts = ["".join(p.itertext()) for p in all_paras]
+
+        third_idx = next(i for i, t in enumerate(all_texts) if "Third paragraph" in t)
+        before1_idx = next(i for i, t in enumerate(all_texts) if "Before 1" in t)
+        before2_idx = next(i for i, t in enumerate(all_texts) if "Before 2" in t)
+
+        assert before1_idx < before2_idx < third_idx
+
+    finally:
+        doc_path.unlink()
+
+
+def test_insert_paragraphs_untracked():
+    """Test inserting untracked paragraphs."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        texts = ["Untracked 1", "Untracked 2"]
+        paras = doc.insert_paragraphs(texts, after="First paragraph", track=False)
+
+        assert len(paras) == 2
+        assert paras[0].text == "Untracked 1"
+        assert paras[1].text == "Untracked 2"
+
+    finally:
+        doc_path.unlink()
+
+
+def test_insert_paragraphs_returns_paragraph_objects():
+    """Test that insert_paragraphs returns Paragraph objects."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        from docx_redline.models.paragraph import Paragraph
+
+        texts = ["Para A", "Para B"]
+        paras = doc.insert_paragraphs(texts, after="First paragraph")
+
+        assert all(isinstance(p, Paragraph) for p in paras)
+
+    finally:
+        doc_path.unlink()
+
+
 # Run tests with: pytest tests/test_structural_operations.py -v
