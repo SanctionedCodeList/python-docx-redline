@@ -16,6 +16,7 @@ __version__ = "0.1.0"
 __author__ = "Parker Hancock"
 __all__ = [
     "Document",
+    "AuthorIdentity",
     "DocxRedlineError",
     "TextNotFoundError",
     "AmbiguousTextError",
@@ -31,6 +32,9 @@ __all__ = [
     "Paragraph",
     "Section",
 ]
+
+# Import author identity
+from .author import AuthorIdentity
 
 # Import error classes
 # Import document class

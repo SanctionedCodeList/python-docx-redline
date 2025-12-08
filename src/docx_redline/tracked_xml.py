@@ -7,7 +7,10 @@ proper OOXML for tracked insertions and deletions with all required attributes.
 
 import random
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from docx_redline.author import AuthorIdentity
 
 
 class TrackedXMLGenerator:
@@ -39,6 +42,11 @@ class TrackedXMLGenerator:
         self.author = author if doc is None else getattr(doc, "author", author)
         self.rsid = rsid if rsid else self._generate_rsid()
 
+        # Check if document has MS365 identity
+        self._author_identity: AuthorIdentity | None = None
+        if doc is not None:
+            self._author_identity = getattr(doc, "_author_identity", None)
+
         # Start change IDs from max existing + 1, or 1 if no doc provided
         if doc is not None:
             self.next_change_id = self._get_max_change_id(doc) + 1
@@ -53,7 +61,7 @@ class TrackedXMLGenerator:
             author: Override author (uses default if None)
 
         Returns:
-            Complete OOXML string for the insertion
+            Complete OOXML string for the insertion with MS365 identity if available
         """
         author = author if author is not None else self.author
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -68,10 +76,17 @@ class TrackedXMLGenerator:
         # Escape XML special characters
         escaped_text = self._escape_xml(text)
 
+        # Build MS365 identity attributes if available
+        identity_attrs = ""
+        if self._author_identity:
+            if self._author_identity.guid:
+                identity_attrs += f' w15:userId="{self._author_identity.guid}"'
+            identity_attrs += f' w15:providerId="{self._author_identity.provider_id}"'
+
         # Generate the OOXML
         xml = (
             f'<w:ins w:id="{change_id}" w:author="{author}" '
-            f'w:date="{timestamp}" w16du:dateUtc="{timestamp}">\n'
+            f'w:date="{timestamp}" w16du:dateUtc="{timestamp}"{identity_attrs}>\n'
             f'  <w:r w:rsidR="{self.rsid}">\n'
             f"    <w:t{xml_space}>{escaped_text}</w:t>\n"
             f"  </w:r>\n"
@@ -88,7 +103,7 @@ class TrackedXMLGenerator:
             author: Override author (uses default if None)
 
         Returns:
-            Complete OOXML string for the deletion
+            Complete OOXML string for the deletion with MS365 identity if available
         """
         author = author if author is not None else self.author
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -103,11 +118,18 @@ class TrackedXMLGenerator:
         # Escape XML special characters
         escaped_text = self._escape_xml(text)
 
+        # Build MS365 identity attributes if available
+        identity_attrs = ""
+        if self._author_identity:
+            if self._author_identity.guid:
+                identity_attrs += f' w15:userId="{self._author_identity.guid}"'
+            identity_attrs += f' w15:providerId="{self._author_identity.provider_id}"'
+
         # Generate the OOXML
         # Note: deletions use <w:delText> instead of <w:t>
         xml = (
             f'<w:del w:id="{change_id}" w:author="{author}" '
-            f'w:date="{timestamp}" w16du:dateUtc="{timestamp}">\n'
+            f'w:date="{timestamp}" w16du:dateUtc="{timestamp}"{identity_attrs}>\n'
             f'  <w:r w:rsidDel="{self.rsid}">\n'
             f"    <w:delText{xml_space}>{escaped_text}</w:delText>\n"
             f"  </w:r>\n"

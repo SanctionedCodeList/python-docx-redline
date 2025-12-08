@@ -61,11 +61,17 @@ doc.save("contract_edited.docx")
 - ✅ **Extract text** - get full document text for analysis
 - ✅ **Agent workflow** - read → understand → targeted edits
 
+**Phase 4 - MS365 Identity Integration:**
+- ✅ **AuthorIdentity support** - link tracked changes to real MS365/Office365 users
+- ✅ **Full profile information** - include email, GUID, and provider ID
+- ✅ **Enterprise-ready** - changes appear with complete user profile in Word
+- ✅ **Backward compatible** - simple string author names still supported
+
 **General:**
 - ✅ **Batch operations** - apply multiple edits efficiently
 - ✅ **YAML/JSON support** - define edits in configuration files
 - ✅ **Type hints** - full type annotation support
-- ✅ **Thoroughly tested** - 182 tests with 92% coverage
+- ✅ **Thoroughly tested** - 200 tests with 92% coverage
 
 ## Installation
 
@@ -215,6 +221,44 @@ for section in doc.sections:
 
 doc.save("contract_updated.docx")
 ```
+
+### MS365/Office365 Identity Integration (Phase 4)
+
+Link tracked changes to real MS365 users with full identity information:
+
+```python
+from docx_redline import Document, AuthorIdentity
+
+# Create an identity with MS365 profile info
+identity = AuthorIdentity(
+    author="Hancock, Parker",
+    email="parker.hancock@company.com",
+    provider_id="AD",  # Active Directory (default)
+    guid="c5c513d2-1f51-4d69-ae91-17e5787f9bfc"  # User's unique ID
+)
+
+# Use identity when creating document
+doc = Document("contract.docx", author=identity)
+
+# All tracked changes will include full MS365 identity
+doc.insert_tracked(" (amended)", after="Section 1")
+doc.replace_tracked("30 days", "45 days")
+doc.delete_tracked("optional clause")
+
+doc.save("contract_edited.docx")
+# Changes now appear in Word with full user profile and avatar
+```
+
+**How to find existing identity info:**
+1. Unpack an existing .docx file (`unzip document.docx`)
+2. Inspect `word/people.xml` for author information
+3. Look for `w15:userId` (GUID) and `w15:providerId` attributes
+
+**Benefits:**
+- Changes show real user names and profile pictures in Word
+- Better audit trail for enterprise environments
+- Integrates with Office 365 user directory
+- Backward compatible - simple string author names still work
 
 ### Using Scopes
 

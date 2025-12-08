@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 import yaml
 from lxml import etree
 
+from .author import AuthorIdentity
 from .errors import AmbiguousTextError, TextNotFoundError, ValidationError
 from .results import EditResult
 from .scope import ScopeEvaluator
@@ -49,24 +50,48 @@ class Document:
         xml_root: Root element of the XML tree
     """
 
-    def __init__(self, path: str | Path, author: str = "Claude") -> None:
+    def __init__(self, path: str | Path, author: str | AuthorIdentity = "Claude") -> None:
         """Initialize a Document from a .docx file.
 
         Args:
             path: Path to the .docx file
-            author: Author name for tracked changes (default: "Claude")
+            author: Author name (str) or full AuthorIdentity for MS365 integration
+                   (default: "Claude")
 
         Raises:
             ValidationError: If the document cannot be loaded or is invalid
+
+        Example:
+            >>> # Simple author name
+            >>> doc = Document("contract.docx", author="John Doe")
+            >>>
+            >>> # Full MS365 identity
+            >>> identity = AuthorIdentity(
+            ...     author="Hancock, Parker",
+            ...     email="parker.hancock@company.com",
+            ...     provider_id="AD",
+            ...     guid="c5c513d2-1f51-4d69-ae91-17e5787f9bfc"
+            ... )
+            >>> doc = Document("contract.docx", author=identity)
         """
         self.path = Path(path)
-        self.author = author
+
+        # Store author identity (convert string to AuthorIdentity if needed)
+        if isinstance(author, str):
+            self._author_identity = None
+            self.author = author
+        else:
+            self._author_identity = author
+            self.author = author.display_name
+
         self._temp_dir: Path | None = None
         self._is_zip = False
 
         # Initialize components
         self._text_search = TextSearch()
-        self._xml_generator = TrackedXMLGenerator(doc=self, author=author)
+        self._xml_generator = TrackedXMLGenerator(
+            doc=self, author=author if isinstance(author, str) else author.display_name
+        )
 
         # Load the document
         self._load_document()
@@ -241,6 +266,7 @@ class Document:
         # Need to wrap it with namespace declarations
         wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <root xmlns:w="{WORD_NAMESPACE}"
+      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
       xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
     {insertion_xml}
 </root>"""
@@ -299,6 +325,7 @@ class Document:
         # Parse the deletion XML with namespace context
         wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <root xmlns:w="{WORD_NAMESPACE}"
+      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
       xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
     {deletion_xml}
 </root>"""
@@ -384,6 +411,7 @@ class Document:
         # Parse both XMLs with namespace context
         wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <root xmlns:w="{WORD_NAMESPACE}"
+      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
       xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
     {deletion_xml}
     {insertion_xml}
