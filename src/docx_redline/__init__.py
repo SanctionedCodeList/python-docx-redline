@@ -29,6 +29,7 @@ __all__ = [
     "AcceptResult",
     "RejectResult",
     "Paragraph",
+    "Section",
 ]
 
 # Import error classes
@@ -43,6 +44,7 @@ from .errors import (
 
 # Import model classes
 from .models.paragraph import Paragraph
+from .models.section import Section
 
 # Import result types
 from .results import AcceptResult, EditResult, RejectResult
