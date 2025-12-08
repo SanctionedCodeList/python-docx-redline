@@ -9,7 +9,10 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from docx_redline.models.paragraph import Paragraph
 
 import yaml
 from lxml import etree
@@ -296,6 +299,125 @@ class Document:
 
         # Replace the matched text with deletion + insertion
         self._replace_match_with_elements(match, [deletion_element, insertion_element])
+
+    def insert_paragraph(
+        self,
+        text: str,
+        after: str | None = None,
+        before: str | None = None,
+        style: str | None = None,
+        track: bool = True,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+    ) -> "Paragraph":
+        """Insert a complete new paragraph with tracked changes.
+
+        Args:
+            text: Text content for the new paragraph
+            after: Text to search for as insertion point (insert after this)
+            before: Text to search for as insertion point (insert before this)
+            style: Paragraph style (e.g., 'Normal', 'Heading1')
+            track: Whether to track this insertion (default True)
+            author: Optional author override (uses document author if None)
+            scope: Limit search scope for anchor text
+
+        Returns:
+            The created Paragraph object
+
+        Raises:
+            ValueError: If neither 'after' nor 'before' is specified, or both are
+            TextNotFoundError: If anchor text is not found
+            AmbiguousTextError: If multiple occurrences of anchor text are found
+        """
+        from docx_redline.models.paragraph import Paragraph
+
+        # Validate arguments
+        if after is None and before is None:
+            raise ValueError("Must specify either 'after' or 'before'")
+        if after is not None and before is not None:
+            raise ValueError("Cannot specify both 'after' and 'before'")
+
+        anchor_text = after if after is not None else before
+        insert_after = after is not None
+
+        # After validation, anchor_text is guaranteed to be a string
+        assert anchor_text is not None
+
+        # Get all paragraphs
+        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+
+        # Apply scope filter if specified
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        # Find the anchor paragraph
+        matches = self._text_search.find_text(anchor_text, paragraphs)
+
+        if not matches:
+            suggestions = SuggestionGenerator.generate_suggestions(anchor_text, paragraphs)
+            raise TextNotFoundError(anchor_text, suggestions=suggestions)
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(anchor_text, matches)
+
+        match = matches[0]
+        anchor_paragraph = match.paragraph
+
+        # Create new paragraph element
+        new_p = etree.Element(f"{{{WORD_NAMESPACE}}}p")
+
+        # Add style if specified
+        if style:
+            p_pr = etree.SubElement(new_p, f"{{{WORD_NAMESPACE}}}pPr")
+            p_style = etree.SubElement(p_pr, f"{{{WORD_NAMESPACE}}}pStyle")
+            p_style.set(f"{{{WORD_NAMESPACE}}}val", style)
+
+        # Add text content
+        run = etree.SubElement(new_p, f"{{{WORD_NAMESPACE}}}r")
+        t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+        t.text = text
+
+        # If tracked, wrap the paragraph in w:ins
+        if track:
+            from datetime import datetime, timezone
+
+            author_name = author if author is not None else self.author
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            change_id = self._xml_generator.next_change_id
+            self._xml_generator.next_change_id += 1
+
+            # Create w:ins element to wrap the paragraph
+            ins = etree.Element(f"{{{WORD_NAMESPACE}}}ins")
+            ins.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+            ins.set(f"{{{WORD_NAMESPACE}}}author", author_name)
+            ins.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+            ins.set(
+                "{http://schemas.microsoft.com/office/word/2023/wordml/word16du}dateUtc",
+                timestamp,
+            )
+
+            # Move the paragraph inside the w:ins element
+            ins.append(new_p)
+            element_to_insert = ins
+        else:
+            element_to_insert = new_p
+
+        # Insert the paragraph in the document
+        parent = anchor_paragraph.getparent()
+        if parent is None:
+            raise ValueError("Anchor paragraph has no parent")
+
+        anchor_index = list(parent).index(anchor_paragraph)
+
+        if insert_after:
+            # Insert after anchor
+            parent.insert(anchor_index + 1, element_to_insert)
+        else:
+            # Insert before anchor
+            parent.insert(anchor_index, element_to_insert)
+
+        # Return Paragraph wrapper
+        # new_p is always the actual paragraph element (whether tracked or not)
+        return Paragraph(new_p)
 
     def _insert_after_match(self, match: Any, insertion_element: Any) -> None:
         """Insert an XML element after a matched text span.
