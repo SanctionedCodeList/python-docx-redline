@@ -464,4 +464,392 @@ def test_insert_paragraphs_returns_paragraph_objects():
         doc_path.unlink()
 
 
+# Tests for delete_section()
+
+
+def test_delete_section_basic_tracked():
+    """Test deleting a section with tracked changes."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Introduction</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Intro content</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Methods</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Methods content</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        deleted_section = doc.delete_section("Methods", track=True)
+
+        assert deleted_section is not None
+        assert deleted_section.heading_text.strip() == "Methods"
+        assert len(deleted_section.paragraphs) == 2
+
+        # Check that w:del elements were created
+        xml_string = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "w:del" in xml_string
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_section_untracked():
+    """Test deleting a section without tracked changes."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Section One</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Content one</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Section Two</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Content two</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        # Count paragraphs before deletion
+        paras_before = list(doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        assert len(paras_before) == 4
+
+        deleted_section = doc.delete_section("Section One", track=False)
+
+        assert deleted_section is not None
+        assert deleted_section.heading_text.strip() == "Section One"
+
+        # Paragraphs should be completely removed (not wrapped in w:del)
+        paras_after = list(doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        assert len(paras_after) == 2  # Only Section Two and its content remain
+
+        # No w:del elements should exist
+        xml_string = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "w:del" not in xml_string
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_section_multiple_paragraphs():
+    """Test deleting section with multiple content paragraphs."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Results</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Result paragraph 1</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Result paragraph 2</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Result paragraph 3</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        deleted_section = doc.delete_section("Results", track=True)
+
+        assert len(deleted_section.paragraphs) == 4  # Heading + 3 content paragraphs
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_section_not_found():
+    """Test error when section heading not found."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        with pytest.raises(TextNotFoundError):
+            doc.delete_section("Nonexistent Section")
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_section_ambiguous():
+    """Test error when multiple sections match."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Results Summary</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Content 1</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Results Analysis</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Content 2</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        # Both sections contain "Results"
+        with pytest.raises(AmbiguousTextError):
+            doc.delete_section("Results")
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_section_case_insensitive():
+    """Test that section matching is case insensitive."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Discussion</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Discussion content</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        # Should match despite different case
+        deleted_section = doc.delete_section("discussion", track=True)
+
+        assert deleted_section.heading_text.strip() == "Discussion"
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_section_with_scope():
+    """Test deleting section with scope filter."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Chapter One</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Content in chapter one</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Summary</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Summary of chapter one</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Chapter Two</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Content in chapter two</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Summary</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Summary of chapter two</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        # Delete only the first Summary section (in chapter one)
+        deleted_section = doc.delete_section("Summary", track=True, scope="chapter one")
+
+        assert deleted_section.heading_text.strip() == "Summary"
+
+        # Verify the second Summary (in chapter two) still exists
+        remaining_paras = [p for p in doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}p")]
+        texts = ["".join(p.itertext()) for p in remaining_paras]
+
+        # Should still have "Summary of chapter two"
+        assert any("chapter two" in text.lower() for text in texts)
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_section_returns_section_object():
+    """Test that delete_section returns a Section object."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Conclusion</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Final thoughts</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        from docx_redline.models.section import Section
+
+        deleted_section = doc.delete_section("Conclusion", track=True)
+
+        assert isinstance(deleted_section, Section)
+        assert deleted_section.heading_text.strip() == "Conclusion"
+        assert len(deleted_section) == 2  # Heading + 1 content paragraph
+
+    finally:
+        doc_path.unlink()
+
+
 # Run tests with: pytest tests/test_structural_operations.py -v

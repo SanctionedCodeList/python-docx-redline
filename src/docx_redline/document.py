@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from docx_redline.models.paragraph import Paragraph
+    from docx_redline.models.section import Section
 
 import yaml
 from lxml import etree
@@ -532,6 +533,139 @@ class Document:
             created_paragraphs.append(ParagraphClass(new_p))
 
         return created_paragraphs
+
+    def delete_section(
+        self,
+        heading: str,
+        track: bool = True,
+        update_toc: bool = False,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+    ) -> "Section":
+        """Delete an entire section by heading text.
+
+        Args:
+            heading: Heading text of section to delete
+            track: Delete as tracked change (default True)
+            update_toc: Automatically update Table of Contents (not implemented yet)
+            author: Author name for tracked changes
+            scope: Limit search scope
+
+        Returns:
+            Section object representing the deleted section
+
+        Raises:
+            TextNotFoundError: If heading not found
+            AmbiguousTextError: If multiple sections match
+
+        Examples:
+            >>> doc.delete_section("Methods", track=True)
+            >>> doc.delete_section("Outdated Section", track=False)
+        """
+        from docx_redline.models.section import Section
+
+        # Parse document into sections
+        all_sections = Section.from_document(self.xml_root)
+
+        # Apply scope filtering if specified
+        if scope is not None:
+            # Filter sections by checking if any paragraph in section is in scope
+            all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+            paragraphs_in_scope = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+            scope_para_set = set(paragraphs_in_scope)
+
+            # Keep sections that have at least one paragraph in scope
+            all_sections = [
+                s for s in all_sections if any(p.element in scope_para_set for p in s.paragraphs)
+            ]
+
+        # Find matching sections (case insensitive by default for heading matching)
+        matches = [
+            s
+            for s in all_sections
+            if s.heading is not None and s.contains(heading, case_sensitive=False)
+        ]
+
+        if not matches:
+            # Generate suggestions from section headings
+            heading_paragraphs = [s.heading.element for s in all_sections if s.heading is not None]
+            suggestions = SuggestionGenerator.generate_suggestions(heading, heading_paragraphs)
+            raise TextNotFoundError(heading, suggestions=suggestions)
+
+        if len(matches) > 1:
+            # Create match representations for error reporting
+            # Use the first paragraph of each matching section as the "match location"
+            from docx_redline.text_search import TextSpan
+
+            match_spans = []
+            for section in matches:
+                if section.heading:
+                    # Create a TextSpan representing this section's heading
+                    # Find the run elements in the heading paragraph
+                    runs = list(section.heading.element.iter(f"{{{WORD_NAMESPACE}}}r"))
+                    if runs:
+                        heading_text = section.heading_text or ""
+                        span = TextSpan(
+                            runs=runs,
+                            start_run_index=0,
+                            end_run_index=len(runs) - 1,
+                            start_offset=0,
+                            end_offset=len(heading_text.strip()),
+                            paragraph=section.heading.element,
+                        )
+                        match_spans.append(span)
+
+            raise AmbiguousTextError(heading, match_spans)
+
+        section = matches[0]
+
+        # Delete all paragraphs in the section
+        if track:
+            from datetime import datetime, timezone
+
+            author_name = author if author is not None else self.author
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            # Wrap each paragraph in w:del
+            for para in section.paragraphs:
+                parent = para.element.getparent()
+                if parent is None:
+                    continue
+
+                # Get position of paragraph in parent
+                para_index = list(parent).index(para.element)
+
+                # Create w:del element
+                change_id = self._xml_generator.next_change_id
+                self._xml_generator.next_change_id += 1
+
+                del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
+                del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+                del_elem.set(f"{{{WORD_NAMESPACE}}}author", author_name)
+                del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+                del_elem.set(
+                    "{http://schemas.microsoft.com/office/word/2023/wordml/word16du}dateUtc",
+                    timestamp,
+                )
+
+                # Remove paragraph from parent and add it to w:del
+                parent.remove(para.element)
+                del_elem.append(para.element)
+
+                # Insert w:del at the same position
+                parent.insert(para_index, del_elem)
+        else:
+            # Untracked deletion: simply remove paragraphs
+            for para in section.paragraphs:
+                parent = para.element.getparent()
+                if parent is not None:
+                    parent.remove(para.element)
+
+        # TODO: Handle update_toc when implemented in separate task
+        if update_toc:
+            pass  # Will implement TOC updates in docx_redline-xpe
+
+        return section
 
     def _insert_after_match(self, match: Any, insertion_element: Any) -> None:
         """Insert an XML element after a matched text span.
