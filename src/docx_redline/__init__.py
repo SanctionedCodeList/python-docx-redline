@@ -24,6 +24,7 @@ __all__ = [
     "TextSpan",
     "TrackedXMLGenerator",
     "SuggestionGenerator",
+    "ScopeEvaluator",
 ]
 
 # Import error classes
@@ -35,6 +36,9 @@ from .errors import (
     TextNotFoundError,
     ValidationError,
 )
+
+# Import scope evaluation
+from .scope import ScopeEvaluator
 
 # Import suggestion generator
 from .suggestions import SuggestionGenerator

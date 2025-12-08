@@ -14,6 +14,7 @@ from typing import Any
 from lxml import etree
 
 from .errors import AmbiguousTextError, TextNotFoundError, ValidationError
+from .scope import ScopeEvaluator
 from .suggestions import SuggestionGenerator
 from .text_search import TextSearch
 from .tracked_xml import TrackedXMLGenerator
@@ -121,7 +122,13 @@ class Document:
                 shutil.rmtree(self._temp_dir)
             raise ValidationError(f"Failed to extract .docx file: {e}") from e
 
-    def insert_tracked(self, text: str, after: str, author: str | None = None) -> None:
+    def insert_tracked(
+        self,
+        text: str,
+        after: str,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+    ) -> None:
         """Insert text with tracked changes after a specific location.
 
         This method searches for the 'after' text in the document and inserts
@@ -131,13 +138,17 @@ class Document:
             text: The text to insert
             after: The text to search for as the insertion point
             author: Optional author override (uses document author if None)
+            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
 
         Raises:
             TextNotFoundError: If the 'after' text is not found
             AmbiguousTextError: If multiple occurrences of 'after' text are found
         """
         # Get all paragraphs in the document
-        paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+
+        # Apply scope filter if specified
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
         # Search for the anchor text
         matches = self._text_search.find_text(after, paragraphs)
@@ -169,7 +180,9 @@ class Document:
         # Insert after the matched text
         self._insert_after_match(match, insertion_element)
 
-    def delete_tracked(self, text: str, author: str | None = None) -> None:
+    def delete_tracked(
+        self, text: str, author: str | None = None, scope: str | dict | Any | None = None
+    ) -> None:
         """Delete text with tracked changes.
 
         This method searches for the specified text in the document and marks
@@ -178,13 +191,17 @@ class Document:
         Args:
             text: The text to delete
             author: Optional author override (uses document author if None)
+            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
 
         Raises:
             TextNotFoundError: If the text is not found
             AmbiguousTextError: If multiple occurrences of text are found
         """
         # Get all paragraphs in the document
-        paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+
+        # Apply scope filter if specified
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
         # Search for the text to delete
         matches = self._text_search.find_text(text, paragraphs)
@@ -215,7 +232,13 @@ class Document:
         # Replace the matched text with deletion
         self._replace_match_with_element(match, deletion_element)
 
-    def replace_tracked(self, find: str, replace: str, author: str | None = None) -> None:
+    def replace_tracked(
+        self,
+        find: str,
+        replace: str,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+    ) -> None:
         """Find and replace text with tracked changes.
 
         This method searches for text and replaces it with new text, showing
@@ -226,13 +249,17 @@ class Document:
             find: Text to find
             replace: Replacement text
             author: Optional author override (uses document author if None)
+            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
 
         Raises:
             TextNotFoundError: If the 'find' text is not found
             AmbiguousTextError: If multiple occurrences of 'find' text are found
         """
         # Get all paragraphs in the document
-        paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+
+        # Apply scope filter if specified
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
         # Search for the text to replace
         matches = self._text_search.find_text(find, paragraphs)
