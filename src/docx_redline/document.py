@@ -1080,7 +1080,11 @@ class Document:
         - <w:commentRangeEnd> - Comment range end markers
         - <w:commentReference> - Comment reference markers
         - Runs containing comment references
+        - word/comments.xml and related files (commentsExtended.xml, etc.)
+        - Comment relationships from document.xml.rels
+        - Comment content types from [Content_Types].xml
 
+        This ensures the document package is valid OOXML with no orphaned comments.
         This is typically used as a preprocessing step before making new edits.
         """
         # Remove comment range markers
@@ -1107,6 +1111,80 @@ class Document:
                 else:
                     # Otherwise just remove the reference
                     parent.remove(elem)
+
+        # Clean up comments-related files in the ZIP package
+        if self._is_zip and self._temp_dir:
+            # Delete comment XML files
+            comment_files = [
+                "word/comments.xml",
+                "word/commentsExtended.xml",
+                "word/commentsIds.xml",
+                "word/commentsExtensible.xml",
+            ]
+            for file_path in comment_files:
+                full_path = self._temp_dir / file_path
+                if full_path.exists():
+                    full_path.unlink()
+
+            # Remove comment relationships from document.xml.rels
+            rels_path = self._temp_dir / "word" / "_rels" / "document.xml.rels"
+            if rels_path.exists():
+                from lxml import etree as lxml_etree
+
+                rels_tree = lxml_etree.parse(str(rels_path))
+                rels_root = rels_tree.getroot()
+
+                # Find and remove comment relationships
+                comment_rel_types = [
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments",
+                    "http://schemas.microsoft.com/office/2011/relationships/commentsExtended",
+                    "http://schemas.microsoft.com/office/2016/09/relationships/commentsIds",
+                    "http://schemas.microsoft.com/office/2018/08/relationships/commentsExtensible",
+                ]
+
+                for rel in list(rels_root):
+                    rel_type = rel.get("Type")
+                    if rel_type in comment_rel_types:
+                        rels_root.remove(rel)
+
+                # Write back the modified relationships
+                rels_tree.write(
+                    str(rels_path),
+                    encoding="utf-8",
+                    xml_declaration=True,
+                    pretty_print=False,
+                )
+
+            # Remove comment content types from [Content_Types].xml
+            content_types_path = self._temp_dir / "[Content_Types].xml"
+            if content_types_path.exists():
+                from lxml import etree as lxml_etree
+
+                ct_tree = lxml_etree.parse(str(content_types_path))
+                ct_root = ct_tree.getroot()
+
+                # Find and remove comment content type overrides
+                ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+                comment_part_names = [
+                    "/word/comments.xml",
+                    "/word/commentsExtended.xml",
+                    "/word/commentsIds.xml",
+                    "/word/commentsExtensible.xml",
+                ]
+
+                for override in list(ct_root):
+                    if override.tag == f"{{{ct_ns}}}Override":
+                        part_name = override.get("PartName")
+                        if part_name in comment_part_names:
+                            ct_root.remove(override)
+
+                # Write back the modified content types
+                ct_tree.write(
+                    str(content_types_path),
+                    encoding="utf-8",
+                    xml_declaration=True,
+                    pretty_print=False,
+                )
 
     def save(self, output_path: str | Path | None = None) -> None:
         """Save the document to a file.
