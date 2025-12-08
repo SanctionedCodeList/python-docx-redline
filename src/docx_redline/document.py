@@ -134,6 +134,7 @@ class Document:
         after: str,
         author: str | None = None,
         scope: str | dict | Any | None = None,
+        regex: bool = False,
     ) -> None:
         """Insert text with tracked changes after a specific location.
 
@@ -142,13 +143,15 @@ class Document:
 
         Args:
             text: The text to insert
-            after: The text to search for as the insertion point
+            after: The text or regex pattern to search for as the insertion point
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            regex: Whether to treat 'after' as a regex pattern (default: False)
 
         Raises:
             TextNotFoundError: If the 'after' text is not found
             AmbiguousTextError: If multiple occurrences of 'after' text are found
+            re.error: If regex=True and the pattern is invalid
         """
         # Get all paragraphs in the document
         all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
@@ -157,7 +160,7 @@ class Document:
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
         # Search for the anchor text
-        matches = self._text_search.find_text(after, paragraphs)
+        matches = self._text_search.find_text(after, paragraphs, regex=regex)
 
         if not matches:
             # Generate smart suggestions
@@ -187,7 +190,11 @@ class Document:
         self._insert_after_match(match, insertion_element)
 
     def delete_tracked(
-        self, text: str, author: str | None = None, scope: str | dict | Any | None = None
+        self,
+        text: str,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+        regex: bool = False,
     ) -> None:
         """Delete text with tracked changes.
 
@@ -195,13 +202,15 @@ class Document:
         it as a tracked deletion.
 
         Args:
-            text: The text to delete
+            text: The text or regex pattern to delete
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            regex: Whether to treat 'text' as a regex pattern (default: False)
 
         Raises:
             TextNotFoundError: If the text is not found
             AmbiguousTextError: If multiple occurrences of text are found
+            re.error: If regex=True and the pattern is invalid
         """
         # Get all paragraphs in the document
         all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
@@ -210,7 +219,7 @@ class Document:
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
         # Search for the text to delete
-        matches = self._text_search.find_text(text, paragraphs)
+        matches = self._text_search.find_text(text, paragraphs, regex=regex)
 
         if not matches:
             # Generate smart suggestions
@@ -244,6 +253,7 @@ class Document:
         replace: str,
         author: str | None = None,
         scope: str | dict | Any | None = None,
+        regex: bool = False,
     ) -> None:
         """Find and replace text with tracked changes.
 
@@ -251,15 +261,28 @@ class Document:
         both the deletion of the old text and insertion of the new text as
         tracked changes.
 
+        When regex=True, the replacement string can use capture groups:
+        - \\1, \\2, etc. for numbered groups
+        - \\g<name> for named groups
+
         Args:
-            find: Text to find
-            replace: Replacement text
+            find: Text or regex pattern to find
+            replace: Replacement text (can include capture group references if regex=True)
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            regex: Whether to treat 'find' as a regex pattern (default: False)
 
         Raises:
             TextNotFoundError: If the 'find' text is not found
             AmbiguousTextError: If multiple occurrences of 'find' text are found
+            re.error: If regex=True and the pattern is invalid
+
+        Example:
+            >>> # Simple replacement
+            >>> doc.replace_tracked("30 days", "45 days")
+            >>>
+            >>> # Regex with capture groups
+            >>> doc.replace_tracked(r"(\\d+) days", r"\\1 business days", regex=True)
         """
         # Get all paragraphs in the document
         all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
@@ -268,7 +291,7 @@ class Document:
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
         # Search for the text to replace
-        matches = self._text_search.find_text(find, paragraphs)
+        matches = self._text_search.find_text(find, paragraphs, regex=regex)
 
         if not matches:
             # Generate smart suggestions
@@ -281,11 +304,21 @@ class Document:
         # We have exactly one match
         match = matches[0]
 
-        # Generate deletion XML for the old text
-        deletion_xml = self._xml_generator.create_deletion(find, author)
+        # Get the actual matched text for deletion
+        matched_text = match.text
 
-        # Generate insertion XML for the new text
-        insertion_xml = self._xml_generator.create_insertion(replace, author)
+        # Handle capture group expansion for regex replacements
+        if regex and match.match_obj:
+            # Use expand() to handle capture group references like \1, \2, etc.
+            replacement_text = match.match_obj.expand(replace)
+        else:
+            replacement_text = replace
+
+        # Generate deletion XML for the old text (use actual matched text)
+        deletion_xml = self._xml_generator.create_deletion(matched_text, author)
+
+        # Generate insertion XML for the new text (with expanded capture groups if regex)
+        insertion_xml = self._xml_generator.create_insertion(replacement_text, author)
 
         # Parse both XMLs with namespace context
         wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -1118,6 +1151,7 @@ class Document:
                 after = edit.get("after")
                 author = edit.get("author")
                 scope = edit.get("scope")
+                regex = edit.get("regex", False)
 
                 if not text or not after:
                     return EditResult(
@@ -1127,7 +1161,7 @@ class Document:
                         error=ValidationError("Missing required parameter"),
                     )
 
-                self.insert_tracked(text, after, author=author, scope=scope)
+                self.insert_tracked(text, after, author=author, scope=scope, regex=regex)
                 return EditResult(
                     success=True,
                     edit_type=edit_type,
@@ -1138,6 +1172,7 @@ class Document:
                 text = edit.get("text")
                 author = edit.get("author")
                 scope = edit.get("scope")
+                regex = edit.get("regex", False)
 
                 if not text:
                     return EditResult(
@@ -1147,7 +1182,7 @@ class Document:
                         error=ValidationError("Missing required parameter"),
                     )
 
-                self.delete_tracked(text, author=author, scope=scope)
+                self.delete_tracked(text, author=author, scope=scope, regex=regex)
                 return EditResult(success=True, edit_type=edit_type, message=f"Deleted '{text}'")
 
             elif edit_type == "replace_tracked":
@@ -1155,6 +1190,7 @@ class Document:
                 replace = edit.get("replace")
                 author = edit.get("author")
                 scope = edit.get("scope")
+                regex = edit.get("regex", False)
 
                 if not find or replace is None:
                     return EditResult(
@@ -1164,7 +1200,7 @@ class Document:
                         error=ValidationError("Missing required parameter"),
                     )
 
-                self.replace_tracked(find, replace, author=author, scope=scope)
+                self.replace_tracked(find, replace, author=author, scope=scope, regex=regex)
                 return EditResult(
                     success=True,
                     edit_type=edit_type,

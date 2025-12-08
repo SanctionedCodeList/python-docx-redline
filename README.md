@@ -45,6 +45,7 @@ doc.save("contract_edited.docx")
 **Phase 1 - Text Operations:**
 - ✅ **Insert, delete, and replace text** with tracked changes
 - ✅ **Smart text search** - handles text fragmented across multiple XML runs
+- ✅ **Regex support** - use regular expressions with capture groups for powerful find/replace
 - ✅ **Scope filtering** - limit operations to specific sections or paragraphs
 - ✅ **Helpful error messages** - suggestions for common issues (curly quotes, whitespace, etc.)
 
@@ -58,7 +59,7 @@ doc.save("contract_edited.docx")
 - ✅ **Batch operations** - apply multiple edits efficiently
 - ✅ **YAML/JSON support** - define edits in configuration files
 - ✅ **Type hints** - full type annotation support
-- ✅ **Thoroughly tested** - 154 tests with 91% coverage
+- ✅ **Thoroughly tested** - 168 tests with 92% coverage
 
 ## Installation
 
@@ -134,6 +135,37 @@ doc.replace_tracked("old term", "new term")
 doc.insert_paragraph("Amendments", after="Section 5", style="Heading1", track=True)
 
 doc.save("contract_restructured.docx")
+```
+
+### Regex Operations (Phase 2.5)
+
+Use regular expressions for powerful pattern matching and replacements:
+
+```python
+from docx_redline import Document
+
+doc = Document("contract.docx")
+
+# Replace all dollar amounts with redacted version
+doc.replace_tracked(r"\$[\d,]+\.?\d*", "$XXX.XX", regex=True)
+
+# Update all occurrences of "X days" to "X business days" using capture groups
+doc.replace_tracked(r"(\d+) days", r"\1 business days", regex=True)
+
+# Swap date format from MM/DD/YYYY to DD/MM/YYYY
+doc.replace_tracked(
+    r"(\d{2})/(\d{2})/(\d{4})",
+    r"\2/\1/\3",
+    regex=True
+)
+
+# Insert text after any section reference
+doc.insert_tracked(" (as amended)", after=r"Section \d+\.\d+", regex=True)
+
+# Delete all email addresses
+doc.delete_tracked(r"\b[a-z]+@[a-z]+\.com\b", regex=True)
+
+doc.save("contract_regex_edited.docx")
 ```
 
 ### Using Scopes
@@ -234,6 +266,12 @@ edits:
   - type: delete_section
     heading: "Deprecated Clause"
     track: true
+
+  # Regex operations
+  - type: replace_tracked
+    find: "(\\d+) days"
+    replace: "\\1 business days"
+    regex: true
 ```
 
 ```python
@@ -246,14 +284,14 @@ print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")
 
 ### Document Methods
 
-#### `insert_tracked(text, after, author=None, scope=None)`
-Insert text with tracked changes after a specific location.
+#### `insert_tracked(text, after, author=None, scope=None, regex=False)`
+Insert text with tracked changes after a specific location. Set `regex=True` to use regex patterns.
 
-#### `delete_tracked(text, author=None, scope=None)`
-Mark text for deletion with tracked changes.
+#### `delete_tracked(text, author=None, scope=None, regex=False)`
+Mark text for deletion with tracked changes. Set `regex=True` to use regex patterns.
 
-#### `replace_tracked(find, replace, author=None, scope=None)`
-Replace text with tracked changes (combines delete + insert).
+#### `replace_tracked(find, replace, author=None, scope=None, regex=False)`
+Replace text with tracked changes (combines delete + insert). Set `regex=True` to use regex patterns with capture group support.
 
 #### `insert_paragraph(text, after=None, before=None, style=None, track=False, author=None, scope=None)`
 Insert a complete paragraph with optional style and tracked changes.

@@ -11,6 +11,7 @@ Algorithm Note:
     documented in docs/ERIC_WHITE_ALGORITHM.md.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,6 +46,7 @@ class TextSpan:
         start_offset: Character offset within the start run
         end_offset: Character offset within the end run (exclusive)
         paragraph: The parent paragraph Element
+        match_obj: Optional regex Match object for capture group support
         text: The actual text content (computed on demand)
         context: Surrounding context for disambiguation (computed on demand)
     """
@@ -55,6 +57,7 @@ class TextSpan:
     start_offset: int
     end_offset: int
     paragraph: Any  # lxml Element
+    match_obj: Any = None  # Optional re.Match object for regex matches
 
     @property
     def text(self) -> str:
@@ -121,28 +124,47 @@ class TextSearch:
     """
 
     def find_text(
-        self, text: str, paragraphs: list[Any], case_sensitive: bool = True
+        self,
+        text: str,
+        paragraphs: list[Any],
+        case_sensitive: bool = True,
+        regex: bool = False,
     ) -> list[TextSpan]:
         """Find all occurrences of text in the given paragraphs.
 
         This is the core algorithm that handles text fragmentation:
         1. Build a character map that tracks which run each character belongs to
         2. Concatenate all text from all runs
-        3. Search in the concatenated text
+        3. Search in the concatenated text (literal or regex)
         4. Map the results back to the original runs
 
         Args:
-            text: The text to search for
+            text: The text or regex pattern to search for
             paragraphs: List of paragraph Elements to search in
             case_sensitive: Whether to perform case-sensitive search (default: True)
+            regex: Whether to treat text as a regex pattern (default: False)
 
         Returns:
             List of TextSpan objects representing each match
+
+        Raises:
+            re.error: If regex=True and the pattern is invalid
         """
         results = []
 
-        # Prepare search text based on case sensitivity
-        search_text = text if case_sensitive else text.lower()
+        # Prepare search pattern
+        if regex:
+            # Compile regex pattern with case sensitivity flag
+            flags = 0 if case_sensitive else re.IGNORECASE
+            try:
+                pattern = re.compile(text, flags)
+            except re.error as e:
+                raise re.error(f"Invalid regex pattern '{text}': {e}") from e
+            search_text = None  # Not used for regex
+        else:
+            # Prepare literal search text based on case sensitivity
+            search_text = text if case_sensitive else text.lower()
+            pattern = None  # Not used for literal search
 
         for para in paragraphs:
             # Get all runs in this paragraph
@@ -164,32 +186,57 @@ class TextSearch:
             # Join into full paragraph text
             full_text = "".join(full_text_chars)
 
-            # Apply case insensitivity if needed
-            search_in = full_text if case_sensitive else full_text.lower()
+            # Find all occurrences
+            if regex:
+                # Use regex search
+                assert pattern is not None  # Type guard: pattern is set when regex=True
+                for match in pattern.finditer(full_text):
+                    pos = match.start()
+                    match_len = match.end() - match.start()
 
-            # Find all occurrences of the search text
-            start = 0
-            while True:
-                pos = search_in.find(search_text, start)
-                if pos == -1:
-                    break
+                    # Map the found position back to runs
+                    start_run_idx, start_offset = char_map[pos]
+                    end_run_idx, end_offset = char_map[pos + match_len - 1]
 
-                # Map the found position back to runs
-                start_run_idx, start_offset = char_map[pos]
-                end_run_idx, end_offset = char_map[pos + len(search_text) - 1]
+                    # Create TextSpan for this match with regex Match object
+                    span = TextSpan(
+                        runs=runs,
+                        start_run_index=start_run_idx,
+                        end_run_index=end_run_idx,
+                        start_offset=start_offset,
+                        end_offset=end_offset + 1,  # Make end_offset exclusive
+                        paragraph=para,
+                        match_obj=match,  # Store match for capture group support
+                    )
+                    results.append(span)
+            else:
+                # Use literal search
+                assert search_text is not None  # Type guard: search_text is set when regex=False
+                # Apply case insensitivity if needed
+                search_in = full_text if case_sensitive else full_text.lower()
 
-                # Create TextSpan for this match
-                span = TextSpan(
-                    runs=runs,
-                    start_run_index=start_run_idx,
-                    end_run_index=end_run_idx,
-                    start_offset=start_offset,
-                    end_offset=end_offset + 1,  # Make end_offset exclusive
-                    paragraph=para,
-                )
-                results.append(span)
+                start = 0
+                while True:
+                    pos = search_in.find(search_text, start)
+                    if pos == -1:
+                        break
 
-                # Move past this match for the next search
-                start = pos + 1
+                    # Map the found position back to runs
+                    start_run_idx, start_offset = char_map[pos]
+                    end_run_idx, end_offset = char_map[pos + len(search_text) - 1]
+
+                    # Create TextSpan for this match
+                    span = TextSpan(
+                        runs=runs,
+                        start_run_index=start_run_idx,
+                        end_run_index=end_run_idx,
+                        start_offset=start_offset,
+                        end_offset=end_offset + 1,  # Make end_offset exclusive
+                        paragraph=para,
+                    )
+                    results.append(span)
+
+                    # Move past this match for the next search
+                    start = pos + 1
 
         return results
