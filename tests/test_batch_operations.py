@@ -281,4 +281,235 @@ def test_apply_edits_with_author():
         doc_path.unlink()
 
 
+# Tests for Phase 2 structural operations
+
+
+def create_structured_document() -> Path:
+    """Create a test document with headings for structural operations."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Introduction</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Introduction content</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Methods</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Methods content</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+    return doc_path
+
+
+def test_apply_edits_insert_paragraph():
+    """Test batch insert_paragraph operation."""
+    doc_path = create_structured_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {
+                "type": "insert_paragraph",
+                "text": "New paragraph text",
+                "after": "Introduction content",
+            }
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].edit_type == "insert_paragraph"
+        assert "inserted paragraph" in results[0].message.lower()
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_insert_paragraph_with_style():
+    """Test batch insert_paragraph with style."""
+    doc_path = create_structured_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {
+                "type": "insert_paragraph",
+                "text": "New heading",
+                "after": "Introduction content",
+                "style": "Heading2",
+            }
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert results[0].success
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_insert_paragraphs():
+    """Test batch insert_paragraphs operation."""
+    doc_path = create_structured_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {
+                "type": "insert_paragraphs",
+                "texts": ["First new para", "Second new para", "Third new para"],
+                "after": "Methods content",
+            }
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].edit_type == "insert_paragraphs"
+        assert "3 paragraphs" in results[0].message
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_delete_section():
+    """Test batch delete_section operation."""
+    doc_path = create_structured_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [{"type": "delete_section", "heading": "Methods"}]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].edit_type == "delete_section"
+        assert "deleted section" in results[0].message.lower()
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_mixed_phase_1_and_2():
+    """Test mixing Phase 1 and Phase 2 operations."""
+    doc_path = create_structured_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {"type": "insert_tracked", "text": " updated", "after": "Introduction content"},
+            {
+                "type": "insert_paragraph",
+                "text": "New paragraph between sections",
+                "after": "Introduction content",
+            },
+            {"type": "replace_tracked", "find": "Methods content", "replace": "New methods"},
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 3
+        # Debug: print results if any failed
+        if not all(r.success for r in results):
+            for i, r in enumerate(results):
+                print(f"Result {i}: success={r.success}, type={r.edit_type}, message={r.message}")
+
+        assert all(
+            r.success for r in results
+        ), f"Failed results: {[r.message for r in results if not r.success]}"
+        assert results[0].edit_type == "insert_tracked"
+        assert results[1].edit_type == "insert_paragraph"
+        assert results[2].edit_type == "replace_tracked"
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_insert_paragraph_missing_params():
+    """Test insert_paragraph with missing parameters."""
+    doc_path = create_structured_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {"type": "insert_paragraph", "after": "Introduction"},  # Missing text
+            {"type": "insert_paragraph", "text": "New text"},  # Missing after/before
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 2
+        assert not any(r.success for r in results)
+        assert all("missing" in r.message.lower() for r in results)
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_insert_paragraphs_missing_params():
+    """Test insert_paragraphs with missing parameters."""
+    doc_path = create_structured_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {"type": "insert_paragraphs", "after": "Introduction"},  # Missing texts
+            {"type": "insert_paragraphs", "texts": ["Text 1", "Text 2"]},  # Missing after/before
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 2
+        assert not any(r.success for r in results)
+        assert all("missing" in r.message.lower() for r in results)
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_delete_section_missing_params():
+    """Test delete_section with missing parameters."""
+    doc_path = create_structured_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [{"type": "delete_section"}]  # Missing heading
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert not results[0].success
+        assert "missing" in results[0].message.lower()
+
+    finally:
+        doc_path.unlink()
+
+
 # Run tests with: pytest tests/test_batch_operations.py -v

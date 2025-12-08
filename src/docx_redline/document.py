@@ -1171,6 +1171,112 @@ class Document:
                     message=f"Replaced '{find}' with '{replace}'",
                 )
 
+            elif edit_type == "insert_paragraph":
+                text = edit.get("text")
+                after = edit.get("after")
+                before = edit.get("before")
+                style = edit.get("style")
+                track = edit.get("track", True)
+                author = edit.get("author")
+                scope = edit.get("scope")
+
+                if not text:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="Missing required parameter: 'text'",
+                        error=ValidationError("Missing required parameter"),
+                    )
+
+                if not after and not before:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="Missing required parameter: 'after' or 'before'",
+                        error=ValidationError("Missing required parameter"),
+                    )
+
+                self.insert_paragraph(
+                    text,
+                    after=after,
+                    before=before,
+                    style=style,
+                    track=track,
+                    author=author,
+                    scope=scope,
+                )
+                location = f"after '{after}'" if after else f"before '{before}'"
+                return EditResult(
+                    success=True,
+                    edit_type=edit_type,
+                    message=f"Inserted paragraph '{text}' {location}",
+                )
+
+            elif edit_type == "insert_paragraphs":
+                texts = edit.get("texts")
+                after = edit.get("after")
+                before = edit.get("before")
+                style = edit.get("style")
+                track = edit.get("track", True)
+                author = edit.get("author")
+                scope = edit.get("scope")
+
+                if not texts:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="Missing required parameter: 'texts'",
+                        error=ValidationError("Missing required parameter"),
+                    )
+
+                if not after and not before:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="Missing required parameter: 'after' or 'before'",
+                        error=ValidationError("Missing required parameter"),
+                    )
+
+                self.insert_paragraphs(
+                    texts,
+                    after=after,
+                    before=before,
+                    style=style,
+                    track=track,
+                    author=author,
+                    scope=scope,
+                )
+                location = f"after '{after}'" if after else f"before '{before}'"
+                return EditResult(
+                    success=True,
+                    edit_type=edit_type,
+                    message=f"Inserted {len(texts)} paragraphs {location}",
+                )
+
+            elif edit_type == "delete_section":
+                heading = edit.get("heading")
+                track = edit.get("track", True)
+                update_toc = edit.get("update_toc", False)
+                author = edit.get("author")
+                scope = edit.get("scope")
+
+                if not heading:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="Missing required parameter: 'heading'",
+                        error=ValidationError("Missing required parameter"),
+                    )
+
+                self.delete_section(
+                    heading, track=track, update_toc=update_toc, author=author, scope=scope
+                )
+                return EditResult(
+                    success=True,
+                    edit_type=edit_type,
+                    message=f"Deleted section '{heading}'",
+                )
+
             else:
                 return EditResult(
                     success=False,
