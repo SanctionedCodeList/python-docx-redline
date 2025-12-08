@@ -39,11 +39,16 @@ class Paragraph:
     def text(self) -> str:
         """Get all text content from the paragraph.
 
+        Extracts text only from w:t elements, avoiding XML structural whitespace.
+        This ensures continuous text isn't broken by XML formatting between runs.
+
         Returns:
             Combined text from all runs in the paragraph
         """
-        # itertext() can return bytes in some cases, so we ensure strings
-        return "".join(str(t) if isinstance(t, bytes) else t for t in self._element.itertext())
+        # Extract text only from w:t elements to avoid XML structural whitespace
+        # Using .//w:t finds all w:t descendants within the paragraph
+        text_elements = self._element.findall(f".//{{{WORD_NAMESPACE}}}t")
+        return "".join(elem.text or "" for elem in text_elements)
 
     @text.setter
     def text(self, value: str) -> None:

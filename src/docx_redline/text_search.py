@@ -35,6 +35,22 @@ def _parse_tag(tag: str) -> str:
     return tag
 
 
+def _get_run_text(run: Any) -> str:
+    """Extract text from a run, avoiding XML structural whitespace.
+
+    Only extracts text from w:t elements to avoid inter-element whitespace.
+
+    Args:
+        run: A w:r (run) Element
+
+    Returns:
+        Text content of the run
+    """
+    # Find all w:t elements within this run
+    text_elements = run.findall(f".//{{{WORD_NAMESPACE}}}t")
+    return "".join(elem.text or "" for elem in text_elements)
+
+
 @dataclass
 class TextSpan:
     """Represents found text across potentially multiple runs.
@@ -66,7 +82,7 @@ class TextSpan:
 
         for idx in range(self.start_run_index, self.end_run_index + 1):
             run = self.runs[idx]
-            run_text = "".join(run.itertext())
+            run_text = _get_run_text(run)
 
             if idx == self.start_run_index and idx == self.end_run_index:
                 # Text is within a single run
@@ -89,7 +105,9 @@ class TextSpan:
 
         Returns up to 40 characters before and after the matched text.
         """
-        para_text = "".join(self.paragraph.itertext())
+        # Extract text only from w:t elements
+        text_elements = self.paragraph.findall(f".//{{{WORD_NAMESPACE}}}t")
+        para_text = "".join(elem.text or "" for elem in text_elements)
         matched = self.text
 
         # Find the match position in the full paragraph text
@@ -178,7 +196,7 @@ class TextSearch:
             full_text_chars = []
 
             for run_idx, run in enumerate(runs):
-                run_text = "".join(run.itertext())
+                run_text = _get_run_text(run)
                 for char_idx, char in enumerate(run_text):
                     char_map.append((run_idx, char_idx))
                     full_text_chars.append(char)
