@@ -222,6 +222,7 @@ class Document:
         author: str | None = None,
         scope: str | dict | Any | None = None,
         regex: bool = False,
+        enable_quote_normalization: bool = True,
     ) -> None:
         """Insert text with tracked changes after or before a specific location.
 
@@ -236,6 +237,8 @@ class Document:
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
             regex: Whether to treat anchor as a regex pattern (default: False)
+            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+                matching (default: True)
 
         Raises:
             ValueError: If both 'after' and 'before' are specified, or if neither is specified
@@ -259,8 +262,13 @@ class Document:
         # Apply scope filter if specified
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
-        # Search for the anchor text
-        matches = self._text_search.find_text(anchor, paragraphs, regex=regex)
+        # Search with optional quote normalization
+        matches = self._text_search.find_text(
+            anchor,
+            paragraphs,
+            regex=regex,
+            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+        )
 
         if not matches:
             # Generate smart suggestions
@@ -299,6 +307,7 @@ class Document:
         author: str | None = None,
         scope: str | dict | Any | None = None,
         regex: bool = False,
+        enable_quote_normalization: bool = True,
     ) -> None:
         """Delete text with tracked changes.
 
@@ -310,6 +319,8 @@ class Document:
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
             regex: Whether to treat 'text' as a regex pattern (default: False)
+            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+                matching (default: True)
 
         Raises:
             TextNotFoundError: If the text is not found
@@ -322,8 +333,13 @@ class Document:
         # Apply scope filter if specified
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
-        # Search for the text to delete
-        matches = self._text_search.find_text(text, paragraphs, regex=regex)
+        # Search with optional quote normalization
+        matches = self._text_search.find_text(
+            text,
+            paragraphs,
+            regex=regex,
+            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+        )
 
         if not matches:
             # Generate smart suggestions
@@ -359,6 +375,7 @@ class Document:
         author: str | None = None,
         scope: str | dict | Any | None = None,
         regex: bool = False,
+        enable_quote_normalization: bool = True,
     ) -> None:
         """Find and replace text with tracked changes.
 
@@ -376,6 +393,8 @@ class Document:
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
             regex: Whether to treat 'find' as a regex pattern (default: False)
+            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+                matching (default: True)
 
         Raises:
             TextNotFoundError: If the 'find' text is not found
@@ -395,8 +414,13 @@ class Document:
         # Apply scope filter if specified
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
-        # Search for the text to replace
-        matches = self._text_search.find_text(find, paragraphs, regex=regex)
+        # Search with optional quote normalization
+        matches = self._text_search.find_text(
+            find,
+            paragraphs,
+            regex=regex,
+            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+        )
 
         if not matches:
             # Generate smart suggestions

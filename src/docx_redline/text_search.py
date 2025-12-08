@@ -147,6 +147,7 @@ class TextSearch:
         paragraphs: list[Any],
         case_sensitive: bool = True,
         regex: bool = False,
+        normalize_quotes_for_matching: bool = False,
     ) -> list[TextSpan]:
         """Find all occurrences of text in the given paragraphs.
 
@@ -161,6 +162,8 @@ class TextSearch:
             paragraphs: List of paragraph Elements to search in
             case_sensitive: Whether to perform case-sensitive search (default: True)
             regex: Whether to treat text as a regex pattern (default: False)
+            normalize_quotes_for_matching: Normalize quotes to straight quotes for matching
+                (default: False)
 
         Returns:
             List of TextSpan objects representing each match
@@ -168,6 +171,8 @@ class TextSearch:
         Raises:
             re.error: If regex=True and the pattern is invalid
         """
+        from .quote_normalization import normalize_quotes as normalize_quotes_func
+
         results = []
 
         # Prepare search pattern
@@ -182,6 +187,9 @@ class TextSearch:
         else:
             # Prepare literal search text based on case sensitivity
             search_text = text if case_sensitive else text.lower()
+            # Apply quote normalization if requested
+            if normalize_quotes_for_matching:
+                search_text = normalize_quotes_func(search_text)
             pattern = None  # Not used for literal search
 
         for para in paragraphs:
@@ -203,6 +211,13 @@ class TextSearch:
 
             # Join into full paragraph text
             full_text = "".join(full_text_chars)
+
+            # Normalize document text for matching if requested
+            search_full_text = full_text
+            if normalize_quotes_for_matching and not regex:
+                search_full_text = normalize_quotes_func(search_full_text)
+            if not case_sensitive and not regex:
+                search_full_text = search_full_text.lower()
 
             # Find all occurrences
             if regex:
@@ -230,8 +245,8 @@ class TextSearch:
             else:
                 # Use literal search
                 assert search_text is not None  # Type guard: search_text is set when regex=False
-                # Apply case insensitivity if needed
-                search_in = full_text if case_sensitive else full_text.lower()
+                # Use the already-normalized and case-adjusted text
+                search_in = search_full_text
 
                 start = 0
                 while True:

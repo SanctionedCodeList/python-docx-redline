@@ -73,8 +73,7 @@ class SuggestionGenerator:
 
         if text_lower in doc_text_lower:
             suggestions.append(
-                "Text found with case-insensitive search. "
-                "Check capitalization in your search text"
+                "Text found with case-insensitive search. Check capitalization in your search text"
             )
 
         # Suggest checking for typos if no other suggestions
