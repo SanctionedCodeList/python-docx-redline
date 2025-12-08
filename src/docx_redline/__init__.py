@@ -28,6 +28,7 @@ __all__ = [
     "EditResult",
     "AcceptResult",
     "RejectResult",
+    "Paragraph",
 ]
 
 # Import error classes
@@ -39,6 +40,9 @@ from .errors import (
     TextNotFoundError,
     ValidationError,
 )
+
+# Import model classes
+from .models.paragraph import Paragraph
 
 # Import result types
 from .results import AcceptResult, EditResult, RejectResult
