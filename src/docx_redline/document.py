@@ -14,6 +14,7 @@ from typing import Any
 from lxml import etree
 
 from .errors import AmbiguousTextError, TextNotFoundError, ValidationError
+from .results import EditResult
 from .scope import ScopeEvaluator
 from .suggestions import SuggestionGenerator
 from .text_search import TextSearch
@@ -657,6 +658,174 @@ class Document:
 
         except Exception as e:
             raise ValidationError(f"Failed to save document: {e}") from e
+
+    def apply_edits(
+        self, edits: list[dict[str, Any]], stop_on_error: bool = False
+    ) -> list[EditResult]:
+        """Apply multiple edits in sequence.
+
+        This method processes a list of edit specifications and applies each one
+        in order. Each edit is a dictionary specifying the edit type and parameters.
+
+        Args:
+            edits: List of edit dictionaries with keys:
+                - type: Edit operation ("insert_tracked", "replace_tracked", "delete_tracked")
+                - Other parameters specific to the edit type
+            stop_on_error: If True, stop processing on first error
+
+        Returns:
+            List of EditResult objects, one per edit
+
+        Example:
+            >>> edits = [
+            ...     {
+            ...         "type": "insert_tracked",
+            ...         "text": "new text",
+            ...         "after": "anchor",
+            ...         "scope": "section:Introduction"
+            ...     },
+            ...     {
+            ...         "type": "replace_tracked",
+            ...         "find": "old",
+            ...         "replace": "new"
+            ...     }
+            ... ]
+            >>> results = doc.apply_edits(edits)
+            >>> print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")
+        """
+        results = []
+
+        for i, edit in enumerate(edits):
+            edit_type = edit.get("type")
+            if not edit_type:
+                results.append(
+                    EditResult(
+                        success=False,
+                        edit_type="unknown",
+                        message=f"Edit {i}: Missing 'type' field",
+                        error=ValidationError("Missing 'type' field"),
+                    )
+                )
+                if stop_on_error:
+                    break
+                continue
+
+            try:
+                result = self._apply_single_edit(edit_type, edit)
+                results.append(result)
+
+                if not result.success and stop_on_error:
+                    break
+
+            except Exception as e:
+                results.append(
+                    EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message=f"Error: {str(e)}",
+                        error=e,
+                    )
+                )
+                if stop_on_error:
+                    break
+
+        return results
+
+    def _apply_single_edit(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+        """Apply a single edit operation.
+
+        Args:
+            edit_type: The type of edit to perform
+            edit: Dictionary with edit parameters
+
+        Returns:
+            EditResult indicating success or failure
+        """
+        try:
+            if edit_type == "insert_tracked":
+                text = edit.get("text")
+                after = edit.get("after")
+                author = edit.get("author")
+                scope = edit.get("scope")
+
+                if not text or not after:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="Missing required parameter: 'text' or 'after'",
+                        error=ValidationError("Missing required parameter"),
+                    )
+
+                self.insert_tracked(text, after, author=author, scope=scope)
+                return EditResult(
+                    success=True,
+                    edit_type=edit_type,
+                    message=f"Inserted '{text}' after '{after}'",
+                )
+
+            elif edit_type == "delete_tracked":
+                text = edit.get("text")
+                author = edit.get("author")
+                scope = edit.get("scope")
+
+                if not text:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="Missing required parameter: 'text'",
+                        error=ValidationError("Missing required parameter"),
+                    )
+
+                self.delete_tracked(text, author=author, scope=scope)
+                return EditResult(success=True, edit_type=edit_type, message=f"Deleted '{text}'")
+
+            elif edit_type == "replace_tracked":
+                find = edit.get("find")
+                replace = edit.get("replace")
+                author = edit.get("author")
+                scope = edit.get("scope")
+
+                if not find or replace is None:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="Missing required parameter: 'find' or 'replace'",
+                        error=ValidationError("Missing required parameter"),
+                    )
+
+                self.replace_tracked(find, replace, author=author, scope=scope)
+                return EditResult(
+                    success=True,
+                    edit_type=edit_type,
+                    message=f"Replaced '{find}' with '{replace}'",
+                )
+
+            else:
+                return EditResult(
+                    success=False,
+                    edit_type=edit_type,
+                    message=f"Unknown edit type: {edit_type}",
+                    error=ValidationError(f"Unknown edit type: {edit_type}"),
+                )
+
+        except TextNotFoundError as e:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message=f"Text not found: {e}",
+                error=e,
+            )
+        except AmbiguousTextError as e:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message=f"Ambiguous text: {e}",
+                error=e,
+            )
+        except Exception as e:
+            return EditResult(
+                success=False, edit_type=edit_type, message=f"Error: {str(e)}", error=e
+            )
 
     def __del__(self) -> None:
         """Clean up temporary directory on object destruction."""

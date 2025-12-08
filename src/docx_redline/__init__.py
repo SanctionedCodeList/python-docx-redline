@@ -25,6 +25,9 @@ __all__ = [
     "TrackedXMLGenerator",
     "SuggestionGenerator",
     "ScopeEvaluator",
+    "EditResult",
+    "AcceptResult",
+    "RejectResult",
 ]
 
 # Import error classes
@@ -36,6 +39,9 @@ from .errors import (
     TextNotFoundError,
     ValidationError,
 )
+
+# Import result types
+from .results import AcceptResult, EditResult, RejectResult
 
 # Import scope evaluation
 from .scope import ScopeEvaluator
