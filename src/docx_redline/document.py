@@ -11,6 +11,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+import yaml
 from lxml import etree
 
 from .errors import AmbiguousTextError, TextNotFoundError, ValidationError
@@ -826,6 +827,77 @@ class Document:
             return EditResult(
                 success=False, edit_type=edit_type, message=f"Error: {str(e)}", error=e
             )
+
+    def apply_edit_file(
+        self, path: str | Path, format: str = "yaml", stop_on_error: bool = False
+    ) -> list[EditResult]:
+        """Apply edits from a YAML or JSON file.
+
+        Loads edit specifications from a file and applies them using apply_edits().
+        The file should contain an 'edits' key with a list of edit dictionaries.
+
+        Args:
+            path: Path to the edit specification file
+            format: File format - "yaml" or "json" (default: "yaml")
+            stop_on_error: If True, stop processing on first error
+
+        Returns:
+            List of EditResult objects, one per edit
+
+        Raises:
+            ValidationError: If file cannot be parsed or has invalid format
+            FileNotFoundError: If file does not exist
+
+        Example YAML file:
+            ```yaml
+            edits:
+              - type: insert_tracked
+                text: "new text"
+                after: "anchor"
+              - type: replace_tracked
+                find: "old"
+                replace: "new"
+            ```
+
+        Example:
+            >>> results = doc.apply_edit_file("edits.yaml")
+            >>> print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")
+        """
+        file_path = Path(path)
+
+        if not file_path.exists():
+            raise FileNotFoundError(f"Edit file not found: {path}")
+
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                if format == "yaml":
+                    data = yaml.safe_load(f)
+                elif format == "json":
+                    import json
+
+                    data = json.load(f)
+                else:
+                    raise ValidationError(f"Unsupported format: {format}")
+
+            if not isinstance(data, dict):
+                raise ValidationError("Edit file must contain a dictionary/object")
+
+            if "edits" not in data:
+                raise ValidationError("Edit file must contain an 'edits' key")
+
+            edits = data["edits"]
+            if not isinstance(edits, list):
+                raise ValidationError("'edits' must be a list")
+
+            # Apply the edits
+            return self.apply_edits(edits, stop_on_error=stop_on_error)
+
+        except yaml.YAMLError as e:
+            raise ValidationError(f"Failed to parse YAML file: {e}") from e
+        except Exception as e:
+            if isinstance(e, ValidationError | FileNotFoundError):
+                raise
+            raise ValidationError(f"Failed to load edit file: {e}") from e
 
     def __del__(self) -> None:
         """Clean up temporary directory on object destruction."""
