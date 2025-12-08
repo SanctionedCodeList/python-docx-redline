@@ -128,6 +128,67 @@ class Document:
                 shutil.rmtree(self._temp_dir)
             raise ValidationError(f"Failed to extract .docx file: {e}") from e
 
+    # View capabilities (Phase 3)
+
+    @property
+    def paragraphs(self) -> list["Paragraph"]:
+        """Get all paragraphs in the document.
+
+        Returns a list of Paragraph wrapper objects that provide convenient
+        access to paragraph text, style, and other properties.
+
+        Returns:
+            List of Paragraph objects for all paragraphs in document
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> for para in doc.paragraphs:
+            ...     if para.is_heading():
+            ...         print(f"Section: {para.text}")
+        """
+        from docx_redline.models.paragraph import Paragraph
+
+        return [Paragraph(p) for p in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p")]
+
+    @property
+    def sections(self) -> list["Section"]:
+        """Get document sections parsed by heading structure.
+
+        A section consists of a heading paragraph followed by all paragraphs
+        until the next heading. Paragraphs before the first heading belong to
+        an intro section with no heading.
+
+        Returns:
+            List of Section objects
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> for section in doc.sections:
+            ...     if section.heading:
+            ...         print(f"Section: {section.heading_text}")
+            ...     print(f"  {len(section.paragraphs)} paragraphs")
+        """
+        from docx_redline.models.section import Section
+
+        return Section.from_document(self.xml_root)
+
+    def get_text(self) -> str:
+        """Extract all text content from the document.
+
+        Returns plain text with paragraphs separated by double newlines.
+        This is useful for understanding document content before making edits.
+
+        Returns:
+            Plain text content of the entire document
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> text = doc.get_text()
+            >>> if "confidential" in text.lower():
+            ...     print("Document contains confidential information")
+        """
+        return "\n\n".join(p.text for p in self.paragraphs)
+
     def insert_tracked(
         self,
         text: str,

@@ -55,11 +55,17 @@ doc.save("contract_edited.docx")
 - ✅ **Delete entire sections** - remove sections by heading with tracked changes
 - ✅ **Section and Paragraph wrappers** - convenient API for document structure
 
+**Phase 3 - Document Viewing:**
+- ✅ **Read paragraphs** - access all paragraphs with text, style, and heading info
+- ✅ **Parse sections** - automatic section detection via heading structure
+- ✅ **Extract text** - get full document text for analysis
+- ✅ **Agent workflow** - read → understand → targeted edits
+
 **General:**
 - ✅ **Batch operations** - apply multiple edits efficiently
 - ✅ **YAML/JSON support** - define edits in configuration files
 - ✅ **Type hints** - full type annotation support
-- ✅ **Thoroughly tested** - 168 tests with 92% coverage
+- ✅ **Thoroughly tested** - 182 tests with 92% coverage
 
 ## Installation
 
@@ -166,6 +172,48 @@ doc.insert_tracked(" (as amended)", after=r"Section \d+\.\d+", regex=True)
 doc.delete_tracked(r"\b[a-z]+@[a-z]+\.com\b", regex=True)
 
 doc.save("contract_regex_edited.docx")
+```
+
+###  Reading Document Content (Phase 3)
+
+View and analyze document structure before making edits:
+
+```python
+from docx_redline import Document
+
+doc = Document("contract.docx")
+
+# Get all paragraphs
+for para in doc.paragraphs:
+    if para.is_heading():
+        print(f"Section: {para.text}")
+    else:
+        print(f"  {para.text}")
+
+# Get document sections (parsed by headings)
+for section in doc.sections:
+    if section.heading:
+        print(f"\nSection: {section.heading_text} (Level {section.heading_level})")
+        print(f"  {len(section.paragraphs)} paragraphs")
+
+    # Find specific text within a section
+    if section.contains("confidential"):
+        print("  Contains confidential information")
+
+# Get full document text
+text = doc.get_text()
+if "arbitration" in text.lower():
+    print("Document contains arbitration clause")
+
+# Agent workflow: read → understand → edit
+for section in doc.sections:
+    if section.heading_text == "Payment Terms":
+        # Found the section, check its content
+        if section.contains("net 30 days"):
+            # Now make targeted edit
+            doc.replace_tracked("net 30 days", "net 45 days", scope="Payment Terms")
+
+doc.save("contract_updated.docx")
 ```
 
 ### Using Scopes
