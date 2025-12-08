@@ -2,7 +2,7 @@
 
 ## Overview
 
-The docx_redline test suite provides comprehensive coverage of all core functionality with 61 tests achieving 87% code coverage.
+The docx_redline test suite provides comprehensive coverage of all core functionality with **168 tests achieving 92% code coverage**.
 
 ## Test Organization
 
@@ -19,12 +19,7 @@ The test suite is organized into focused test modules:
   - Accept all changes functionality
   - Comment deletion
 
-- **`test_text_search.py`** (tests in other files)
-  - Text fragmentation handling
-  - Multiple run scenarios
-  - Ambiguous text detection
-
-#### Feature-Specific Tests
+#### Phase 1: Text Operations
 
 - **`test_scope.py`** (12 tests)
   - String scope specifications (`"section:Name"`, `"paragraph_containing:text"`)
@@ -33,7 +28,7 @@ The test suite is organized into focused test modules:
   - Section detection via heading styles
   - Combined filter logic
 
-- **`test_batch_operations.py`** (11 tests)
+- **`test_batch_operations.py`** (19 tests)
   - `apply_edits()` with multiple operations
   - Success/failure tracking via `EditResult`
   - Stop-on-error behavior
@@ -58,9 +53,41 @@ The test suite is organized into focused test modules:
     - Case sensitivity
     - Special characters (non-breaking spaces, zero-width spaces, tabs)
 
+#### Phase 2: Structural Operations
+
+- **`test_paragraph.py`** (27 tests)
+  - Paragraph wrapper class functionality
+  - Text extraction and iteration
+  - Parent document access
+  - Paragraph properties
+
+- **`test_section.py`** (24 tests)
+  - Section wrapper class functionality
+  - Heading detection and navigation
+  - Section content iteration
+  - Parent document access
+
+- **`test_structural_operations.py`** (29 tests)
+  - `insert_paragraph()` with styles and tracking
+  - `insert_paragraphs()` for multiple paragraphs
+  - `delete_section()` with tracked changes
+  - Before/after positioning
+  - Scope support for structural operations
+  - Error handling
+
+#### Phase 2.5: Regex Support
+
+- **`test_regex_operations.py`** (14 tests)
+  - Basic regex patterns (digits, emails, currency)
+  - Capture group replacements with `\1`, `\2` syntax
+  - Insert/delete operations with regex
+  - Error handling for invalid patterns
+  - Batch operations with regex
+  - Scope filtering with regex
+
 #### Integration Tests
 
-- **`test_integration.py`** (5 tests)
+- **`test_integration.py`** (10 tests)
   - **`test_complete_workflow`**: Realistic multi-operation document editing
     - Party name replacements with scoping
     - Payment term updates
