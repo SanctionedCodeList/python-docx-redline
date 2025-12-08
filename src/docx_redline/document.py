@@ -217,28 +217,42 @@ class Document:
     def insert_tracked(
         self,
         text: str,
-        after: str,
+        after: str | None = None,
+        before: str | None = None,
         author: str | None = None,
         scope: str | dict | Any | None = None,
         regex: bool = False,
     ) -> None:
-        """Insert text with tracked changes after a specific location.
+        """Insert text with tracked changes after or before a specific location.
 
-        This method searches for the 'after' text in the document and inserts
-        the new text immediately after it as a tracked insertion.
+        This method searches for the anchor text in the document and inserts
+        the new text either immediately after it or immediately before it as
+        a tracked insertion.
 
         Args:
             text: The text to insert
-            after: The text or regex pattern to search for as the insertion point
+            after: The text or regex pattern to insert after (optional)
+            before: The text or regex pattern to insert before (optional)
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
-            regex: Whether to treat 'after' as a regex pattern (default: False)
+            regex: Whether to treat anchor as a regex pattern (default: False)
 
         Raises:
-            TextNotFoundError: If the 'after' text is not found
-            AmbiguousTextError: If multiple occurrences of 'after' text are found
+            ValueError: If both 'after' and 'before' are specified, or if neither is specified
+            TextNotFoundError: If the anchor text is not found
+            AmbiguousTextError: If multiple occurrences of anchor text are found
             re.error: If regex=True and the pattern is invalid
         """
+        # Validate parameters
+        if after is not None and before is not None:
+            raise ValueError("Cannot specify both 'after' and 'before' parameters")
+        if after is None and before is None:
+            raise ValueError("Must specify either 'after' or 'before' parameter")
+
+        # Determine anchor text and insertion mode
+        anchor: str = after if after is not None else before  # type: ignore[assignment]
+        insert_after = after is not None
+
         # Get all paragraphs in the document
         all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
 
@@ -246,15 +260,15 @@ class Document:
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
         # Search for the anchor text
-        matches = self._text_search.find_text(after, paragraphs, regex=regex)
+        matches = self._text_search.find_text(anchor, paragraphs, regex=regex)
 
         if not matches:
             # Generate smart suggestions
-            suggestions = SuggestionGenerator.generate_suggestions(after, paragraphs)
-            raise TextNotFoundError(after, suggestions=suggestions)
+            suggestions = SuggestionGenerator.generate_suggestions(anchor, paragraphs)
+            raise TextNotFoundError(anchor, suggestions=suggestions)
 
         if len(matches) > 1:
-            raise AmbiguousTextError(after, matches)
+            raise AmbiguousTextError(anchor, matches)
 
         # We have exactly one match
         match = matches[0]
@@ -273,8 +287,11 @@ class Document:
         root = etree.fromstring(wrapped_xml.encode("utf-8"))
         insertion_element = root[0]  # Get the first child (the actual insertion)
 
-        # Insert after the matched text
-        self._insert_after_match(match, insertion_element)
+        # Insert at the appropriate position
+        if insert_after:
+            self._insert_after_match(match, insertion_element)
+        else:
+            self._insert_before_match(match, insertion_element)
 
     def delete_tracked(
         self,
@@ -807,6 +824,25 @@ class Document:
 
         # Insert the new element after the end run
         paragraph.insert(run_index + 1, insertion_element)
+
+    def _insert_before_match(self, match: Any, insertion_element: Any) -> None:
+        """Insert an XML element before a matched text span.
+
+        Args:
+            match: TextSpan object representing where to insert
+            insertion_element: The lxml Element to insert
+        """
+        # Get the paragraph containing the match
+        paragraph = match.paragraph
+
+        # Find the run where the match starts
+        start_run = match.runs[match.start_run_index]
+
+        # Find the position of the start run in the paragraph
+        run_index = list(paragraph).index(start_run)
+
+        # Insert the new element before the start run
+        paragraph.insert(run_index, insertion_element)
 
     def _replace_match_with_element(self, match: Any, replacement_element: Any) -> None:
         """Replace matched text with a single XML element.

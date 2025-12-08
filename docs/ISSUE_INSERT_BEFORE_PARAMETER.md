@@ -3,6 +3,7 @@
 **Date:** 2025-12-08
 **Severity:** Medium
 **Category:** API Completeness / User Experience
+**Status:** ✅ RESOLVED (2025-12-08)
 
 ---
 
@@ -364,3 +365,82 @@ This is functional but unintuitive and fragile.
 - Triggered by: Legal brief editing workflow (Edit 11 in surgical_edits.md)
 - Similar patterns: DOM manipulation APIs, text editor APIs
 - Related code: `src/docx_redline/document.py:229` (insert_tracked method)
+
+---
+
+## Resolution
+
+**Date Resolved:** 2025-12-08
+**Fixed in Commit:** (see git log)
+
+### Implementation
+
+Added `before` parameter to `insert_tracked()` method with the following changes:
+
+1. **Parameter signature**: Made both `after` and `before` optional with validation
+   ```python
+   def insert_tracked(
+       self,
+       text: str,
+       after: str | None = None,
+       before: str | None = None,
+       author: str | None = None,
+       scope: str | dict | Any | None = None,
+       regex: bool = False,
+   ) -> None:
+   ```
+
+2. **Validation logic**: Ensures exactly one insertion direction is specified
+   - Raises `ValueError` if both `after` and `before` are specified
+   - Raises `ValueError` if neither `after` nor `before` are specified
+
+3. **Implementation**: Created `_insert_before_match()` helper method
+   - Mirrors `_insert_after_match()` but inserts at `run_index` instead of `run_index + 1`
+   - Uses `start_run` from match instead of `end_run`
+
+### Files Changed
+
+- **src/docx_redline/document.py**: Lines 217-294 (modified `insert_tracked()`), Lines 828-845 (new `_insert_before_match()`)
+- **tests/test_insert_before.py**: 14 comprehensive tests (337 lines)
+- **docs/ISSUE_INSERT_BEFORE_PARAMETER.md**: Updated status to RESOLVED
+
+### Test Coverage
+
+Created 14 tests covering:
+- Basic before/after insertion
+- Mutual exclusion validation
+- Required parameter validation
+- Paragraph start/end insertion
+- Regex support
+- Scope filtering
+- Not found / ambiguous cases
+- Formatting preservation
+- Multi-run text support
+- Sequential operations
+- Custom author support
+
+**All 242 tests pass** with **93% coverage**.
+
+### API Examples
+
+```python
+# Insert before (NEW)
+doc.insert_tracked("Preface. ", before="Introduction")
+
+# Insert after (existing)
+doc.insert_tracked("Addendum. ", after="Conclusion")
+
+# Both with scope
+doc.insert_tracked(
+    "New paragraph. ",
+    before="existing text",
+    scope="section:Analysis"
+)
+```
+
+### Backward Compatibility
+
+This change is **100% backward compatible**:
+- Existing code using `after` continues to work unchanged
+- `after` parameter default changed from required to optional
+- No breaking changes to API behavior
