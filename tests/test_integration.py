@@ -327,4 +327,425 @@ def test_context_manager_workflow():
             output_path.unlink()
 
 
+# Phase 2 Integration Tests - Structural Operations
+
+
+def create_structured_contract() -> Path:
+    """Create a contract document with multiple sections for structural operations."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Parties</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>This Agreement is between Company A and Company B.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Services</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Company A will provide consulting services.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Payment</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Payment terms are net 30 days.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Outdated Clause</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>This clause is no longer applicable.</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:pPr>
+        <w:pStyle w:val="Heading1"/>
+      </w:pPr>
+      <w:r>
+        <w:t>Termination</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Either party may terminate with notice.</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("word/document.xml", document_xml)
+        docx.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        docx.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
+
+    return doc_path
+
+
+def test_structural_operations_workflow():
+    """Test complete workflow with Phase 2 structural operations."""
+    doc_path = create_structured_contract()
+
+    try:
+        doc = Document(doc_path)
+
+        # 1. Delete outdated section completely
+        doc.delete_section("Outdated Clause", track=True)
+
+        # 2. Add new section between Services and Payment
+        doc.insert_paragraph(
+            "Deliverables",
+            after="Company A will provide consulting services.",
+            style="Heading1",
+            track=True,
+        )
+
+        # 3. Add content to new section
+        doc.insert_paragraphs(
+            [
+                "Company A shall deliver the following:",
+                "- Weekly status reports",
+                "- Monthly progress reviews",
+                "- Final project documentation",
+            ],
+            after="Deliverables",
+            track=True,
+        )
+
+        # 4. Update existing text using Phase 1 operations
+        doc.replace_tracked("net 30 days", "net 45 days")
+
+        # Save and verify
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+        doc.save(output_path)
+
+        # Reload and verify structure
+        modified_doc = Document(output_path)
+        doc_text = "".join("".join(p.itertext()) for p in modified_doc.xml_root.iter("{*}p"))
+
+        # Verify deletions
+        assert "Outdated Clause" in doc_text  # Still present in w:del
+        assert "no longer applicable" in doc_text
+
+        # Verify new section
+        assert "Deliverables" in doc_text
+        assert "Weekly status reports" in doc_text
+        assert "Final project documentation" in doc_text
+
+        # Verify updates
+        assert "net 45 days" in doc_text
+
+        # Verify tracked changes exist
+        from lxml import etree
+
+        xml_string = etree.tostring(modified_doc.xml_root, encoding="unicode")
+        assert "w:ins" in xml_string
+        assert "w:del" in xml_string
+
+        output_path.unlink()
+
+    finally:
+        doc_path.unlink()
+
+
+def test_document_restructuring_workflow():
+    """Test major document restructuring with mixed operations."""
+    doc_path = create_structured_contract()
+
+    try:
+        doc = Document(doc_path)
+
+        # Scenario: Client wants to reorganize and update contract
+
+        # Step 1: Update party names  (do both replacements with more specific text)
+        doc.replace_tracked(
+            "Company A and Company B", "Acme Corp and Widget Inc", scope="section:Parties"
+        )
+
+        # Step 2: Add executive summary at the beginning
+        doc.insert_paragraph(
+            "Executive Summary",
+            before="This Agreement is between",
+            style="Heading1",
+            track=True,
+        )
+        doc.insert_paragraph(
+            "This is a services agreement between Acme Corp and Widget Inc for consulting services.",
+            after="Executive Summary",
+            track=True,
+        )
+
+        # Step 3: Remove outdated section
+        doc.delete_section("Outdated Clause", track=True)
+
+        # Step 4: Add compliance section at the end
+        doc.insert_paragraph(
+            "Compliance",
+            after="Either party may terminate with notice.",
+            style="Heading1",
+            track=True,
+        )
+        doc.insert_paragraphs(
+            [
+                "Both parties agree to comply with all applicable laws.",
+                "This includes but is not limited to:",
+                "- Data protection regulations",
+                "- Employment laws",
+                "- Industry-specific requirements",
+            ],
+            after="Compliance",
+            track=True,
+        )
+
+        # Save and verify
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+        doc.save(output_path)
+
+        modified_doc = Document(output_path)
+        doc_text = "".join("".join(p.itertext()) for p in modified_doc.xml_root.iter("{*}p"))
+
+        # Verify all changes
+        assert "Acme Corp" in doc_text
+        assert "Widget Inc" in doc_text
+        assert "Executive Summary" in doc_text
+        assert "Compliance" in doc_text
+        assert "Data protection regulations" in doc_text
+
+        output_path.unlink()
+
+    finally:
+        doc_path.unlink()
+
+
+def test_batch_structural_operations():
+    """Test Phase 2 operations in batch mode with YAML."""
+    doc_path = create_structured_contract()
+    yaml_path = Path(tempfile.mktemp(suffix=".yaml"))
+
+    try:
+        # Create YAML with mixed Phase 1 and Phase 2 operations
+        yaml_content = """
+edits:
+  # Phase 1 text operations
+  - type: replace_tracked
+    find: "Company A and Company B"
+    replace: "TechCorp and ClientCo"
+    scope: "section:Parties"
+
+  # Phase 2 structural operations
+  - type: delete_section
+    heading: "Outdated Clause"
+    track: true
+
+  - type: insert_paragraph
+    text: "Warranties"
+    after: "Payment terms are net 30 days."
+    style: "Heading1"
+    track: true
+
+  - type: insert_paragraphs
+    texts:
+      - "TechCorp warrants that services will be performed professionally."
+      - "ClientCo warrants that all information provided is accurate."
+    after: "Warranties"
+    track: true
+
+  # More Phase 1 operations
+  - type: insert_tracked
+    text: " in writing"
+    after: "may terminate"
+"""
+        yaml_path.write_text(yaml_content, encoding="utf-8")
+
+        # Apply all edits from YAML
+        doc = Document(doc_path)
+        results = doc.apply_edit_file(yaml_path)
+
+        # All operations should succeed
+        assert len(results) == 5
+        assert all(r.success for r in results), [r.message for r in results if not r.success]
+
+        # Verify each type
+        assert results[0].edit_type == "replace_tracked"
+        assert results[1].edit_type == "delete_section"
+        assert results[2].edit_type == "insert_paragraph"
+        assert results[3].edit_type == "insert_paragraphs"
+        assert results[4].edit_type == "insert_tracked"
+
+        # Save and verify content
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+        doc.save(output_path)
+
+        modified_doc = Document(output_path)
+        doc_text = "".join("".join(p.itertext()) for p in modified_doc.xml_root.iter("{*}p"))
+
+        assert "TechCorp" in doc_text
+        assert "ClientCo" in doc_text
+        assert "Warranties" in doc_text
+        assert "performed professionally" in doc_text
+        assert "in writing" in doc_text
+
+        output_path.unlink()
+
+    finally:
+        doc_path.unlink()
+        yaml_path.unlink()
+
+
+def test_incremental_document_building():
+    """Test building up a document incrementally with structural operations."""
+    doc_path = create_structured_contract()
+
+    try:
+        doc = Document(doc_path)
+
+        # Scenario: Start with basic contract, add sections incrementally
+
+        # Add new sections one by one
+        doc.insert_paragraph(
+            "Intellectual Property",
+            after="Payment terms are net 30 days.",
+            style="Heading1",
+            track=True,
+        )
+
+        doc.insert_paragraphs(
+            [
+                "All work product shall be owned by ClientCo.",
+                "TechCorp retains ownership of pre-existing materials.",
+            ],
+            after="Intellectual Property",
+            track=True,
+        )
+
+        doc.insert_paragraph(
+            "Liability",
+            after="TechCorp retains ownership of pre-existing materials.",
+            style="Heading1",
+            track=True,
+        )
+
+        doc.insert_paragraph(
+            "Liability shall be limited to the fees paid under this Agreement.",
+            after="Liability",
+            track=True,
+        )
+
+        doc.insert_paragraph(
+            "Governing Law",
+            after="Liability shall be limited to the fees paid under this Agreement.",
+            style="Heading1",
+            track=True,
+        )
+
+        doc.insert_paragraph(
+            "This Agreement shall be governed by the laws of California.",
+            after="Governing Law",
+            track=True,
+        )
+
+        # Save and verify structure
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+        doc.save(output_path)
+
+        modified_doc = Document(output_path)
+
+        # Verify content includes all new sections
+        # (Don't count headings directly because they may be in w:ins elements)
+
+        doc_text = "".join("".join(p.itertext()) for p in modified_doc.xml_root.iter("{*}p"))
+        assert "Intellectual Property" in doc_text
+        assert "Liability" in doc_text
+        assert "Governing Law" in doc_text
+
+        output_path.unlink()
+
+    finally:
+        doc_path.unlink()
+
+
+def test_section_replacement_workflow():
+    """Test replacing a section by deleting old and inserting new."""
+    doc_path = create_structured_contract()
+
+    try:
+        doc = Document(doc_path)
+
+        # Scenario: Replace "Services" section with more detailed version
+
+        # Delete old section
+        doc.delete_section("Services", track=True)
+
+        # Add new detailed Services section
+        doc.insert_paragraph(
+            "Services and Deliverables",
+            after="This Agreement is between Company A and Company B.",
+            style="Heading1",
+            track=True,
+        )
+
+        doc.insert_paragraphs(
+            [
+                "Company A will provide the following services:",
+                "1. Strategic consulting",
+                "2. Implementation support",
+                "3. Training and documentation",
+                "4. Ongoing maintenance and support",
+            ],
+            after="Services and Deliverables",
+            track=True,
+        )
+
+        # Save and verify
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+        doc.save(output_path)
+
+        modified_doc = Document(output_path)
+        doc_text = "".join("".join(p.itertext()) for p in modified_doc.xml_root.iter("{*}p"))
+
+        # Old section still visible in tracked deletion
+        assert "Services" in doc_text
+
+        # New section content
+        assert "Services and Deliverables" in doc_text
+        assert "Strategic consulting" in doc_text
+        assert "Ongoing maintenance and support" in doc_text
+
+        output_path.unlink()
+
+    finally:
+        doc_path.unlink()
+
+
 # Run tests with: pytest tests/test_integration.py -v
