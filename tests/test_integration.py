@@ -67,11 +67,25 @@ def create_realistic_docx() -> Path:
   </w:body>
 </w:document>"""
 
-    # Create minimal .docx structure
+    # Proper Content_Types.xml
+    content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    # Proper relationships file
+    rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    # Create proper .docx structure
     with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types)
+        docx.writestr("_rels/.rels", rels)
         docx.writestr("word/document.xml", document_xml)
-        docx.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
-        docx.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
 
     return doc_path
 
@@ -405,10 +419,24 @@ def create_structured_contract() -> Path:
   </w:body>
 </w:document>"""
 
+    # Proper Content_Types.xml
+    content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    # Proper relationships file
+    rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
     with zipfile.ZipFile(doc_path, "w") as docx:
         docx.writestr("word/document.xml", document_xml)
-        docx.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
-        docx.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
+        docx.writestr("[Content_Types].xml", content_types)
+        docx.writestr("_rels/.rels", rels)
 
     return doc_path
 

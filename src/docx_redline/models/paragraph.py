@@ -39,16 +39,18 @@ class Paragraph:
     def text(self) -> str:
         """Get all text content from the paragraph.
 
-        Extracts text only from w:t elements, avoiding XML structural whitespace.
+        Extracts text from both w:t and w:delText elements, avoiding XML structural whitespace.
         This ensures continuous text isn't broken by XML formatting between runs.
+        Includes text from tracked deletions (w:delText) as well as regular text (w:t).
 
         Returns:
             Combined text from all runs in the paragraph
         """
-        # Extract text only from w:t elements to avoid XML structural whitespace
-        # Using .//w:t finds all w:t descendants within the paragraph
+        # Extract text from both w:t and w:delText elements to avoid XML structural whitespace
+        # Using .// finds all descendants within the paragraph
         text_elements = self._element.findall(f".//{{{WORD_NAMESPACE}}}t")
-        return "".join(elem.text or "" for elem in text_elements)
+        deltext_elements = self._element.findall(f".//{{{WORD_NAMESPACE}}}delText")
+        return "".join(elem.text or "" for elem in text_elements + deltext_elements)
 
     @text.setter
     def text(self, value: str) -> None:

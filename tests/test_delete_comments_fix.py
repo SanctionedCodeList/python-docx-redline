@@ -55,12 +55,18 @@ def create_document_with_comments() -> Path:
   <Override PartName="/word/comments.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"/>
 </Types>"""
 
+    # Proper _rels/.rels file
+    root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
     with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types_xml)
+        docx.writestr("_rels/.rels", root_rels)
         docx.writestr("word/document.xml", document_xml)
         docx.writestr("word/comments.xml", comments_xml)
         docx.writestr("word/_rels/document.xml.rels", rels_xml)
-        docx.writestr("[Content_Types].xml", content_types_xml)
-        docx.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
 
     return doc_path
 
@@ -104,9 +110,9 @@ def test_delete_all_comments_removes_comment_relationships() -> None:
             # Check no comment relationships exist
             for rel in rels_tree:
                 rel_type = rel.get("Type")
-                assert (
-                    "comment" not in rel_type.lower()
-                ), f"Comment relationship should be removed: {rel_type}"
+                assert "comment" not in rel_type.lower(), (
+                    f"Comment relationship should be removed: {rel_type}"
+                )
 
         output_path.unlink()
 
@@ -134,9 +140,9 @@ def test_delete_all_comments_removes_comment_content_types() -> None:
             for override in ct_tree:
                 if override.tag == f"{{{ct_ns}}}Override":
                     part_name = override.get("PartName")
-                    assert (
-                        "comment" not in part_name.lower()
-                    ), f"Comment content type should be removed: {part_name}"
+                    assert "comment" not in part_name.lower(), (
+                        f"Comment content type should be removed: {part_name}"
+                    )
 
         output_path.unlink()
 
@@ -189,9 +195,9 @@ def test_delete_all_comments_complete_cleanup() -> None:
             file_list = docx.namelist()
 
             # No comment files
-            assert not any(
-                "comment" in f.lower() for f in file_list
-            ), "No comment-related files should exist"
+            assert not any("comment" in f.lower() for f in file_list), (
+                "No comment-related files should exist"
+            )
 
             # No comment relationships
             rels_content = docx.read("word/_rels/document.xml.rels")

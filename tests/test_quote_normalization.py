@@ -22,8 +22,22 @@ from docx_redline.quote_normalization import (
 
 
 def create_test_document(text: str) -> Path:
-    """Create a simple test document with given text."""
+    """Create a simple but valid test document with given text."""
     doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    # Proper Content_Types.xml
+    content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    # Proper relationships file
+    rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
 
     document_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -33,9 +47,9 @@ def create_test_document(text: str) -> Path:
 </w:document>"""
 
     with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types)
+        docx.writestr("_rels/.rels", rels)
         docx.writestr("word/document.xml", document_xml)
-        docx.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
-        docx.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
 
     return doc_path
 
@@ -400,6 +414,20 @@ def test_normalization_with_scope() -> None:
     """Quote normalization works with scope filtering."""
     doc_path = Path(tempfile.mktemp(suffix=".docx"))
 
+    # Proper Content_Types.xml
+    content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    # Proper relationships file
+    rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
     document_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
 <w:body>
@@ -417,9 +445,9 @@ def test_normalization_with_scope() -> None:
 </w:document>"""
 
     with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types)
+        docx.writestr("_rels/.rels", rels)
         docx.writestr("word/document.xml", document_xml)
-        docx.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
-        docx.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
 
     try:
         doc = Document(doc_path)

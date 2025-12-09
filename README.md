@@ -67,11 +67,17 @@ doc.save("contract_edited.docx")
 - ✅ **Enterprise-ready** - changes appear with complete user profile in Word
 - ✅ **Backward compatible** - simple string author names still supported
 
+**Phase 5 - Context-Aware Editing:**
+- ✅ **Context preview** - see text before/after matches to verify correctness
+- ✅ **Fragment detection** - automatic warnings for potential sentence fragments
+- ✅ **Smart heuristics** - detects lowercase starts, connecting phrases, continuation punctuation
+- ✅ **Helpful suggestions** - actionable guidance when issues detected
+
 **General:**
 - ✅ **Batch operations** - apply multiple edits efficiently
 - ✅ **YAML/JSON support** - define edits in configuration files
 - ✅ **Type hints** - full type annotation support
-- ✅ **Thoroughly tested** - 200 tests with 92% coverage
+- ✅ **Thoroughly tested** - 270 tests with 77% coverage
 
 ## Installation
 
@@ -259,6 +265,76 @@ doc.save("contract_edited.docx")
 - Better audit trail for enterprise environments
 - Integrates with Office 365 user directory
 - Backward compatible - simple string author names still work
+
+### Context-Aware Editing (Phase 5)
+
+Prevent sentence fragments and verify replacements with context preview and automatic fragment detection:
+
+```python
+import warnings
+from docx_redline import Document, ContinuityWarning
+
+doc = Document("contract.docx")
+
+# Preview context before/after replacement
+doc.replace_tracked(
+    find="old text",
+    replace="new text",
+    show_context=True,       # Show surrounding text
+    context_chars=100        # Characters to show before/after
+)
+
+# Output shows:
+# ================================================================================
+# CONTEXT PREVIEW
+# ================================================================================
+#
+# BEFORE (78 chars):
+#   '...The Buyer shall have the right to terminate this Agreement within'
+#
+# MATCH (8 chars):
+#   'old text'
+#
+# AFTER (79 chars):
+#   'of the Effective Date by providing written notice to the Seller...'
+#
+# REPLACEMENT (8 chars):
+#   'new text'
+# ================================================================================
+
+# Enable automatic fragment detection
+warnings.simplefilter("always")  # Enable warnings
+
+doc.replace_tracked(
+    find="The product in Vrdolyak was an attorney directory.",
+    replace="BatchLeads is different.",
+    check_continuity=True    # Warn about potential fragments
+)
+
+# If next text is " in question here is property data.", warns:
+# ContinuityWarning: Next text starts with connecting phrase 'in question'
+#   • Include more context in your replacement text
+#   • Adjust the 'find' text to include the connecting phrase
+#   • Review the following text to ensure grammatical correctness
+
+# Use both features together
+doc.replace_tracked(
+    find="complex legal text",
+    replace="simplified version",
+    show_context=True,
+    check_continuity=True,
+    context_chars=100
+)
+
+doc.save("contract_edited.docx")
+```
+
+**Fragment Detection:**
+- Detects lowercase starts: " in question here..." → warns about fragment
+- Detects connecting phrases: " of which", " that is", " wherein", etc.
+- Detects continuation punctuation: ", and...", "; however...", etc.
+
+See [Context-Awareness Guide](docs/CONTEXT_AWARENESS_GUIDE.md) for detailed usage.
 
 ### Using Scopes
 

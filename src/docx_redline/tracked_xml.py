@@ -165,6 +165,126 @@ class TrackedXMLGenerator:
         """
         return "".join(random.choices("0123456789ABCDEF", k=8))
 
+    def create_move_from(
+        self,
+        text: str,
+        move_name: str,
+        author: str | None = None,
+    ) -> tuple[str, int, int]:
+        """Generate moveFrom XML for the source location of a move.
+
+        Creates the complete moveFrom container including:
+        - moveFromRangeStart with unique ID and move name
+        - moveFrom with the moved text
+        - moveFromRangeEnd
+
+        Args:
+            text: The text being moved
+            move_name: Name linking source to destination (e.g., "move1")
+            author: Override author (uses default if None)
+
+        Returns:
+            Tuple of (XML string, range_id, move_id)
+        """
+        author = author if author is not None else self.author
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Generate unique IDs for range markers and move element
+        range_id = self.next_change_id
+        self.next_change_id += 1
+        move_id = self.next_change_id
+        self.next_change_id += 1
+
+        # Handle xml:space for leading/trailing whitespace
+        xml_space = (
+            ' xml:space="preserve"' if (text and (text[0].isspace() or text[-1].isspace())) else ""
+        )
+
+        # Escape XML special characters
+        escaped_text = self._escape_xml(text)
+
+        # Build MS365 identity attributes if available
+        identity_attrs = ""
+        if self._author_identity:
+            if self._author_identity.guid:
+                identity_attrs += f' w15:userId="{self._author_identity.guid}"'
+            identity_attrs += f' w15:providerId="{self._author_identity.provider_id}"'
+
+        # Generate the OOXML for moveFrom container
+        xml = (
+            f'<w:moveFromRangeStart w:id="{range_id}" w:name="{move_name}" '
+            f'w:author="{author}" w:date="{timestamp}"/>\n'
+            f'<w:moveFrom w:id="{move_id}" w:author="{author}" '
+            f'w:date="{timestamp}"{identity_attrs}>\n'
+            f'  <w:r w:rsidDel="{self.rsid}">\n'
+            f"    <w:delText{xml_space}>{escaped_text}</w:delText>\n"
+            f"  </w:r>\n"
+            f"</w:moveFrom>\n"
+            f'<w:moveFromRangeEnd w:id="{range_id}"/>'
+        )
+
+        return xml, range_id, move_id
+
+    def create_move_to(
+        self,
+        text: str,
+        move_name: str,
+        author: str | None = None,
+    ) -> tuple[str, int, int]:
+        """Generate moveTo XML for the destination location of a move.
+
+        Creates the complete moveTo container including:
+        - moveToRangeStart with unique ID and move name
+        - moveTo with the moved text
+        - moveToRangeEnd
+
+        Args:
+            text: The text being moved
+            move_name: Name linking source to destination (must match moveFrom)
+            author: Override author (uses default if None)
+
+        Returns:
+            Tuple of (XML string, range_id, move_id)
+        """
+        author = author if author is not None else self.author
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Generate unique IDs for range markers and move element
+        range_id = self.next_change_id
+        self.next_change_id += 1
+        move_id = self.next_change_id
+        self.next_change_id += 1
+
+        # Handle xml:space for leading/trailing whitespace
+        xml_space = (
+            ' xml:space="preserve"' if (text and (text[0].isspace() or text[-1].isspace())) else ""
+        )
+
+        # Escape XML special characters
+        escaped_text = self._escape_xml(text)
+
+        # Build MS365 identity attributes if available
+        identity_attrs = ""
+        if self._author_identity:
+            if self._author_identity.guid:
+                identity_attrs += f' w15:userId="{self._author_identity.guid}"'
+            identity_attrs += f' w15:providerId="{self._author_identity.provider_id}"'
+
+        # Generate the OOXML for moveTo container
+        xml = (
+            f'<w:moveToRangeStart w:id="{range_id}" w:name="{move_name}" '
+            f'w:author="{author}" w:date="{timestamp}"/>\n'
+            f'<w:moveTo w:id="{move_id}" w:author="{author}" '
+            f'w:date="{timestamp}"{identity_attrs}>\n'
+            f'  <w:r w:rsidR="{self.rsid}">\n'
+            f"    <w:t{xml_space}>{escaped_text}</w:t>\n"
+            f"  </w:r>\n"
+            f"</w:moveTo>\n"
+            f'<w:moveToRangeEnd w:id="{range_id}"/>'
+        )
+
+        return xml, range_id, move_id
+
     @staticmethod
     def _get_max_change_id(doc: Any) -> int:
         """Find the maximum change ID in the document.

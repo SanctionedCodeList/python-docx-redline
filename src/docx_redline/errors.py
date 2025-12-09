@@ -84,6 +84,43 @@ class ValidationError(DocxRedlineError):
     - The document structure is invalid
     - Required OOXML elements are missing
     - The document cannot be opened or saved
+
+    Attributes:
+        errors: List of specific validation error messages (optional)
     """
 
-    pass
+    def __init__(self, message: str, errors: list[str] | None = None) -> None:
+        self.errors = errors or []
+        super().__init__(message)
+
+
+class ContinuityWarning(UserWarning):
+    """Warning raised when text replacement may create a sentence fragment.
+
+    This warning is raised when check_continuity=True in replace_tracked()
+    and the text immediately following the replacement suggests a potential
+    grammatical issue (e.g., sentence fragment, disconnected clause).
+
+    Attributes:
+        message: Description of the potential continuity issue
+        next_text: The text immediately following the replacement
+        suggestions: List of suggestions for fixing the issue
+    """
+
+    def __init__(self, message: str, next_text: str, suggestions: list[str] | None = None) -> None:
+        self.message = message
+        self.next_text = next_text
+        self.suggestions = suggestions or []
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        """Format a helpful warning message with suggestions."""
+        msg = f"{self.message}\n"
+        msg += f"Next text begins with: {repr(self.next_text[:50])}\n"
+
+        if self.suggestions:
+            msg += "\nSuggestions:\n"
+            for suggestion in self.suggestions:
+                msg += f"  • {suggestion}\n"
+
+        return msg

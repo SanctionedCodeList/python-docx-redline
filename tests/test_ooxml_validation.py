@@ -22,8 +22,22 @@ XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 
 
 def create_test_document() -> Path:
-    """Create a simple test document."""
+    """Create a simple but valid test document with proper OOXML structure."""
     doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    # Proper Content_Types.xml
+    content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    # Proper relationships file
+    rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
 
     document_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
@@ -34,9 +48,9 @@ def create_test_document() -> Path:
 </w:document>"""
 
     with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types)
+        docx.writestr("_rels/.rels", rels)
         docx.writestr("word/document.xml", document_xml)
-        docx.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
-        docx.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
 
     return doc_path
 
@@ -57,26 +71,24 @@ def validate_xml_wellformed(doc: Document) -> tuple[bool, str]:
 
 
 def validate_whitespace_preservation(doc: Document) -> tuple[bool, list[str]]:
-    """
-    Validate that w:t elements with leading/trailing whitespace have xml:space='preserve'.
+    """Validate whitespace preservation (same logic as DOCXSchemaValidator)."""
+    import re
 
-    From: ~/.agents/.../docx/ooxml/scripts/validation/docx.py:validate_whitespace_preservation
-    """
     errors = []
-    root = get_document_xml(doc)
+    root = doc.xml_root
 
     # Find all w:t elements
     for elem in root.iter(f"{{{WORD_NAMESPACE}}}t"):
         if elem.text:
             text = elem.text
             # Check if text starts or ends with whitespace
-            if text.startswith((" ", "\t", "\n")) or text.endswith((" ", "\t", "\n")):
+            if re.match(r"^\s.*", text) or re.match(r".*\s$", text):
                 # Check if xml:space="preserve" attribute exists
                 xml_space_attr = f"{{{XML_NAMESPACE}}}space"
                 if xml_space_attr not in elem.attrib or elem.attrib[xml_space_attr] != "preserve":
                     text_preview = repr(text)[:50] + "..." if len(repr(text)) > 50 else repr(text)
                     errors.append(
-                        f"Line {elem.sourceline}: w:t element with whitespace "
+                        f"Line {elem.sourceline}: <w:t> element with whitespace "
                         f"missing xml:space='preserve': {text_preview}"
                     )
 
@@ -84,14 +96,9 @@ def validate_whitespace_preservation(doc: Document) -> tuple[bool, list[str]]:
 
 
 def validate_deletion_structure(doc: Document) -> tuple[bool, list[str]]:
-    """
-    Validate that w:t elements are NOT within w:del elements.
-    Deletions must use w:delText, not w:t.
-
-    From: ~/.agents/.../docx/ooxml/scripts/validation/docx.py:validate_deletions
-    """
+    """Validate deletion structure (same logic as DOCXSchemaValidator)."""
     errors = []
-    root = get_document_xml(doc)
+    root = doc.xml_root
 
     # Find all w:t elements that are descendants of w:del elements
     namespaces = {"w": WORD_NAMESPACE}
@@ -104,20 +111,17 @@ def validate_deletion_structure(doc: Document) -> tuple[bool, list[str]]:
                 repr(t_elem.text)[:50] + "..." if len(repr(t_elem.text)) > 50 else repr(t_elem.text)
             )
             errors.append(
-                f"Line {t_elem.sourceline}: <w:t> found within <w:del> (should be <w:delText>): {text_preview}"
+                f"Line {t_elem.sourceline}: <w:t> found within <w:del> "
+                f"(should be <w:delText>): {text_preview}"
             )
 
     return (len(errors) == 0, errors)
 
 
 def validate_insertion_structure(doc: Document) -> tuple[bool, list[str]]:
-    """
-    Validate that w:delText elements are NOT within w:ins elements (unless nested in w:del).
-
-    From: ~/.agents/.../docx/ooxml/scripts/validation/docx.py:validate_insertions
-    """
+    """Validate insertion structure (same logic as DOCXSchemaValidator)."""
     errors = []
-    root = get_document_xml(doc)
+    root = doc.xml_root
     namespaces = {"w": WORD_NAMESPACE}
 
     # Find w:delText in w:ins that are NOT within w:del
@@ -367,6 +371,162 @@ def test_empty_string_whitespace_handling() -> None:
 
         valid_ws, ws_errors = validate_whitespace_preservation(doc)
         assert valid_ws, "Whitespace preservation errors:\n" + "\n".join(ws_errors)
+
+    finally:
+        doc_path.unlink()
+
+
+def test_save_validates_document() -> None:
+    """Test that save() validates the document and raises informative errors."""
+
+    doc_path = create_test_document()
+    output_path = Path(tempfile.mktemp(suffix=".docx"))
+    try:
+        doc = Document(doc_path)
+        doc.insert_tracked(" text with leading space", after="test")
+
+        # save() should validate and succeed for valid documents
+        doc.save(output_path)
+        assert output_path.exists()
+
+        # Verify saved document can be loaded
+        loaded_doc = Document(output_path)
+        assert "text with leading space" in loaded_doc.get_text()
+
+    finally:
+        doc_path.unlink()
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_save_raises_informative_validation_error() -> None:
+    """Test that save() raises ValidationError with detailed error list for bug reports."""
+    from docx_redline.validation import ValidationError
+
+    doc_path = create_test_document()
+    output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    try:
+        doc = Document(doc_path)
+
+        # Manually corrupt the document by creating invalid structure
+        # Add a w:t element directly within a w:del (should be w:delText)
+        root = doc.xml_root
+        para = root.find(f".//{{{WORD_NAMESPACE}}}p")
+        if para is not None:
+            # Create invalid structure: w:del with w:t instead of w:delText
+            del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
+            run_elem = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+            t_elem = etree.Element(f"{{{WORD_NAMESPACE}}}t")
+            t_elem.text = "invalid deletion"
+            run_elem.append(t_elem)
+            del_elem.append(run_elem)
+            para.append(del_elem)
+
+            # Attempt to save should raise ValidationError
+            try:
+                doc.save(output_path)
+                assert False, "save() should have raised ValidationError for invalid structure"
+            except ValidationError as e:
+                # Verify error has informative message
+                error_str = str(e)
+                assert "validation failed" in error_str.lower()
+                assert "bug" in error_str.lower()  # Mentions reporting as bug
+                assert hasattr(e, "errors"), "ValidationError should have errors list"
+                assert len(e.errors) > 0, "ValidationError should include specific errors"
+                # Verify the specific error is in the list
+                assert any("<w:t> found within <w:del>" in err for err in e.errors)
+
+    finally:
+        doc_path.unlink()
+        if output_path.exists():
+            output_path.unlink()
+
+
+def test_validation_case_insensitive_customxml_paths() -> None:
+    """Test that validation handles case-insensitive customXml vs customXML paths.
+
+    Microsoft Word sometimes creates documents with inconsistent casing in paths,
+    especially for customXml directories. The validation should tolerate this.
+
+    See: docs/issues/ISSUE_CUSTOMXML_CASE_SENSITIVITY.md
+    """
+    from docx_redline.validation_base import BaseSchemaValidator
+
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    # Create a document with case mismatch: reference to /customXML/ but file at customXml/
+    content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+<Override PartName="/customXml/item1.xml" ContentType="application/vnd.openxmlformats-officedocument.customXml+xml"/>
+<Override PartName="/customXml/itemProps1.xml" ContentType="application/vnd.openxmlformats-officedocument.customXmlProperties+xml"/>
+</Types>"""
+
+    rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    # Reference with uppercase customXML but file will be at lowercase customXml
+    word_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml" Target="../customXML/item1.xml"/>
+</Relationships>"""
+
+    # customXml items have their own rels file that references itemProps with case mismatch
+    custom_xml_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemProps1.xml"/>
+</Relationships>"""
+
+    document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body><w:p><w:r><w:t>Test document with customXml.</w:t></w:r></w:p></w:body>
+</w:document>"""
+
+    custom_xml_item = """<?xml version="1.0" encoding="UTF-8"?>
+<root>Custom data</root>"""
+
+    custom_xml_props = """<?xml version="1.0" encoding="UTF-8"?>
+<ds:datastoreItem xmlns:ds="http://schemas.openxmlformats.org/officeDocument/2006/customXml" ds:itemID="{12345678-1234-1234-1234-123456789012}">
+<ds:schemaRefs/>
+</ds:datastoreItem>"""
+
+    with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types)
+        docx.writestr("_rels/.rels", rels)
+        docx.writestr("word/document.xml", document_xml)
+        docx.writestr("word/_rels/document.xml.rels", word_rels)
+        # Files at lowercase path, but referenced with uppercase
+        docx.writestr("customXml/item1.xml", custom_xml_item)
+        docx.writestr("customXml/_rels/item1.xml.rels", custom_xml_rels)
+        docx.writestr("customXml/itemProps1.xml", custom_xml_props)
+
+    try:
+        # Extract and validate
+        with tempfile.TemporaryDirectory() as unpack_dir:
+            unpack_path = Path(unpack_dir)
+            with zipfile.ZipFile(doc_path, "r") as zip_ref:
+                zip_ref.extractall(unpack_path)
+
+            # Create a minimal validator subclass for testing
+            class TestValidator(BaseSchemaValidator):
+                def validate(self):
+                    return self.validate_file_references()
+
+            validator = TestValidator(
+                unpacked_dir=unpack_path, original_file=doc_path, verbose=False
+            )
+
+            # This should pass due to case-insensitive matching
+            result = validator.validate_file_references()
+            assert result, (
+                "validate_file_references() should pass with case-insensitive matching "
+                "for customXml vs customXML paths"
+            )
 
     finally:
         doc_path.unlink()

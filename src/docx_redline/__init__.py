@@ -21,6 +21,7 @@ __all__ = [
     "TextNotFoundError",
     "AmbiguousTextError",
     "ValidationError",
+    "ContinuityWarning",
     "TextSearch",
     "TextSpan",
     "TrackedXMLGenerator",
@@ -31,6 +32,8 @@ __all__ = [
     "RejectResult",
     "Paragraph",
     "Section",
+    "Comment",
+    "CommentRange",
 ]
 
 # Import author identity
@@ -41,12 +44,14 @@ from .author import AuthorIdentity
 from .document import Document
 from .errors import (
     AmbiguousTextError,
+    ContinuityWarning,
     DocxRedlineError,
     TextNotFoundError,
     ValidationError,
 )
 
 # Import model classes
+from .models.comment import Comment, CommentRange
 from .models.paragraph import Paragraph
 from .models.section import Section
 
