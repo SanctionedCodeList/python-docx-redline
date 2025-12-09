@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from docx_redline.models.comment import Comment
+    from docx_redline.models.footnote import Endnote, Footnote
     from docx_redline.models.paragraph import Paragraph
     from docx_redline.models.section import Section
     from docx_redline.models.table import Table, TableRow
@@ -4558,6 +4559,585 @@ class Document:
         else:
             # Insert at the end
             body.append(new_para)
+
+    # ========================================================================
+    # FOOTNOTE / ENDNOTE METHODS
+    # ========================================================================
+
+    @property
+    def footnotes(self) -> list["Footnote"]:
+        """Get all footnotes in the document.
+
+        Returns:
+            List of Footnote objects
+        """
+        from docx_redline.models.footnote import Footnote
+
+        if not self._temp_dir:
+            return []
+
+        footnotes_path = self._temp_dir / "word" / "footnotes.xml"
+        if not footnotes_path.exists():
+            return []
+
+        tree = etree.parse(str(footnotes_path))
+        root = tree.getroot()
+
+        # Find all footnote elements
+        footnote_elems = root.findall(f"{{{WORD_NAMESPACE}}}footnote")
+
+        # Filter out special footnotes (separator, continuationSeparator)
+        # These have type attribute and IDs -1, 0, etc.
+        return [
+            Footnote(elem, self)
+            for elem in footnote_elems
+            if elem.get(f"{{{WORD_NAMESPACE}}}type") is None
+        ]
+
+    @property
+    def endnotes(self) -> list["Endnote"]:
+        """Get all endnotes in the document.
+
+        Returns:
+            List of Endnote objects
+        """
+        from docx_redline.models.footnote import Endnote
+
+        if not self._temp_dir:
+            return []
+
+        endnotes_path = self._temp_dir / "word" / "endnotes.xml"
+        if not endnotes_path.exists():
+            return []
+
+        tree = etree.parse(str(endnotes_path))
+        root = tree.getroot()
+
+        # Find all endnote elements
+        endnote_elems = root.findall(f"{{{WORD_NAMESPACE}}}endnote")
+
+        # Filter out special endnotes (separator, continuationSeparator)
+        return [
+            Endnote(elem, self)
+            for elem in endnote_elems
+            if elem.get(f"{{{WORD_NAMESPACE}}}type") is None
+        ]
+
+    def insert_footnote(
+        self,
+        text: str,
+        at: str,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+    ) -> int:
+        """Insert a footnote reference at specific text location.
+
+        Args:
+            text: The footnote text content
+            at: Text to search for where footnote reference should be inserted
+            author: Optional author (uses document author if None)
+            scope: Optional scope to limit search
+
+        Returns:
+            The footnote ID
+
+        Raises:
+            TextNotFoundError: If 'at' text not found
+            AmbiguousTextError: If multiple occurrences of 'at' text found
+
+        Example:
+            >>> doc.insert_footnote("See Smith (2020) for details", at="original study")
+        """
+        if not self._is_zip or not self._temp_dir:
+            raise ValueError("Cannot add footnotes to non-ZIP documents")
+
+        author_name = author if author is not None else self.author
+
+        # Find location for footnote reference
+        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        matches = self._text_search.find_text(at, paragraphs)
+
+        if not matches:
+            raise TextNotFoundError(at, scope)
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(at, matches)
+
+        match = matches[0]
+
+        # Generate new footnote ID
+        footnote_id = self._get_next_footnote_id()
+
+        # Add footnote content to footnotes.xml
+        self._add_footnote_to_xml(footnote_id, text, author_name)
+
+        # Insert footnote reference in document
+        self._insert_footnote_reference(match, footnote_id)
+
+        return footnote_id
+
+    def insert_endnote(
+        self,
+        text: str,
+        at: str,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+    ) -> int:
+        """Insert an endnote reference at specific text location.
+
+        Args:
+            text: The endnote text content
+            at: Text to search for where endnote reference should be inserted
+            author: Optional author (uses document author if None)
+            scope: Optional scope to limit search
+
+        Returns:
+            The endnote ID
+
+        Raises:
+            TextNotFoundError: If 'at' text not found
+            AmbiguousTextError: If multiple occurrences of 'at' text found
+
+        Example:
+            >>> doc.insert_endnote("Additional details here", at="main conclusion")
+        """
+        if not self._is_zip or not self._temp_dir:
+            raise ValueError("Cannot add endnotes to non-ZIP documents")
+
+        author_name = author if author is not None else self.author
+
+        # Find location for endnote reference
+        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        matches = self._text_search.find_text(at, paragraphs)
+
+        if not matches:
+            raise TextNotFoundError(at, scope)
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(at, matches)
+
+        match = matches[0]
+
+        # Generate new endnote ID
+        endnote_id = self._get_next_endnote_id()
+
+        # Add endnote content to endnotes.xml
+        self._add_endnote_to_xml(endnote_id, text, author_name)
+
+        # Insert endnote reference in document
+        self._insert_endnote_reference(match, endnote_id)
+
+        return endnote_id
+
+    def _get_next_footnote_id(self) -> int:
+        """Get the next available footnote ID.
+
+        Returns:
+            Integer ID for new footnote
+        """
+        footnotes_path = self._temp_dir / "word" / "footnotes.xml"
+
+        if not footnotes_path.exists():
+            return 1
+
+        tree = etree.parse(str(footnotes_path))
+        root = tree.getroot()
+
+        # Find all footnote IDs
+        footnote_elems = root.findall(f"{{{WORD_NAMESPACE}}}footnote")
+        ids = []
+
+        for elem in footnote_elems:
+            id_str = elem.get(f"{{{WORD_NAMESPACE}}}id")
+            if id_str:
+                try:
+                    ids.append(int(id_str))
+                except ValueError:
+                    pass
+
+        return max(ids) + 1 if ids else 1
+
+    def _get_next_endnote_id(self) -> int:
+        """Get the next available endnote ID.
+
+        Returns:
+            Integer ID for new endnote
+        """
+        endnotes_path = self._temp_dir / "word" / "endnotes.xml"
+
+        if not endnotes_path.exists():
+            return 1
+
+        tree = etree.parse(str(endnotes_path))
+        root = tree.getroot()
+
+        # Find all endnote IDs
+        endnote_elems = root.findall(f"{{{WORD_NAMESPACE}}}endnote")
+        ids = []
+
+        for elem in endnote_elems:
+            id_str = elem.get(f"{{{WORD_NAMESPACE}}}id")
+            if id_str:
+                try:
+                    ids.append(int(id_str))
+                except ValueError:
+                    pass
+
+        return max(ids) + 1 if ids else 1
+
+    def _add_footnote_to_xml(self, footnote_id: int, text: str, author: str) -> None:
+        """Add a footnote to footnotes.xml, creating the file if needed.
+
+        Args:
+            footnote_id: The footnote ID
+            text: Footnote text content
+            author: Author name (for tracking if needed)
+        """
+        footnotes_path = self._temp_dir / "word" / "footnotes.xml"
+
+        # Load or create footnotes.xml
+        if footnotes_path.exists():
+            footnotes_tree = etree.parse(str(footnotes_path))
+            footnotes_root = footnotes_tree.getroot()
+        else:
+            # Create new footnotes.xml with separators
+            footnotes_root = etree.Element(
+                f"{{{WORD_NAMESPACE}}}footnotes",
+                nsmap={"w": WORD_NAMESPACE},
+            )
+            footnotes_tree = etree.ElementTree(footnotes_root)
+
+            # Add standard footnote separators (required by Word)
+            # Separator (ID -1)
+            sep = etree.SubElement(footnotes_root, f"{{{WORD_NAMESPACE}}}footnote")
+            sep.set(f"{{{WORD_NAMESPACE}}}id", "-1")
+            sep.set(f"{{{WORD_NAMESPACE}}}type", "separator")
+            sep_p = etree.SubElement(sep, f"{{{WORD_NAMESPACE}}}p")
+            sep_r = etree.SubElement(sep_p, f"{{{WORD_NAMESPACE}}}r")
+            etree.SubElement(sep_r, f"{{{WORD_NAMESPACE}}}separator")
+
+            # Continuation separator (ID 0)
+            cont_sep = etree.SubElement(footnotes_root, f"{{{WORD_NAMESPACE}}}footnote")
+            cont_sep.set(f"{{{WORD_NAMESPACE}}}id", "0")
+            cont_sep.set(f"{{{WORD_NAMESPACE}}}type", "continuationSeparator")
+            cont_sep_p = etree.SubElement(cont_sep, f"{{{WORD_NAMESPACE}}}p")
+            cont_sep_r = etree.SubElement(cont_sep_p, f"{{{WORD_NAMESPACE}}}r")
+            etree.SubElement(cont_sep_r, f"{{{WORD_NAMESPACE}}}continuationSeparator")
+
+            # Need to add relationship and content type
+            self._ensure_footnotes_relationship()
+            self._ensure_footnotes_content_type()
+
+        # Create footnote element
+        footnote_elem = etree.SubElement(footnotes_root, f"{{{WORD_NAMESPACE}}}footnote")
+        footnote_elem.set(f"{{{WORD_NAMESPACE}}}id", str(footnote_id))
+
+        # Add paragraph with text
+        para = etree.SubElement(footnote_elem, f"{{{WORD_NAMESPACE}}}p")
+        run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+        t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+        t.text = text
+
+        # Write footnotes.xml
+        footnotes_tree.write(
+            str(footnotes_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
+
+    def _add_endnote_to_xml(self, endnote_id: int, text: str, author: str) -> None:
+        """Add an endnote to endnotes.xml, creating the file if needed.
+
+        Args:
+            endnote_id: The endnote ID
+            text: Endnote text content
+            author: Author name (for tracking if needed)
+        """
+        endnotes_path = self._temp_dir / "word" / "endnotes.xml"
+
+        # Load or create endnotes.xml
+        if endnotes_path.exists():
+            endnotes_tree = etree.parse(str(endnotes_path))
+            endnotes_root = endnotes_tree.getroot()
+        else:
+            # Create new endnotes.xml with separators
+            endnotes_root = etree.Element(
+                f"{{{WORD_NAMESPACE}}}endnotes",
+                nsmap={"w": WORD_NAMESPACE},
+            )
+            endnotes_tree = etree.ElementTree(endnotes_root)
+
+            # Add standard endnote separators
+            sep = etree.SubElement(endnotes_root, f"{{{WORD_NAMESPACE}}}endnote")
+            sep.set(f"{{{WORD_NAMESPACE}}}id", "-1")
+            sep.set(f"{{{WORD_NAMESPACE}}}type", "separator")
+            sep_p = etree.SubElement(sep, f"{{{WORD_NAMESPACE}}}p")
+            sep_r = etree.SubElement(sep_p, f"{{{WORD_NAMESPACE}}}r")
+            etree.SubElement(sep_r, f"{{{WORD_NAMESPACE}}}separator")
+
+            cont_sep = etree.SubElement(endnotes_root, f"{{{WORD_NAMESPACE}}}endnote")
+            cont_sep.set(f"{{{WORD_NAMESPACE}}}id", "0")
+            cont_sep.set(f"{{{WORD_NAMESPACE}}}type", "continuationSeparator")
+            cont_sep_p = etree.SubElement(cont_sep, f"{{{WORD_NAMESPACE}}}p")
+            cont_sep_r = etree.SubElement(cont_sep_p, f"{{{WORD_NAMESPACE}}}r")
+            etree.SubElement(cont_sep_r, f"{{{WORD_NAMESPACE}}}continuationSeparator")
+
+            # Need to add relationship and content type
+            self._ensure_endnotes_relationship()
+            self._ensure_endnotes_content_type()
+
+        # Create endnote element
+        endnote_elem = etree.SubElement(endnotes_root, f"{{{WORD_NAMESPACE}}}endnote")
+        endnote_elem.set(f"{{{WORD_NAMESPACE}}}id", str(endnote_id))
+
+        # Add paragraph with text
+        para = etree.SubElement(endnote_elem, f"{{{WORD_NAMESPACE}}}p")
+        run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+        t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+        t.text = text
+
+        # Write endnotes.xml
+        endnotes_tree.write(
+            str(endnotes_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
+
+    def _insert_footnote_reference(self, match: Any, footnote_id: int) -> None:
+        """Insert a footnote reference at the matched text location.
+
+        Args:
+            match: TextSpan object indicating where to insert
+            footnote_id: The footnote ID to reference
+        """
+        # Find the run where the match ends
+        end_run = match.runs[-1] if match.runs else None
+        if not end_run:
+            return
+
+        # Create a new run with the footnote reference
+        new_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+
+        # Add footnote reference
+        footnote_ref = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}footnoteReference")
+        footnote_ref.set(f"{{{WORD_NAMESPACE}}}id", str(footnote_id))
+
+        # Insert the new run after the last run of the match
+        parent = end_run.getparent()
+        index = list(parent).index(end_run)
+        parent.insert(index + 1, new_run)
+
+    def _insert_endnote_reference(self, match: Any, endnote_id: int) -> None:
+        """Insert an endnote reference at the matched text location.
+
+        Args:
+            match: TextSpan object indicating where to insert
+            endnote_id: The endnote ID to reference
+        """
+        # Find the run where the match ends
+        end_run = match.runs[-1] if match.runs else None
+        if not end_run:
+            return
+
+        # Create a new run with the endnote reference
+        new_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+
+        # Add endnote reference
+        endnote_ref = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}endnoteReference")
+        endnote_ref.set(f"{{{WORD_NAMESPACE}}}id", str(endnote_id))
+
+        # Insert the new run after the last run of the match
+        parent = end_run.getparent()
+        index = list(parent).index(end_run)
+        parent.insert(index + 1, new_run)
+
+    def _ensure_footnotes_relationship(self) -> None:
+        """Ensure footnotes.xml relationship exists in document.xml.rels."""
+        if not self._temp_dir:
+            return
+
+        rels_path = self._temp_dir / "word" / "_rels" / "document.xml.rels"
+        rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+        footnote_rel_type = (
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
+        )
+
+        # Ensure _rels directory exists
+        rels_dir = rels_path.parent
+        rels_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load or create rels file
+        if rels_path.exists():
+            tree = etree.parse(str(rels_path))
+            root = tree.getroot()
+        else:
+            root = etree.Element(
+                f"{{{rels_ns}}}Relationships",
+                nsmap={None: rels_ns},
+            )
+            tree = etree.ElementTree(root)
+
+        # Check if footnotes relationship already exists
+        for rel in root.findall(f"{{{rels_ns}}}Relationship"):
+            if rel.get("Type") == footnote_rel_type:
+                return  # Already exists
+
+        # Find next relationship ID
+        existing_ids = []
+        for rel in root.findall(f"{{{rels_ns}}}Relationship"):
+            rel_id = rel.get("Id", "")
+            if rel_id.startswith("rId"):
+                try:
+                    existing_ids.append(int(rel_id[3:]))
+                except ValueError:
+                    pass
+
+        next_id = max(existing_ids) + 1 if existing_ids else 1
+
+        # Add footnotes relationship
+        rel_elem = etree.SubElement(root, f"{{{rels_ns}}}Relationship")
+        rel_elem.set("Id", f"rId{next_id}")
+        rel_elem.set("Type", footnote_rel_type)
+        rel_elem.set("Target", "footnotes.xml")
+
+        # Write rels file
+        tree.write(
+            str(rels_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
+
+    def _ensure_endnotes_relationship(self) -> None:
+        """Ensure endnotes.xml relationship exists in document.xml.rels."""
+        if not self._temp_dir:
+            return
+
+        rels_path = self._temp_dir / "word" / "_rels" / "document.xml.rels"
+        rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
+        endnote_rel_type = (
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes"
+        )
+
+        # Ensure _rels directory exists
+        rels_dir = rels_path.parent
+        rels_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load or create rels file
+        if rels_path.exists():
+            tree = etree.parse(str(rels_path))
+            root = tree.getroot()
+        else:
+            root = etree.Element(
+                f"{{{rels_ns}}}Relationships",
+                nsmap={None: rels_ns},
+            )
+            tree = etree.ElementTree(root)
+
+        # Check if endnotes relationship already exists
+        for rel in root.findall(f"{{{rels_ns}}}Relationship"):
+            if rel.get("Type") == endnote_rel_type:
+                return  # Already exists
+
+        # Find next relationship ID
+        existing_ids = []
+        for rel in root.findall(f"{{{rels_ns}}}Relationship"):
+            rel_id = rel.get("Id", "")
+            if rel_id.startswith("rId"):
+                try:
+                    existing_ids.append(int(rel_id[3:]))
+                except ValueError:
+                    pass
+
+        next_id = max(existing_ids) + 1 if existing_ids else 1
+
+        # Add endnotes relationship
+        rel_elem = etree.SubElement(root, f"{{{rels_ns}}}Relationship")
+        rel_elem.set("Id", f"rId{next_id}")
+        rel_elem.set("Type", endnote_rel_type)
+        rel_elem.set("Target", "endnotes.xml")
+
+        # Write rels file
+        tree.write(
+            str(rels_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
+
+    def _ensure_footnotes_content_type(self) -> None:
+        """Ensure footnotes.xml content type exists in [Content_Types].xml."""
+        if not self._temp_dir:
+            return
+
+        content_types_path = self._temp_dir / "[Content_Types].xml"
+        ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+
+        footnotes_part_name = "/word/footnotes.xml"
+        footnotes_content_type = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"
+        )
+
+        tree = etree.parse(str(content_types_path))
+        root = tree.getroot()
+
+        # Check if already exists
+        for override in root.findall(f"{{{ct_ns}}}Override"):
+            if override.get("PartName") == footnotes_part_name:
+                return  # Already exists
+
+        # Add Override element
+        override_elem = etree.SubElement(root, f"{{{ct_ns}}}Override")
+        override_elem.set("PartName", footnotes_part_name)
+        override_elem.set("ContentType", footnotes_content_type)
+
+        # Write content types
+        tree.write(
+            str(content_types_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
+
+    def _ensure_endnotes_content_type(self) -> None:
+        """Ensure endnotes.xml content type exists in [Content_Types].xml."""
+        if not self._temp_dir:
+            return
+
+        content_types_path = self._temp_dir / "[Content_Types].xml"
+        ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+
+        endnotes_part_name = "/word/endnotes.xml"
+        endnotes_content_type = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"
+        )
+
+        tree = etree.parse(str(content_types_path))
+        root = tree.getroot()
+
+        # Check if already exists
+        for override in root.findall(f"{{{ct_ns}}}Override"):
+            if override.get("PartName") == endnotes_part_name:
+                return  # Already exists
+
+        # Add Override element
+        override_elem = etree.SubElement(root, f"{{{ct_ns}}}Override")
+        override_elem.set("PartName", endnotes_part_name)
+        override_elem.set("ContentType", endnotes_content_type)
+
+        # Write content types
+        tree.write(
+            str(content_types_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
 
     def __del__(self) -> None:
         """Clean up temporary directory on object destruction."""

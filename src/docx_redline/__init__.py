@@ -34,6 +34,8 @@ __all__ = [
     "Section",
     "Comment",
     "CommentRange",
+    "Footnote",
+    "Endnote",
 ]
 
 # Import author identity
@@ -52,6 +54,7 @@ from .errors import (
 
 # Import model classes
 from .models.comment import Comment, CommentRange
+from .models.footnote import Endnote, Footnote
 from .models.paragraph import Paragraph
 from .models.section import Section
 
