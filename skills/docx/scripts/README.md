@@ -18,18 +18,17 @@ Use these scripts only for:
 pip install defusedxml lxml
 ```
 
-## Schema Requirements
+## Schema Files
 
-The validation scripts (`ooxml/scripts/validation/`) require OOXML XSD schemas to be present at `ooxml/schemas/`. These schemas are not included due to their size.
+The OOXML XSD schemas are included in `ooxml/schemas/` (~1 MB):
+- `ISO-IEC29500-4_2016/` - ISO/IEC 29500-4:2016 schemas
+- `ecma/` - ECMA-376 schemas
+- `microsoft/` - Microsoft Office extension schemas
+- `mce/` - Markup Compatibility and Extensibility
 
-To use validation features, you'll need to:
-1. Download the OOXML schemas from the official sources
-2. Place them in `ooxml/schemas/` with this structure:
-   - `ISO-IEC29500-4_2016/` - ISO/IEC 29500-4:2016 schemas
-   - `ecma/` - ECMA-376 schemas
-   - `microsoft/` - Microsoft Office extension schemas
+These schemas are used by the validation scripts for XSD validation.
 
-Alternatively, use LibreOffice for validation:
+Alternatively, use LibreOffice for quick validation:
 ```bash
 soffice --headless --convert-to html:HTML document.docx
 # If conversion succeeds, the document is valid
@@ -62,7 +61,11 @@ ooxml/
 │       ├── base.py
 │       ├── docx.py
 │       └── redlining.py
-└── schemas/         # (not included - see above)
+└── schemas/         # OOXML XSD schemas (~1 MB)
+    ├── ISO-IEC29500-4_2016/
+    ├── ecma/
+    ├── microsoft/
+    └── mce/
 ```
 
 ## Basic Usage
