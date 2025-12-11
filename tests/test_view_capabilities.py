@@ -9,7 +9,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from docx_redline import Document, Paragraph, Section
+from python_docx_redline import Document, Paragraph, Section
 
 
 def create_document_with_sections() -> Path:

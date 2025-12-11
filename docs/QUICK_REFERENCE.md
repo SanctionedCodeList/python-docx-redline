@@ -8,7 +8,7 @@
 ## Basic Usage
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 # Open document
 doc = Document('file.docx', author="Your Name")
@@ -182,7 +182,7 @@ print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")
 ### From YAML File
 
 ```python
-from docx_redline import apply_edit_file
+from python_docx_redline import apply_edit_file
 
 results = apply_edit_file('edits.yaml')
 ```
@@ -229,7 +229,7 @@ doc.save('output.docx', validate=False)
 ### Text Not Found
 
 ```python
-from docx_redline.errors import TextNotFoundError
+from python_docx_redline.errors import TextNotFoundError
 
 try:
     doc.insert_tracked(" text", after="nonexistent")
@@ -240,7 +240,7 @@ except TextNotFoundError as e:
 ### Multiple Matches
 
 ```python
-from docx_redline.errors import AmbiguousTextError
+from python_docx_redline.errors import AmbiguousTextError
 
 try:
     doc.insert_tracked(" text", after="common")
@@ -414,7 +414,7 @@ doc.save()
 ### After (High-Level)
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document('file.docx', author="Name")
 doc.insert_tracked(" text", after="target")
@@ -426,7 +426,7 @@ doc.save('output.docx')
 ## Complete Example
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 # Open document
 doc = Document('motion.docx', author="Hancock, Parker")

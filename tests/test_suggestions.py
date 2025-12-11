@@ -7,7 +7,7 @@ text search issues.
 
 from lxml import etree
 
-from docx_redline import SuggestionGenerator
+from python_docx_redline import SuggestionGenerator
 
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 

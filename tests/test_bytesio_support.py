@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from docx_redline import Document
-from docx_redline.validation import ValidationError
+from python_docx_redline import Document
+from python_docx_redline.validation import ValidationError
 
 # Path to test fixtures
 FIXTURES_DIR = Path(__file__).parent / "fixtures"

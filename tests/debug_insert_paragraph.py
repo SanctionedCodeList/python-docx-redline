@@ -6,7 +6,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from docx_redline import Document
+from python_docx_redline import Document
 
 # Create minimal document
 doc_path = Path(tempfile.mktemp(suffix=".docx"))

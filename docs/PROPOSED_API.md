@@ -772,7 +772,7 @@ scope=my_scope
 ### Core Components
 
 ```
-docx_redline/
+python_docx_redline/
 ├── document.py          # High-level Document class
 ├── text_span.py         # TextSpan class for fragmentation handling
 ├── search.py            # Search and disambiguation logic
@@ -921,7 +921,7 @@ class AmbiguousTextError(Exception):
 ### Example 1: Simple Surgical Edits
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 # Open document
 doc = Document('motion.docx', author="Hancock, Parker")
@@ -1025,7 +1025,7 @@ edits:
 ```
 
 ```python
-from docx_redline import apply_edit_file
+from python_docx_redline import apply_edit_file
 
 results = apply_edit_file('surgical_edits.yaml')
 print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")

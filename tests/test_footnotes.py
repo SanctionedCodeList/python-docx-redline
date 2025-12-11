@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
-from docx_redline import Document
+from python_docx_redline import Document
 
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -336,7 +336,7 @@ class TestFootnoteEndnoteErrors:
 
     def test_insert_footnote_text_not_found(self):
         """Test footnote insertion with non-existent anchor text."""
-        from docx_redline import TextNotFoundError
+        from python_docx_redline import TextNotFoundError
 
         doc = Document(create_test_docx())
 
@@ -345,7 +345,7 @@ class TestFootnoteEndnoteErrors:
 
     def test_insert_endnote_text_not_found(self):
         """Test endnote insertion with non-existent anchor text."""
-        from docx_redline import TextNotFoundError
+        from python_docx_redline import TextNotFoundError
 
         doc = Document(create_test_docx())
 
@@ -354,7 +354,7 @@ class TestFootnoteEndnoteErrors:
 
     def test_insert_footnote_ambiguous_text(self):
         """Test footnote insertion with ambiguous anchor text."""
-        from docx_redline import AmbiguousTextError
+        from python_docx_redline import AmbiguousTextError
 
         # Create doc with duplicate text
         content = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>

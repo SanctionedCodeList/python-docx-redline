@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from lxml import etree
 
-from docx_redline.models.paragraph import WORD_NAMESPACE, Paragraph
+from python_docx_redline.models.paragraph import WORD_NAMESPACE, Paragraph
 
 if TYPE_CHECKING:
     pass

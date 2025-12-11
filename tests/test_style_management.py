@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
-from docx_redline.document import Document
+from python_docx_redline.document import Document
 
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -296,7 +296,7 @@ class TestCopyFormat:
         """Test copy_format when source text doesn't exist."""
         doc = Document(create_test_docx())
 
-        from docx_redline import TextNotFoundError
+        from python_docx_redline import TextNotFoundError
 
         with pytest.raises(TextNotFoundError):
             doc.copy_format("Nonexistent", "Target")

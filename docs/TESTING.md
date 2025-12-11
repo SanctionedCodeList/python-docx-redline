@@ -2,7 +2,7 @@
 
 ## Overview
 
-The docx_redline test suite provides comprehensive coverage of all core functionality with **168 tests achieving 92% code coverage**.
+The python_docx_redline test suite provides comprehensive coverage of all core functionality with **168 tests achieving 92% code coverage**.
 
 ## Test Organization
 
@@ -132,7 +132,7 @@ pytest tests/test_scope.py -v
 ### Run with Coverage
 
 ```bash
-pytest --cov=src/docx_redline --cov-report=html
+pytest --cov=src/python_docx_redline --cov-report=html
 ```
 
 View detailed coverage report: `open htmlcov/index.html`

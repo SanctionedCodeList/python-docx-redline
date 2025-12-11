@@ -1,6 +1,6 @@
 # Claude Code Project Guidelines
 
-This document provides instructions for AI agents (and developers) working on the `docx_redline` project.
+This document provides instructions for AI agents (and developers) working on the `python_docx_redline` project.
 
 ## Project Overview
 
@@ -81,10 +81,10 @@ ruff format .
 ruff check . --fix
 
 # Run tests with coverage
-pytest tests/ -v --cov=src/docx_redline --cov-report=term-missing
+pytest tests/ -v --cov=src/python_docx_redline --cov-report=term-missing
 
 # Ensure minimum 80% coverage
-pytest tests/ --cov=src/docx_redline --cov-fail-under=80
+pytest tests/ --cov=src/python_docx_redline --cov-fail-under=80
 
 # Type check (when mypy is configured)
 mypy src/
@@ -145,10 +145,10 @@ pytest tests/test_document.py -v
 pytest tests/test_document.py::test_insert_tracked_basic -v
 
 # Run with coverage
-pytest tests/ -v --cov=src/docx_redline --cov-report=term-missing
+pytest tests/ -v --cov=src/python_docx_redline --cov-report=term-missing
 
 # Run and show coverage in HTML
-pytest tests/ --cov=src/docx_redline --cov-report=html
+pytest tests/ --cov=src/python_docx_redline --cov-report=html
 open htmlcov/index.html
 ```
 
@@ -278,10 +278,10 @@ bd blocked
 ## Project Structure
 
 ```
-docx_redline/
+python_docx_redline/
 ├── .venv/                  # Virtual environment (created by uv)
 ├── src/
-│   └── docx_redline/      # Main package
+│   └── python_docx_redline/      # Main package
 │       ├── __init__.py
 │       ├── document.py    # Document class
 │       ├── text_search.py # Text search algorithm
@@ -347,7 +347,7 @@ pytest tests/ -v
 
 ### Tests Failing Due to Coverage Plugin
 
-If you see `error: unrecognized arguments: --cov=src/docx_redline`:
+If you see `error: unrecognized arguments: --cov=src/python_docx_redline`:
 
 ```bash
 # Ensure pytest-cov is installed

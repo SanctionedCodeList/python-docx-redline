@@ -15,7 +15,7 @@ The `delete_all_comments()` method only removed comment markers from `document.x
 
 ## Environment
 
-- **docx_redline version:** 0.1.0
+- **python_docx_redline version:** 0.1.0
 - **Python version:** 3.12
 - **Test document:** `2025-12-02_MTD_client_comments.docx`
 - **Operations:** `accept_all_changes()` followed by `delete_all_comments()`
@@ -27,7 +27,7 @@ The `delete_all_comments()` method only removed comment markers from `document.x
 ### 1. Create a document with comments and accept changes
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document("document_with_comments.docx")
 doc.accept_all_changes()
@@ -64,7 +64,7 @@ $ unzip -p clean.docx '[Content_Types].xml' | grep comment
 
 ### Original Implementation (BROKEN)
 
-The `delete_all_comments()` method (src/docx_redline/document.py:1075-1110) only:
+The `delete_all_comments()` method (src/python_docx_redline/document.py:1075-1110) only:
 
 1. ✅ Removed `<w:commentRangeStart>` markers from document.xml
 2. ✅ Removed `<w:commentRangeEnd>` markers from document.xml
@@ -134,7 +134,7 @@ def delete_all_comments(self) -> None:
 
 ### Files Changed
 
-**src/docx_redline/document.py** (lines 1075-1186)
+**src/python_docx_redline/document.py** (lines 1075-1186)
 - Extended `delete_all_comments()` to remove comment files
 - Extended `delete_all_comments()` to clean up relationships
 - Extended `delete_all_comments()` to clean up content types
@@ -227,7 +227,7 @@ This pattern should be applied to any similar cleanup operations (tracked change
 
 ## References
 
-- Fixed code: `src/docx_redline/document.py:1075-1186`
+- Fixed code: `src/python_docx_redline/document.py:1075-1186`
 - Test suite: `tests/test_delete_comments_fix.py`
 - Bug report document: `MTD_clean.docx` (orphaned comments example)
 - OOXML spec: ISO/IEC 29500 (Office Open XML File Formats)

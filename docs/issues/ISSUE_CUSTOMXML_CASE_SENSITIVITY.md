@@ -59,7 +59,7 @@ Add case-insensitive path matching in the validation logic, or add a `Document.r
 ## Environment
 
 - Source document: Microsoft 365 Word (web or desktop)
-- docx_redline version: current development
+- python_docx_redline version: current development
 - Date: 2024-12-08
 
 ## Resolution

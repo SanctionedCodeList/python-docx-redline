@@ -12,7 +12,7 @@ import warnings
 import zipfile
 from pathlib import Path
 
-from docx_redline import ContinuityWarning, Document
+from python_docx_redline import ContinuityWarning, Document
 
 
 def create_test_document(text: str) -> Path:

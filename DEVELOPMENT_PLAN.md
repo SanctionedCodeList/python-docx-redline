@@ -1,4 +1,4 @@
-# docx_redline Development Plan
+# python_docx_redline Development Plan
 
 ## Project Overview
 
@@ -11,7 +11,7 @@ A high-level Python API for editing Word documents with tracked changes, elimina
 ## Project Structure
 
 ```
-~/Projects/docx_redline/
+~/Projects/python_docx_redline/
 ├── docs/                        # Complete API specification (162 pages)
 │   ├── PROPOSED_API_README.md  # Executive summary
 │   ├── PROPOSED_API.md         # Full API spec (92 pages)
@@ -22,7 +22,7 @@ A high-level Python API for editing Word documents with tracked changes, elimina
 │   ├── simple_edits.yaml       # Basic contract edits
 │   └── citation_updates.yaml   # Batch citation updates
 ├── src/
-│   └── docx_redline/           # Main package (to be built)
+│   └── python_docx_redline/           # Main package (to be built)
 ├── tests/                       # Test suite (to be built)
 └── .beads/                      # Task tracking database
 ```
@@ -35,45 +35,45 @@ Build the core functionality to enable surgical document edits without writing X
 
 ### Critical Path
 
-1. **Setup** (docx_redline-vvi)
+1. **Setup** (python_docx_redline-vvi)
    - Package structure with pyproject.toml
    - Dependencies: lxml, python-dateutil, pyyaml
    - Modern Python packaging (Python 3.10+)
 
-2. **Foundation** (docx_redline-uj2)
+2. **Foundation** (python_docx_redline-uj2)
    - Custom exception classes with helpful error messages
    - Base for all error handling
 
-3. **Core Algorithm #1** (docx_redline-ye8) - **HIGH PRIORITY**
+3. **Core Algorithm #1** (python_docx_redline-ye8) - **HIGH PRIORITY**
    - Text search with fragmentation handling
    - This is THE critical piece that makes everything work
    - Algorithm: build character map across runs, find text, map back
 
-4. **Core Algorithm #2** (docx_redline-03e) - **HIGH PRIORITY**
+4. **Core Algorithm #2** (python_docx_redline-03e) - **HIGH PRIORITY**
    - TrackedXMLGenerator for insertions
    - Auto-generate <w:ins> XML with proper attributes
    - Handle timestamps, IDs, RSID, xml:space
 
-5. **Integration** (docx_redline-c3m)
+5. **Integration** (python_docx_redline-c3m)
    - Minimal Document class
    - Get ONE edit working end-to-end
    - Prove the concept
 
 6. **Expansion**
-   - TextSpan class (docx_redline-yk0)
-   - Scope system (docx_redline-klh)
-   - Replace/delete operations (docx_redline-b23)
-   - Error suggestions (docx_redline-wq7)
+   - TextSpan class (python_docx_redline-yk0)
+   - Scope system (python_docx_redline-klh)
+   - Replace/delete operations (python_docx_redline-b23)
+   - Error suggestions (python_docx_redline-wq7)
 
 7. **Batch Processing**
-   - apply_edits() (docx_redline-3dx)
-   - YAML support (docx_redline-lvb)
+   - apply_edits() (python_docx_redline-3dx)
+   - YAML support (python_docx_redline-lvb)
 
 8. **Utilities**
-   - accept_all_changes() (docx_redline-vtz)
+   - accept_all_changes() (python_docx_redline-vtz)
    - delete_all_comments()
 
-9. **Validation** (docx_redline-47a) - **HIGH PRIORITY**
+9. **Validation** (python_docx_redline-47a) - **HIGH PRIORITY**
    - Integration test with all 11 surgical edits
    - This is the success criteria
 
@@ -106,7 +106,7 @@ Build the core functionality to enable surgical document edits without writing X
 
 ## Next Actions
 
-1. Claim issue: `bd claim docx_redline-vvi` (Setup)
+1. Claim issue: `bd claim python_docx_redline-vvi` (Setup)
 2. Create package structure
 3. Move to core algorithms
 
@@ -121,7 +121,7 @@ Build the core functionality to enable surgical document edits without writing X
 ## Track Progress
 
 ```bash
-cd ~/Projects/docx_redline
+cd ~/Projects/python_docx_redline
 
 # See all issues
 bd list

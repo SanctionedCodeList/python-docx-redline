@@ -1,10 +1,10 @@
-# docx_redline
+# python_docx_redline
 
 A high-level Python API for editing Word documents with tracked changes.
 
-## Why docx_redline?
+## Why python_docx_redline?
 
-Making surgical edits to Word documents with tracked changes typically requires writing complex OOXML XML manipulation code. **docx_redline** reduces this from 30+ lines of raw XML to 3 lines of clean Python.
+Making surgical edits to Word documents with tracked changes typically requires writing complex OOXML XML manipulation code. **python_docx_redline** reduces this from 30+ lines of raw XML to 3 lines of clean Python.
 
 **Before** (raw OOXML):
 ```python
@@ -31,9 +31,9 @@ insertion.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}dat
 # ... more XML construction ...
 ```
 
-**After** (docx_redline):
+**After** (python_docx_redline):
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document("contract.docx")
 doc.insert_tracked("new clause text", after="Section 2.1")
@@ -84,7 +84,7 @@ doc.save("contract_edited.docx")
 ## Installation
 
 ```bash
-pip install docx-redline
+pip install python-docx-redline
 ```
 
 **Requirements:**
@@ -98,7 +98,7 @@ pip install docx-redline
 ### Basic Operations
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 # Load a document
 doc = Document("contract.docx")
@@ -125,7 +125,7 @@ Seamlessly integrate with python-docx for the best of both libraries:
 
 ```python
 from docx import Document as PythonDocxDocument
-from docx_redline import Document, from_python_docx, to_python_docx
+from python_docx_redline import Document, from_python_docx, to_python_docx
 
 # Create a document with python-docx
 py_doc = PythonDocxDocument()
@@ -133,7 +133,7 @@ py_doc.add_heading("Contract", 0)
 py_doc.add_paragraph("Payment terms: net 30 days")
 py_doc.add_paragraph("Effective date: January 1, 2025")
 
-# Convert to docx_redline for tracked changes
+# Convert to python_docx_redline for tracked changes
 doc = from_python_docx(py_doc, author="Legal Team")
 
 # Make tracked edits
@@ -162,7 +162,7 @@ doc_bytes = doc.save_to_bytes(validate=False)
 **Round-trip between libraries**:
 
 ```python
-# Start with docx_redline
+# Start with python_docx_redline
 doc = Document("contract.docx")
 doc.replace_tracked("old term", "new term")
 
@@ -177,7 +177,7 @@ py_doc.save("final.docx")
 Add, remove, and reorganize document structure with tracked changes:
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document("contract.docx")
 
@@ -215,7 +215,7 @@ doc.save("contract_restructured.docx")
 Use regular expressions for powerful pattern matching and replacements:
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document("contract.docx")
 
@@ -246,7 +246,7 @@ doc.save("contract_regex_edited.docx")
 View and analyze document structure before making edits:
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document("contract.docx")
 
@@ -288,7 +288,7 @@ doc.save("contract_updated.docx")
 Link tracked changes to real MS365 users with full identity information:
 
 ```python
-from docx_redline import Document, AuthorIdentity
+from python_docx_redline import Document, AuthorIdentity
 
 # Create an identity with MS365 profile info
 identity = AuthorIdentity(
@@ -327,7 +327,7 @@ Prevent sentence fragments and verify replacements with context preview and auto
 
 ```python
 import warnings
-from docx_redline import Document, ContinuityWarning
+from python_docx_redline import Document, ContinuityWarning
 
 doc = Document("contract.docx")
 
@@ -540,10 +540,10 @@ Save the document to bytes (in-memory). Useful for passing documents between lib
 ### Compatibility Functions
 
 #### `from_python_docx(python_docx_doc, author="Claude")`
-Create a docx_redline Document from a python-docx Document. Enables workflows where you create documents with python-docx and then add tracked changes.
+Create a python_docx_redline Document from a python-docx Document. Enables workflows where you create documents with python-docx and then add tracked changes.
 
 #### `to_python_docx(doc, validate=True)`
-Convert a docx_redline Document back to a python-docx Document. Useful when you need python-docx's document creation features after making tracked changes.
+Convert a python_docx_redline Document back to a python-docx Document. Useful when you need python-docx's document creation features after making tracked changes.
 
 ### Scope Specifications
 
@@ -557,10 +557,10 @@ Scopes limit where operations apply:
 
 ## Error Handling
 
-docx_redline provides helpful error messages with suggestions:
+python_docx_redline provides helpful error messages with suggestions:
 
 ```python
-from docx_redline import Document, TextNotFoundError
+from python_docx_redline import Document, TextNotFoundError
 
 doc = Document("contract.docx")
 
@@ -645,8 +645,8 @@ Comprehensive documentation available in the `docs/` directory:
 
 ```bash
 # Clone the repository
-git clone https://github.com/parkerhancock/docx_redline.git
-cd docx_redline
+git clone https://github.com/parkerhancock/python_docx_redline.git
+cd python_docx_redline
 
 # Install in development mode with dev dependencies
 pip install -e ".[dev]"
@@ -659,7 +659,7 @@ pip install -e ".[dev]"
 pytest
 
 # Run with coverage
-pytest --cov=src/docx_redline --cov-report=html
+pytest --cov=src/python_docx_redline --cov-report=html
 
 # Run specific test file
 pytest tests/test_document.py -v
@@ -720,6 +720,6 @@ MIT License - see LICENSE file for details
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/parkerhancock/docx_redline/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/parkerhancock/docx_redline/discussions)
+- **Issues**: [GitHub Issues](https://github.com/parkerhancock/python_docx_redline/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/parkerhancock/python_docx_redline/discussions)
 - **Email**: parker@parkerhancock.com

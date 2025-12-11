@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from lxml import etree
 
 if TYPE_CHECKING:
-    from docx_redline.models.section import Section
+    from python_docx_redline.models.section import Section
 
 # Word namespace
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"

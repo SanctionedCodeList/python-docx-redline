@@ -8,13 +8,13 @@ the comment applies to.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from lxml import etree
 
 if TYPE_CHECKING:
-    from docx_redline.document import Document
-    from docx_redline.models.paragraph import Paragraph
+    from python_docx_redline.document import Document
+    from python_docx_redline.models.paragraph import Paragraph
 
 # Word namespace
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"

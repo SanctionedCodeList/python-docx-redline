@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from lxml import etree
 
 if TYPE_CHECKING:
-    from docx_redline.models.paragraph import Paragraph
+    from python_docx_redline.models.paragraph import Paragraph
 
 # Word namespace
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -87,7 +87,7 @@ class TableCell:
         Returns:
             List of Paragraph objects
         """
-        from docx_redline.models.paragraph import Paragraph
+        from python_docx_redline.models.paragraph import Paragraph
 
         para_elements = self._element.findall(f"{{{WORD_NAMESPACE}}}p")
         return [Paragraph(elem) for elem in para_elements]
@@ -151,8 +151,7 @@ class TableRow:
         """
         cell_elements = self._element.findall(f"{{{WORD_NAMESPACE}}}tc")
         return [
-            TableCell(elem, self._row_index, col_idx)
-            for col_idx, elem in enumerate(cell_elements)
+            TableCell(elem, self._row_index, col_idx) for col_idx, elem in enumerate(cell_elements)
         ]
 
     def contains(self, text: str, case_sensitive: bool = True) -> bool:
@@ -250,9 +249,7 @@ class Table:
 
         return cells[col]
 
-    def find_cell(
-        self, text: str, case_sensitive: bool = True
-    ) -> TableCell | None:
+    def find_cell(self, text: str, case_sensitive: bool = True) -> TableCell | None:
         """Find first cell containing text.
 
         Args:

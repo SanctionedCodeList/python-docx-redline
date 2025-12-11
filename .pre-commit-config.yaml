@@ -37,7 +37,7 @@ repos:
         args:
           - tests/
           - -v
-          - --cov=src/docx_redline
+          - --cov=src/python_docx_redline
           - --cov-fail-under=80
           - --cov-report=term-missing
 

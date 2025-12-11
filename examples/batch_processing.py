@@ -9,7 +9,7 @@ processing multiple versions of similar contracts.
 from pathlib import Path
 from typing import Any
 
-from docx_redline import Document
+from python_docx_redline import Document
 
 # Define a standard set of edits to apply
 STANDARD_EDITS: list[dict[str, Any]] = [

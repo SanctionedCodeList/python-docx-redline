@@ -16,11 +16,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
 if TYPE_CHECKING:
-    from docx_redline.models.comment import Comment
-    from docx_redline.models.footnote import Endnote, Footnote
-    from docx_redline.models.paragraph import Paragraph
-    from docx_redline.models.section import Section
-    from docx_redline.models.table import Table, TableRow
+    from python_docx_redline.models.comment import Comment
+    from python_docx_redline.models.footnote import Endnote, Footnote
+    from python_docx_redline.models.paragraph import Paragraph
+    from python_docx_redline.models.section import Section
+    from python_docx_redline.models.table import Table, TableRow
 
 import yaml
 from lxml import etree
@@ -211,7 +211,7 @@ class Document:
         Args:
             source: Path to the .docx file or a file-like object containing it
         """
-        self._temp_dir = Path(tempfile.mkdtemp(prefix="docx_redline_"))
+        self._temp_dir = Path(tempfile.mkdtemp(prefix="python_docx_redline_"))
 
         try:
             with zipfile.ZipFile(source, "r") as zip_ref:
@@ -240,7 +240,7 @@ class Document:
             ...     if para.is_heading():
             ...         print(f"Section: {para.text}")
         """
-        from docx_redline.models.paragraph import Paragraph
+        from python_docx_redline.models.paragraph import Paragraph
 
         return [Paragraph(p) for p in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p")]
 
@@ -262,7 +262,7 @@ class Document:
             ...         print(f"Section: {section.heading_text}")
             ...     print(f"  {len(section.paragraphs)} paragraphs")
         """
-        from docx_redline.models.section import Section
+        from python_docx_redline.models.section import Section
 
         return Section.from_document(self.xml_root)
 
@@ -278,7 +278,7 @@ class Document:
             >>> for i, table in enumerate(doc.tables):
             ...     print(f"Table {i}: {table.row_count} rows × {table.col_count} cols")
         """
-        from docx_redline.models.table import Table
+        from python_docx_redline.models.table import Table
 
         return [Table(tbl) for tbl in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}tbl")]
 
@@ -320,7 +320,7 @@ class Document:
             ...     if comment.marked_text:
             ...         print(f"  Regarding: '{comment.marked_text}'")
         """
-        from docx_redline.models.comment import Comment
+        from python_docx_redline.models.comment import Comment
 
         comments_xml = self._load_comments_xml()
         if comments_xml is None:
@@ -401,7 +401,7 @@ class Document:
         Returns:
             Dict mapping comment ID to CommentRange
         """
-        from docx_redline.models.comment import CommentRange
+        from python_docx_redline.models.comment import CommentRange
 
         ranges: dict[str, CommentRange] = {}
 
@@ -491,7 +491,7 @@ class Document:
         Returns:
             Paragraph wrapper or None if not found
         """
-        from docx_redline.models.paragraph import Paragraph
+        from python_docx_redline.models.paragraph import Paragraph
 
         current = elem
         while current is not None:
@@ -1417,7 +1417,7 @@ class Document:
             >>> # Apply quote style to paragraphs with specific text
             >>> count = doc.apply_style("As stated in", "Quote")
         """
-        from docx_redline.models.paragraph import Paragraph as ParagraphClass
+        from python_docx_redline.models.paragraph import Paragraph as ParagraphClass
 
         # Get all paragraphs
         all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
@@ -1630,7 +1630,7 @@ class Document:
             TextNotFoundError: If anchor text is not found
             AmbiguousTextError: If multiple occurrences of anchor text are found
         """
-        from docx_redline.models.paragraph import Paragraph
+        from python_docx_redline.models.paragraph import Paragraph
 
         # Validate arguments
         if after is None and before is None:
@@ -1753,7 +1753,7 @@ class Document:
             TextNotFoundError: If anchor text is not found
             AmbiguousTextError: If multiple occurrences of anchor text are found
         """
-        from docx_redline.models.paragraph import Paragraph as ParagraphClass
+        from python_docx_redline.models.paragraph import Paragraph as ParagraphClass
 
         if not texts:
             return []
@@ -1852,7 +1852,7 @@ class Document:
             >>> doc.delete_section("Methods", track=True)
             >>> doc.delete_section("Outdated Section", track=False)
         """
-        from docx_redline.models.section import Section
+        from python_docx_redline.models.section import Section
 
         # Parse document into sections
         all_sections = Section.from_document(self.xml_root)
@@ -1885,7 +1885,7 @@ class Document:
         if len(matches) > 1:
             # Create match representations for error reporting
             # Use the first paragraph of each matching section as the "match location"
-            from docx_redline.text_search import TextSpan
+            from python_docx_redline.text_search import TextSpan
 
             match_spans = []
             for section in matches:
@@ -1975,7 +1975,7 @@ class Document:
 
         # TODO: Handle update_toc when implemented in separate task
         if update_toc:
-            pass  # Will implement TOC updates in docx_redline-xpe
+            pass  # Will implement TOC updates in python_docx_redline-xpe
 
         return section
 
@@ -2659,7 +2659,7 @@ class Document:
         """
         from datetime import datetime, timezone
 
-        from docx_redline.models.comment import Comment, CommentRange
+        from python_docx_redline.models.comment import Comment, CommentRange
 
         # Validate arguments
         if reply_to is None and on is None:
@@ -2735,7 +2735,7 @@ class Document:
             )
 
             # Build the CommentRange for the return value
-            from docx_redline.models.paragraph import Paragraph
+            from python_docx_redline.models.paragraph import Paragraph
 
             start_para = Paragraph(match.paragraph)
             comment_range = CommentRange(
@@ -2758,7 +2758,7 @@ class Document:
         Raises:
             ValueError: If the comment is not found
         """
-        from docx_redline.models.comment import Comment
+        from python_docx_redline.models.comment import Comment
 
         if isinstance(ref, Comment):
             return ref
@@ -3578,7 +3578,7 @@ class Document:
             ...     track=True
             ... )
         """
-        from docx_redline.models.table import TableRow
+        from python_docx_redline.models.table import TableRow
 
         tables = self.tables
         if table_index < 0 or table_index >= len(tables):
@@ -4714,7 +4714,7 @@ class Document:
         Returns:
             List of Footnote objects
         """
-        from docx_redline.models.footnote import Footnote
+        from python_docx_redline.models.footnote import Footnote
 
         if not self._temp_dir:
             return []
@@ -4744,7 +4744,7 @@ class Document:
         Returns:
             List of Endnote objects
         """
-        from docx_redline.models.footnote import Endnote
+        from python_docx_redline.models.footnote import Endnote
 
         if not self._temp_dir:
             return []

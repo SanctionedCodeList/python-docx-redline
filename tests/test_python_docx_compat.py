@@ -1,7 +1,7 @@
 """Tests for python-docx compatibility.
 
 These tests verify the from_python_docx() and to_python_docx() functions
-that enable seamless integration between python-docx and docx_redline.
+that enable seamless integration between python-docx and python_docx_redline.
 
 Note: These tests are skipped if python-docx is not installed.
 """
@@ -14,14 +14,14 @@ import pytest
 docx = pytest.importorskip("docx")
 from docx import Document as PythonDocxDocument  # noqa: E402
 
-from docx_redline import Document, from_python_docx, to_python_docx  # noqa: E402
+from python_docx_redline import Document, from_python_docx, to_python_docx  # noqa: E402
 
 
 class TestFromPythonDocx:
     """Test from_python_docx() conversion function."""
 
     def test_basic_conversion(self) -> None:
-        """Can create docx_redline Document from python-docx Document."""
+        """Can create python_docx_redline Document from python-docx Document."""
         # Create with python-docx
         py_doc = PythonDocxDocument()
         py_doc.add_paragraph("Hello World")
@@ -117,12 +117,12 @@ class TestToPythonDocx:
     """Test to_python_docx() conversion function."""
 
     def test_basic_conversion(self, tmp_path: Path) -> None:
-        """Can convert docx_redline Document back to python-docx."""
+        """Can convert python_docx_redline Document back to python-docx."""
         # Create a simple document
         py_doc_original = PythonDocxDocument()
         py_doc_original.add_paragraph("Original content")
 
-        # Convert to docx_redline
+        # Convert to python_docx_redline
         doc = from_python_docx(py_doc_original)
         doc.replace_tracked("Original", "Modified")
 
@@ -160,10 +160,10 @@ class TestToPythonDocx:
 
 
 class TestFullWorkflow:
-    """Test complete workflows combining python-docx and docx_redline."""
+    """Test complete workflows combining python-docx and python_docx_redline."""
 
     def test_create_edit_save_workflow(self, tmp_path: Path) -> None:
-        """Full workflow: create with python-docx, edit with docx_redline, save."""
+        """Full workflow: create with python-docx, edit with python_docx_redline, save."""
         # Step 1: Create document with python-docx
         py_doc = PythonDocxDocument()
         py_doc.add_heading("Contract", 0)
@@ -214,7 +214,7 @@ class TestFullWorkflow:
         py_doc = PythonDocxDocument()
         py_doc.add_paragraph("Version 1")
 
-        # Round 2: Edit with docx_redline (skip validation for in-memory docs)
+        # Round 2: Edit with python_docx_redline (skip validation for in-memory docs)
         doc = from_python_docx(py_doc)
         doc.insert_tracked(" -> Version 2", after="Version 1")
         bytes1 = doc.save_to_bytes(validate=False)

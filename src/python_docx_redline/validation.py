@@ -1,5 +1,5 @@
 """
-Full OOXML validation for docx_redline documents.
+Full OOXML validation for python_docx_redline documents.
 
 This module provides comprehensive validation using the same validation
 suite as the Anthropic docx skill to ensure documents are production-ready
@@ -76,7 +76,7 @@ def validate_document(
 
     # Create a temporary docx file for validation
     with tempfile.TemporaryDirectory() as temp_dir:
-        temp_docx = Path(temp_dir) / "validation.docx"
+        _ = Path(temp_dir) / "validation.docx"  # Not used but kept for reference
 
         # Save the current document to temp location
         # We need to create a proper .docx file structure

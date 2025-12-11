@@ -74,7 +74,7 @@ doc.insert_tracked(" (interpreting IRPA)", ...)
 ### Directory Structure
 
 ```
-docx_redline/
+python_docx_redline/
 ├── __init__.py              # Public API exports
 ├── document.py              # Main Document class
 ├── text_operations.py       # insert_tracked, replace_tracked, etc.
@@ -449,7 +449,7 @@ class TextSpan:
 
 ```python
 class DocxRedlineError(Exception):
-    """Base exception for all docx_redline errors."""
+    """Base exception for all python_docx_redline errors."""
     pass
 
 class TextNotFoundError(DocxRedlineError):
@@ -532,8 +532,8 @@ class SuggestionGenerator:
 ```python
 # tests/test_text_operations.py
 import pytest
-from docx_redline import Document
-from docx_redline.errors import TextNotFoundError, AmbiguousTextError
+from python_docx_redline import Document
+from python_docx_redline.errors import TextNotFoundError, AmbiguousTextError
 
 class TestInsertTracked:
     def test_simple_insertion(self, sample_doc):

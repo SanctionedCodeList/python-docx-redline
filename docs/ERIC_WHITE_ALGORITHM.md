@@ -168,7 +168,7 @@ public static XElement SplitRunsInParagraph(XElement p, int[] positions)
 
 ## Application to Our Project
 
-### Current Approach (docx_redline)
+### Current Approach (python_docx_redline)
 
 Our `TextSearch` class uses a **character map** approach:
 ```python

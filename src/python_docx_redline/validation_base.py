@@ -142,7 +142,7 @@ class BaseSchemaValidator:
                 # Decode to check XML declaration
                 try:
                     text = data.decode("utf-8", errors="ignore")
-                except:
+                except Exception:
                     text = data.decode("latin-1", errors="ignore")
 
                 # Extract encoding from XML declaration
@@ -275,10 +275,11 @@ class BaseSchemaValidator:
                                 # Check global uniqueness
                                 if id_value in global_ids:
                                     prev_file, prev_line, prev_tag = global_ids[id_value]
+                                    rel_path = xml_file.relative_to(self.unpacked_dir)
                                     errors.append(
-                                        f"  {xml_file.relative_to(self.unpacked_dir)}: "
-                                        f"Line {elem.sourceline}: Global ID '{id_value}' in <{tag}> "
-                                        f"already used in {prev_file} at line {prev_line} in <{prev_tag}>"
+                                        f"  {rel_path}: Line {elem.sourceline}: "
+                                        f"Global ID '{id_value}' in <{tag}> already used "
+                                        f"in {prev_file} at line {prev_line} in <{prev_tag}>"
                                     )
                                 else:
                                     global_ids[id_value] = (
@@ -294,10 +295,11 @@ class BaseSchemaValidator:
 
                                 if id_value in file_ids[key]:
                                     prev_line = file_ids[key][id_value]
+                                    rel_path = xml_file.relative_to(self.unpacked_dir)
                                     errors.append(
-                                        f"  {xml_file.relative_to(self.unpacked_dir)}: "
-                                        f"Line {elem.sourceline}: Duplicate {attr_name}='{id_value}' in <{tag}> "
-                                        f"(first occurrence at line {prev_line})"
+                                        f"  {rel_path}: Line {elem.sourceline}: "
+                                        f"Duplicate {attr_name}='{id_value}' in <{tag}> "
+                                        f"(first at line {prev_line})"
                                     )
                                 else:
                                     file_ids[key][id_value] = elem.sourceline
@@ -512,10 +514,12 @@ class BaseSchemaValidator:
 
                         # Check if the ID exists
                         if rid_attr not in rid_to_type:
+                            valid_ids = sorted(rid_to_type.keys())[:5]
+                            more = "..." if len(rid_to_type) > 5 else ""
                             errors.append(
                                 f"  {xml_rel_path}: Line {elem.sourceline}: "
-                                f"<{elem_name}> references non-existent relationship '{rid_attr}' "
-                                f"(valid IDs: {', '.join(sorted(rid_to_type.keys())[:5])}{'...' if len(rid_to_type) > 5 else ''})"
+                                f"<{elem_name}> refs non-existent '{rid_attr}' "
+                                f"(valid: {', '.join(valid_ids)}{more})"
                             )
                         # Check if we have type expectations for this element
                         elif self.ELEMENT_RELATIONSHIP_TYPES:
@@ -526,8 +530,8 @@ class BaseSchemaValidator:
                                 if expected_type not in actual_type.lower():
                                     errors.append(
                                         f"  {xml_rel_path}: Line {elem.sourceline}: "
-                                        f"<{elem_name}> references '{rid_attr}' which points to '{actual_type}' "
-                                        f"but should point to a '{expected_type}' relationship"
+                                        f"<{elem_name}> refs '{rid_attr}' -> '{actual_type}' "
+                                        f"(expected '{expected_type}')"
                                     )
 
             except Exception as e:
@@ -653,7 +657,7 @@ class BaseSchemaValidator:
 
                     if root_name in declarable_roots and path_str not in declared_parts:
                         errors.append(
-                            f"  {path_str}: File with <{root_name}> root not declared in [Content_Types].xml"
+                            f"  {path_str}: <{root_name}> not declared in [Content_Types].xml"
                         )
 
                 except Exception:
@@ -674,8 +678,11 @@ class BaseSchemaValidator:
                     # Check if it's a known media extension that should be declared
                     if extension in media_extensions:
                         relative_path = file_path.relative_to(self.unpacked_dir)
+                        ct = media_extensions[extension]
                         errors.append(
-                            f'  {relative_path}: File with extension \'{extension}\' not declared in [Content_Types].xml - should add: <Default Extension="{extension}" ContentType="{media_extensions[extension]}"/>'
+                            f"  {relative_path}: Extension '{extension}' not in "
+                            f'[Content_Types].xml - add: <Default Extension="{extension}" '
+                            f'ContentType="{ct}"/>'
                         )
 
         except Exception as e:
@@ -771,9 +778,8 @@ class BaseSchemaValidator:
             print(f"  - Skipped (no schema): {skipped_count}")
             if original_error_count:
                 print(f"  - With original errors (ignored): {original_error_count}")
-            print(
-                f"  - With NEW errors: {len(new_errors) > 0 and len([e for e in new_errors if not e.startswith('    ')]) or 0}"
-            )
+            new_err_count = len([e for e in new_errors if not e.startswith("    ")])
+            print(f"  - With NEW errors: {new_err_count if new_errors else 0}")
 
         if new_errors:
             print("\nFAILED - Found NEW validation errors:")

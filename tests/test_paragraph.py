@@ -5,7 +5,7 @@ Tests for Paragraph wrapper class.
 import pytest
 from lxml import etree
 
-from docx_redline.models.paragraph import WORD_NAMESPACE, Paragraph
+from python_docx_redline.models.paragraph import WORD_NAMESPACE, Paragraph
 
 
 def create_paragraph_element(text: str = "", style: str | None = None) -> etree._Element:

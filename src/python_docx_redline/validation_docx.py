@@ -103,9 +103,10 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                                 text_preview = (
                                     repr(text)[:50] + "..." if len(repr(text)) > 50 else repr(text)
                                 )
+                                rel_path = xml_file.relative_to(self.unpacked_dir)
                                 errors.append(
-                                    f"  {xml_file.relative_to(self.unpacked_dir)}: "
-                                    f"Line {elem.sourceline}: w:t element with whitespace missing xml:space='preserve': {text_preview}"
+                                    f"  {rel_path}: Line {elem.sourceline}: "
+                                    f"w:t missing xml:space='preserve': {text_preview}"
                                 )
 
             except (lxml.etree.XMLSyntaxError, Exception) as e:

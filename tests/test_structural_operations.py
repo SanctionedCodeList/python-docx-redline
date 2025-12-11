@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
-from docx_redline import Document
-from docx_redline.errors import AmbiguousTextError, TextNotFoundError
-from docx_redline.models.paragraph import WORD_NAMESPACE
+from python_docx_redline import Document
+from python_docx_redline.errors import AmbiguousTextError, TextNotFoundError
+from python_docx_redline.models.paragraph import WORD_NAMESPACE
 
 
 def create_test_document() -> Path:
@@ -303,7 +303,7 @@ def test_insert_paragraph_returns_paragraph_object():
     try:
         doc = Document(doc_path)
 
-        from docx_redline.models.paragraph import Paragraph
+        from python_docx_redline.models.paragraph import Paragraph
 
         new_para = doc.insert_paragraph("New text", after="First paragraph")
 
@@ -453,7 +453,7 @@ def test_insert_paragraphs_returns_paragraph_objects():
     try:
         doc = Document(doc_path)
 
-        from docx_redline.models.paragraph import Paragraph
+        from python_docx_redline.models.paragraph import Paragraph
 
         texts = ["Para A", "Para B"]
         paras = doc.insert_paragraphs(texts, after="First paragraph")
@@ -840,7 +840,7 @@ def test_delete_section_returns_section_object():
     try:
         doc = Document(doc_path)
 
-        from docx_redline.models.section import Section
+        from python_docx_redline.models.section import Section
 
         deleted_section = doc.delete_section("Conclusion", track=True)
 

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from docx_redline import Document, ValidationError
+from python_docx_redline import Document, ValidationError
 
 
 def create_test_document() -> Path:

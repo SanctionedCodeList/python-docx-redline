@@ -1,5 +1,5 @@
 """
-Custom exception classes for docx_redline package.
+Custom exception classes for python_docx_redline package.
 
 These exceptions provide helpful error messages with suggestions for
 resolving common issues when searching for and editing text in Word documents.
@@ -9,7 +9,7 @@ from typing import Any
 
 
 class DocxRedlineError(Exception):
-    """Base exception for all docx_redline errors."""
+    """Base exception for all python_docx_redline errors."""
 
     pass
 

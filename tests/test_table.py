@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from docx_redline import Document
-from docx_redline.models.table import Table, TableCell, TableRow
+from python_docx_redline import Document
+from python_docx_redline.models.table import Table, TableCell, TableRow
 
 # Minimal document XML with a simple 2x2 table
 DOCUMENT_WITH_TABLE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -576,9 +576,7 @@ def test_replace_in_table_case_sensitivity():
         assert count == 0
 
         # Case-insensitive - should match
-        count = doc.replace_in_table(
-            "row 1", "Updated", case_sensitive=False, track=False
-        )
+        count = doc.replace_in_table("row 1", "Updated", case_sensitive=False, track=False)
         assert count == 2
     finally:
         docx_path.unlink()
@@ -593,9 +591,7 @@ def test_insert_table_row_tracked():
         doc = Document(docx_path)
 
         # Insert new row with tracking
-        doc.insert_table_row(
-            after_row=0, cells=["Row 1.5, Col 1", "Row 1.5, Col 2"], track=True
-        )
+        doc.insert_table_row(after_row=0, cells=["Row 1.5, Col 1", "Row 1.5, Col 2"], track=True)
         doc.save(output_path)
 
         # Reload and verify
@@ -630,9 +626,7 @@ def test_insert_table_row_untracked():
         doc = Document(docx_path)
 
         # Insert row without tracking
-        doc.insert_table_row(
-            after_row=1, cells=["New Row, Col 1", "New Row, Col 2"], track=False
-        )
+        doc.insert_table_row(after_row=1, cells=["New Row, Col 1", "New Row, Col 2"], track=False)
         doc.save(output_path)
 
         # Reload and verify
@@ -665,9 +659,7 @@ def test_insert_table_row_by_text():
         doc = Document(docx_path)
 
         # Insert after row containing specific text
-        doc.insert_table_row(
-            after_row="Row 1, Col 1", cells=["Inserted", "Row"], track=False
-        )
+        doc.insert_table_row(after_row="Row 1, Col 1", cells=["Inserted", "Row"], track=False)
         doc.save(output_path)
 
         # Reload and verify

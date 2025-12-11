@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from lxml import etree
 
-from docx_redline import AuthorIdentity, Document
+from python_docx_redline import AuthorIdentity, Document
 
 
 def create_test_document() -> Path:

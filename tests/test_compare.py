@@ -4,10 +4,9 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-import pytest
 from lxml import etree
 
-from docx_redline.document import Document
+from python_docx_redline.document import Document
 
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -270,12 +269,8 @@ class TestCompareToComplex:
 
     def test_multiple_operations_same_region(self):
         """Test multiple changes in the same region."""
-        original = Document(
-            create_test_docx(["Start", "Old middle", "End"])
-        )
-        modified = Document(
-            create_test_docx(["Start", "New middle 1", "New middle 2", "End"])
-        )
+        original = Document(create_test_docx(["Start", "Old middle", "End"]))
+        modified = Document(create_test_docx(["Start", "New middle 1", "New middle 2", "End"]))
 
         count = original.compare_to(modified)
 
@@ -348,9 +343,7 @@ class TestCompareToSpecialContent:
             create_test_docx(["Line with &amp; ampersand", "Line with &lt;brackets&gt;"])
         )
         modified = Document(
-            create_test_docx(
-                ["Line with &amp; ampersand", "Modified &lt;brackets&gt;"]
-            )
+            create_test_docx(["Line with &amp; ampersand", "Modified &lt;brackets&gt;"])
         )
 
         count = original.compare_to(modified)

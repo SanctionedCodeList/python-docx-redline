@@ -1,5 +1,5 @@
 """
-Footnote and Endnote model classes for docx_redline.
+Footnote and Endnote model classes for python_docx_redline.
 
 These classes represent footnotes and endnotes in a Word document,
 providing a high-level interface for accessing and manipulating them.
@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 from lxml import etree
 
 if TYPE_CHECKING:
-    from docx_redline.document import Document
-    from docx_redline.models.paragraph import Paragraph
+    from python_docx_redline.document import Document
+    from python_docx_redline.models.paragraph import Paragraph
 
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -51,7 +51,7 @@ class Footnote:
         Returns:
             List of Paragraph objects
         """
-        from docx_redline.models.paragraph import Paragraph
+        from python_docx_redline.models.paragraph import Paragraph
 
         para_elements = self.element.findall(f"{{{WORD_NAMESPACE}}}p")
         return [Paragraph(p) for p in para_elements]
@@ -127,7 +127,7 @@ class Endnote:
         Returns:
             List of Paragraph objects
         """
-        from docx_redline.models.paragraph import Paragraph
+        from python_docx_redline.models.paragraph import Paragraph
 
         para_elements = self.element.findall(f"{{{WORD_NAMESPACE}}}p")
         return [Paragraph(p) for p in para_elements]

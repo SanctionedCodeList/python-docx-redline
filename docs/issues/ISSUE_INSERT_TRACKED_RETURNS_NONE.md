@@ -9,7 +9,7 @@
 ## Reproduction
 
 ```python
-from docx_redline import Document, AuthorIdentity
+from python_docx_redline import Document, AuthorIdentity
 
 doc = Document("document.docx", author=identity)
 
@@ -17,7 +17,7 @@ after_text = '"the game-related statistics are matters of public interest." 109 
 
 # This finds the text at document level
 text = doc.get_text()
-from docx_redline.quote_normalization import normalize_quotes
+from python_docx_redline.quote_normalization import normalize_quotes
 assert normalize_quotes(after_text) in normalize_quotes(text)  # True!
 
 # But insert_tracked returns None
@@ -60,7 +60,7 @@ The text search logic should:
 ## Environment
 
 - Source document: Legal brief with citations containing mixed formatting
-- docx_redline version: current development
+- python_docx_redline version: current development
 - Date: 2024-12-08
 
 ## Resolution

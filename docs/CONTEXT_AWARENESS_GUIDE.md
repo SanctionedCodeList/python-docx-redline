@@ -1,6 +1,6 @@
 # Context-Aware Text Replacement Guide
 
-This guide explains how to use the context-aware features in `docx_redline` to prevent sentence fragments and preview replacements before making changes.
+This guide explains how to use the context-aware features in `python_docx_redline` to prevent sentence fragments and preview replacements before making changes.
 
 ## Overview
 
@@ -16,7 +16,7 @@ These features help prevent common editing mistakes where replacing text inadver
 ### Basic Usage
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document("contract.docx")
 doc.replace_tracked(
@@ -68,7 +68,7 @@ REPLACEMENT (216 chars):
 
 ```python
 import warnings
-from docx_redline import Document, ContinuityWarning
+from python_docx_redline import Document, ContinuityWarning
 
 doc = Document("contract.docx")
 
@@ -135,7 +135,7 @@ Warnings include helpful suggestions:
 
 ```python
 import warnings
-from docx_redline import ContinuityWarning
+from python_docx_redline import ContinuityWarning
 
 with warnings.catch_warnings(record=True) as w:
     warnings.simplefilter("always")
@@ -178,7 +178,7 @@ doc.replace_tracked(
 
 ```python
 import warnings
-from docx_redline import Document, ContinuityWarning
+from python_docx_redline import Document, ContinuityWarning
 
 doc = Document("contract.docx")
 warnings.simplefilter("always")

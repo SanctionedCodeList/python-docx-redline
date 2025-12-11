@@ -1,12 +1,12 @@
 """
-docx_redline - A high-level Python API for editing Word documents with tracked changes.
+python_docx_redline - A high-level Python API for editing Word documents with tracked changes.
 
 This package provides a simple interface for making surgical edits to Word documents
 without needing to write raw OOXML XML. It handles tracked changes, text search across
 fragmented runs, and provides helpful error messages.
 
 Example:
-    >>> from docx_redline import Document
+    >>> from python_docx_redline import Document
     >>> doc = Document("contract.docx")
     >>> doc.insert_tracked("new clause text", after="Section 2.1")
     >>> doc.save("contract_edited.docx")

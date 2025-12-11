@@ -14,7 +14,7 @@ Word documents commonly use smart quotes (curly quotes/apostrophes: `'` `'` `"` 
 
 ## Environment
 
-- **docx_redline version:** 0.1.0 (editable install)
+- **python_docx_redline version:** 0.1.0 (editable install)
 - **Python version:** 3.12
 - **Document source:** Microsoft Word documents (which auto-convert straight quotes to smart quotes)
 
@@ -33,7 +33,7 @@ Example text in Word: `"Don't use the plaintiff's name for advertising"`
 ### 2. Attempt Search with Python
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document("brief.docx")
 
@@ -48,7 +48,7 @@ doc.replace_tracked(
 ### 3. Error Message
 
 ```
-docx_redline.errors.TextNotFoundError: Could not find "plaintiff's name"
+python_docx_redline.errors.TextNotFoundError: Could not find "plaintiff's name"
 
 Suggestions:
   • Document contains curly apostrophes (''). Try replacing straight apostrophes with curly ones in search text
@@ -144,7 +144,7 @@ doc.replace_tracked(
 ### Option C: Helper Function
 
 ```python
-from docx_redline import Document, normalize_quotes
+from python_docx_redline import Document, normalize_quotes
 
 doc.replace_tracked(
     normalize_quotes("plaintiff's name"),
@@ -386,7 +386,7 @@ Add section on quote handling:
 ### Working with Smart Quotes
 
 Word documents typically use smart quotes (curly quotes/apostrophes: `'` `"`) instead of
-straight quotes (`'` `"`). docx_redline handles this automatically:
+straight quotes (`'` `"`). python_docx_redline handles this automatically:
 
 \`\`\`python
 # Your document contains: "The plaintiff's claim"

@@ -1,5 +1,5 @@
 """
-End-to-end integration tests for docx_redline.
+End-to-end integration tests for python_docx_redline.
 
 These tests verify that all components work together correctly in
 realistic workflows.
@@ -9,7 +9,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from docx_redline import Document
+from python_docx_redline import Document
 
 
 def create_realistic_docx() -> Path:

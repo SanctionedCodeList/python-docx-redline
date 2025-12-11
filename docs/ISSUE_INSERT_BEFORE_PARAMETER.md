@@ -15,7 +15,7 @@ The `insert_tracked()` method only supports inserting text `after` an anchor poi
 
 ## Environment
 
-- **docx_redline version:** 0.1.0 (editable install)
+- **python_docx_redline version:** 0.1.0 (editable install)
 - **Python version:** 3.12
 - **Use case:** Legal document editing - inserting new paragraphs before existing content
 
@@ -24,7 +24,7 @@ The `insert_tracked()` method only supports inserting text `after` an anchor poi
 ## Current Behavior
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document("brief.docx")
 
@@ -364,7 +364,7 @@ This is functional but unintuitive and fragile.
 
 - Triggered by: Legal brief editing workflow (Edit 11 in surgical_edits.md)
 - Similar patterns: DOM manipulation APIs, text editor APIs
-- Related code: `src/docx_redline/document.py:229` (insert_tracked method)
+- Related code: `src/python_docx_redline/document.py:229` (insert_tracked method)
 
 ---
 
@@ -400,7 +400,7 @@ Added `before` parameter to `insert_tracked()` method with the following changes
 
 ### Files Changed
 
-- **src/docx_redline/document.py**: Lines 217-294 (modified `insert_tracked()`), Lines 828-845 (new `_insert_before_match()`)
+- **src/python_docx_redline/document.py**: Lines 217-294 (modified `insert_tracked()`), Lines 828-845 (new `_insert_before_match()`)
 - **tests/test_insert_before.py**: 14 comprehensive tests (337 lines)
 - **docs/ISSUE_INSERT_BEFORE_PARAMETER.md**: Updated status to RESOLVED
 

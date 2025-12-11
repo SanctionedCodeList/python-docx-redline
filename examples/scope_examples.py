@@ -7,7 +7,7 @@ parts of a document using scope filters.
 
 from typing import Any
 
-from docx_redline import Document
+from python_docx_redline import Document
 
 
 def example_simple_scope() -> None:

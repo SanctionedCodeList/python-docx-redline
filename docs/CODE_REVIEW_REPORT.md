@@ -1,4 +1,4 @@
-# Detailed Code Review: docx_redline
+# Detailed Code Review: python_docx_redline
 
 **Date:** 2025-12-09
 **Reviewer:** Claude Code
@@ -73,7 +73,7 @@ This means **change IDs may collide** with existing tracked changes in documents
 ```python
 def _extract_docx(self) -> None:
     """Extract the .docx ZIP archive to a temporary directory."""
-    self._temp_dir = Path(tempfile.mkdtemp(prefix="docx_redline_"))
+    self._temp_dir = Path(tempfile.mkdtemp(prefix="python_docx_redline_"))
     try:
         with zipfile.ZipFile(self.path, "r") as zip_ref:
             zip_ref.extractall(self._temp_dir)
@@ -248,7 +248,7 @@ No abstract base classes or Protocols define the expected behavior. For example:
 
 `validation.py` has only **26% coverage**, and the tests show:
 ```
-src/docx_redline/validation_redlining.py    144    132     8%
+src/python_docx_redline/validation_redlining.py    144    132     8%
 ```
 
 The validation infrastructure exists but isn't integrated into the main workflow. Documents can be saved without validation.

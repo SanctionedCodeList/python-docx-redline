@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from docx_redline import (
+from python_docx_redline import (
     AmbiguousTextError,
     Document,
     TextNotFoundError,

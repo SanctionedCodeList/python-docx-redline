@@ -1,1 +1,1 @@
-"""Test suite for docx_redline package."""
+"""Test suite for python_docx_redline package."""

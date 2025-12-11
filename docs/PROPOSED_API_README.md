@@ -140,7 +140,7 @@ Client provided feedback on a motion to dismiss via tracked changes. Need to:
 ### Proposed Approach (5 minutes)
 
 ```python
-from docx_redline import apply_edit_file
+from python_docx_redline import apply_edit_file
 
 results = apply_edit_file('surgical_edits.yaml')
 print(f"Applied {sum(r.success for r in results)}/11 edits")
@@ -245,7 +245,7 @@ edits:
 ```
 
 ```python
-from docx_redline import apply_edit_file
+from python_docx_redline import apply_edit_file
 apply_edit_file('edits.yaml')
 ```
 

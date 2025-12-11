@@ -12,7 +12,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from docx_redline import Document
+from python_docx_redline import Document
 
 
 def create_document_with_formatted_xml() -> Path:

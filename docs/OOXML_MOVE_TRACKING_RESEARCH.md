@@ -570,7 +570,7 @@ Key implementation points:
 - Validate that **track revisions is enabled**
 - Handle **fallback cases** where moves degrade to insertions/deletions
 
-This research provides the foundation for implementing move tracking functionality in the `docx_redline` Python library.
+This research provides the foundation for implementing move tracking functionality in the `python_docx_redline` Python library.
 
 ---
 

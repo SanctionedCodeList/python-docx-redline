@@ -1,4 +1,4 @@
-# docx_redline Refactoring Plan
+# python_docx_redline Refactoring Plan
 
 **Based on:** CODE_REVIEW_REPORT.md (2025-12-09)
 **Goal:** Transform the codebase from prototype to production-grade library
@@ -88,7 +88,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 2.1 Create Centralized Constants Module
 
-**New file:** `src/docx_redline/constants.py`
+**New file:** `src/python_docx_redline/constants.py`
 
 **Tasks:**
 - [ ] Create `constants.py` with all namespace definitions:
@@ -125,7 +125,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 2.2 Create Type Definitions Module
 
-**New file:** `src/docx_redline/types.py`
+**New file:** `src/python_docx_redline/types.py`
 
 **Tasks:**
 - [ ] Define type aliases for lxml elements:
@@ -145,10 +145,10 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 2.3 Add Logging Infrastructure
 
-**New file:** `src/docx_redline/logging.py` (or add to `__init__.py`)
+**New file:** `src/python_docx_redline/logging.py` (or add to `__init__.py`)
 
 **Tasks:**
-- [ ] Create module-level logger: `logger = logging.getLogger("docx_redline")`
+- [ ] Create module-level logger: `logger = logging.getLogger("python_docx_redline")`
 - [ ] Replace all `print()` statements with appropriate log levels
 - [ ] Add debug logging for:
   - Document load/save operations
@@ -166,7 +166,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 3.1 Create Package Manager
 
-**New file:** `src/docx_redline/package.py`
+**New file:** `src/python_docx_redline/package.py`
 
 **Tasks:**
 - [ ] Create `OOXMLPackage` class:
@@ -205,7 +205,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 3.2 Create Relationship Manager
 
-**New file:** `src/docx_redline/relationships.py`
+**New file:** `src/python_docx_redline/relationships.py`
 
 **Tasks:**
 - [ ] Create `RelationshipManager` class:
@@ -236,7 +236,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 3.3 Create Content Type Manager
 
-**New file:** `src/docx_redline/content_types.py`
+**New file:** `src/python_docx_redline/content_types.py`
 
 **Tasks:**
 - [ ] Create `ContentTypeManager` class:
@@ -272,7 +272,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 4.1 Create Tracked Change Operations Class
 
-**New file:** `src/docx_redline/operations/tracked_changes.py`
+**New file:** `src/python_docx_redline/operations/tracked_changes.py`
 
 **Tasks:**
 - [ ] Create `TrackedChangeOperations` class:
@@ -310,7 +310,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 4.2 Create Change Management Class
 
-**New file:** `src/docx_redline/operations/change_management.py`
+**New file:** `src/python_docx_redline/operations/change_management.py`
 
 **Tasks:**
 - [ ] Create `ChangeManagement` class:
@@ -336,7 +336,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 4.3 Create Comment Operations Class
 
-**New file:** `src/docx_redline/operations/comments.py`
+**New file:** `src/python_docx_redline/operations/comments.py`
 
 **Tasks:**
 - [ ] Create `CommentOperations` class:
@@ -363,7 +363,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 4.4 Create Footnote/Endnote Operations Class
 
-**New file:** `src/docx_redline/operations/notes.py`
+**New file:** `src/python_docx_redline/operations/notes.py`
 
 **Tasks:**
 - [ ] Create `NoteOperations` class for footnotes and endnotes
@@ -375,7 +375,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 4.5 Create Pattern Helpers Class
 
-**New file:** `src/docx_redline/operations/patterns.py`
+**New file:** `src/python_docx_redline/operations/patterns.py`
 
 **Tasks:**
 - [ ] Create `PatternHelpers` class:
@@ -393,7 +393,7 @@ Each phase can be completed independently with passing tests between phases.
 
 ### 4.6 Create Style Operations Class
 
-**New file:** `src/docx_redline/operations/styles.py`
+**New file:** `src/python_docx_redline/operations/styles.py`
 
 **Tasks:**
 - [ ] Create `StyleOperations` class:
@@ -548,7 +548,7 @@ doc = Document("file.docx")
 doc.insert_tracked("text", after="anchor")
 
 # New way (more explicit)
-from docx_redline.operations import TrackedChangeOperations
+from python_docx_redline.operations import TrackedChangeOperations
 doc = Document("file.docx")
 ops = TrackedChangeOperations(doc)
 ops.insert("text", after="anchor")

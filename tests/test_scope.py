@@ -7,7 +7,7 @@ in Word documents.
 
 from lxml import etree
 
-from docx_redline import ScopeEvaluator
+from python_docx_redline import ScopeEvaluator
 
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 

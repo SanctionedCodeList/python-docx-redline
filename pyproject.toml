@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "docx-redline"
+name = "python-docx-redline"
 version = "0.1.0"
 description = "A high-level Python API for editing Word documents with tracked changes"
 readme = "README.md"
@@ -41,12 +41,12 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/parkerhancock/docx_redline"
-Repository = "https://github.com/parkerhancock/docx_redline"
-Documentation = "https://github.com/parkerhancock/docx_redline/tree/main/docs"
+Homepage = "https://github.com/parkerhancock/python-docx-redline"
+Repository = "https://github.com/parkerhancock/python-docx-redline"
+Documentation = "https://github.com/parkerhancock/python-docx-redline/tree/main/docs"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/docx_redline"]
+packages = ["src/python_docx_redline"]
 
 [tool.black]
 line-length = 100
@@ -75,4 +75,4 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --cov=src/docx_redline --cov-report=term-missing"
+addopts = "-v --cov=src/python_docx_redline --cov-report=term-missing"

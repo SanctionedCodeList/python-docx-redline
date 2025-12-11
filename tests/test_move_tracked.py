@@ -10,9 +10,8 @@ import zipfile
 from pathlib import Path
 
 import pytest
-from lxml import etree
 
-from docx_redline import AmbiguousTextError, Document, TextNotFoundError
+from python_docx_redline import AmbiguousTextError, Document, TextNotFoundError
 
 
 def create_test_document() -> Path:

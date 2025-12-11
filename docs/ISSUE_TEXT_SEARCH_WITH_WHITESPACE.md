@@ -15,7 +15,7 @@ The `replace_tracked()` and `insert_tracked()` methods fail to find text that ex
 
 ## Environment
 
-- **docx_redline version:** 0.1.0 (editable install)
+- **python_docx_redline version:** 0.1.0 (editable install)
 - **Python version:** 3.12
 - **Document source:** Microsoft Word document with tracked changes that were accepted
 - **Operations attempted:** `replace_tracked()`, `insert_tracked()`
@@ -47,10 +47,10 @@ It claims merely that a database records their property ownership.
 
 Text clearly reads as continuous prose.
 
-### 3. Attempted Search with docx_redline
+### 3. Attempted Search with python_docx_redline
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document("MTD_client_accepted.docx")
 
@@ -81,7 +81,7 @@ doc.replace_tracked(
 Created debug script to inspect `get_text()` output:
 
 ```python
-from docx_redline import Document
+from python_docx_redline import Document
 
 doc = Document("MTD_client_accepted.docx")
 full_text = doc.get_text()
@@ -287,7 +287,7 @@ from scripts.document import Document
 from scripts.find_text import find_text
 
 # Unpack, manually locate text in XML, replace at XML level, repack
-# This defeats the purpose of docx_redline as a high-level API
+# This defeats the purpose of python_docx_redline as a high-level API
 ```
 
 ---
@@ -342,7 +342,7 @@ Following **Eric White's algorithm insight** (docs/ERIC_WHITE_ALGORITHM.md), we 
        return "".join(elem.text or "" for elem in text_elements)
    ```
 
-2. **Fixed Paragraph.text property** (src/docx_redline/models/paragraph.py:39-51):
+2. **Fixed Paragraph.text property** (src/python_docx_redline/models/paragraph.py:39-51):
    ```python
    @property
    def text(self) -> str:
@@ -356,8 +356,8 @@ Following **Eric White's algorithm insight** (docs/ERIC_WHITE_ALGORITHM.md), we 
 
 ### Files Changed
 
-- `src/docx_redline/models/paragraph.py` - Fixed Paragraph.text property
-- `src/docx_redline/text_search.py` - Added helper function and updated all text extraction
+- `src/python_docx_redline/models/paragraph.py` - Fixed Paragraph.text property
+- `src/python_docx_redline/text_search.py` - Added helper function and updated all text extraction
 - `tests/test_text_extraction_whitespace.py` - Added 13 comprehensive tests
 
 ### Test Coverage

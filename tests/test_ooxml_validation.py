@@ -1,5 +1,5 @@
 """
-OOXML validation tests to ensure docx_redline produces valid Office documents.
+OOXML validation tests to ensure python_docx_redline produces valid Office documents.
 
 These tests use validation techniques from the docx skill in ~/.agents to verify:
 1. XML well-formedness
@@ -14,7 +14,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from docx_redline import AuthorIdentity, Document
+from python_docx_redline import AuthorIdentity, Document
 
 # Namespace constants
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -401,7 +401,7 @@ def test_save_validates_document() -> None:
 
 def test_save_raises_informative_validation_error() -> None:
     """Test that save() raises ValidationError with detailed error list for bug reports."""
-    from docx_redline.validation import ValidationError
+    from python_docx_redline.validation import ValidationError
 
     doc_path = create_test_document()
     output_path = Path(tempfile.mktemp(suffix=".docx"))
@@ -451,7 +451,7 @@ def test_validation_case_insensitive_customxml_paths() -> None:
 
     See: docs/issues/ISSUE_CUSTOMXML_CASE_SENSITIVITY.md
     """
-    from docx_redline.validation_base import BaseSchemaValidator
+    from python_docx_redline.validation_base import BaseSchemaValidator
 
     doc_path = Path(tempfile.mktemp(suffix=".docx"))
 

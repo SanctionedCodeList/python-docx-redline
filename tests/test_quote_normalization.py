@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from docx_redline import Document
-from docx_redline.errors import TextNotFoundError
-from docx_redline.quote_normalization import (
+from python_docx_redline import Document
+from python_docx_redline.errors import TextNotFoundError
+from python_docx_redline.quote_normalization import (
     denormalize_quotes,
     has_smart_quotes,
     has_straight_quotes,

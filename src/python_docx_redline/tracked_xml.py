@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from docx_redline.author import AuthorIdentity
+    from python_docx_redline.author import AuthorIdentity
 
 
 class TrackedXMLGenerator:

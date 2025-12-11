@@ -7,12 +7,12 @@ property and get_comments() method.
 
 import tempfile
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from docx_redline import Comment, CommentRange, Document
+from python_docx_redline import Document
 
 
 def create_document_with_comments() -> Path:
@@ -807,7 +807,7 @@ class TestAddComment:
 
     def test_add_comment_text_not_found(self) -> None:
         """Test that add_comment raises error for missing text."""
-        from docx_redline import TextNotFoundError
+        from python_docx_redline import TextNotFoundError
 
         doc_path = create_document_without_comments()
         try:
@@ -821,7 +821,7 @@ class TestAddComment:
 
     def test_add_comment_ambiguous_text(self) -> None:
         """Test that add_comment raises error for ambiguous text."""
-        from docx_redline import AmbiguousTextError
+        from python_docx_redline import AmbiguousTextError
 
         # Create document with repeated text
         doc_path = Path(tempfile.mktemp(suffix=".docx"))
@@ -1114,7 +1114,7 @@ class TestCommentDeletion:
         try:
             doc = Document(doc_path)
             comment1 = doc.add_comment("First", on="Simple")
-            comment2 = doc.add_comment("Second", on="without")
+            doc.add_comment("Second", on="without")  # comment2 kept for side effect
 
             assert len(doc.comments) == 2
 
@@ -1310,8 +1310,8 @@ class TestCommentReplies:
             doc = Document(doc_path)
 
             parent = doc.add_comment("Original", on="Simple text")
-            reply1 = parent.add_reply("First reply")
-            reply2 = parent.add_reply("Second reply")
+            parent.add_reply("First reply")  # Side effect: creates reply
+            parent.add_reply("Second reply")  # Side effect: creates reply
 
             replies = parent.replies
             assert len(replies) == 2
@@ -1459,7 +1459,7 @@ class TestCommentReplies:
             doc = Document(doc_path)
 
             parent = doc.add_comment("Original", on="Simple text")
-            reply = parent.add_reply("Reply")
+            parent.add_reply("Reply")  # Side effect: creates reply
 
             # Save and check file structure
             output_path = Path(tempfile.mktemp(suffix=".docx"))
