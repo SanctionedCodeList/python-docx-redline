@@ -93,6 +93,27 @@ pip install python-docx-redline
 - python-dateutil
 - pyyaml
 
+### Claude Code Plugin
+
+This package includes a [Claude Code](https://claude.com/claude-code) skill with OOXML reference documentation and helper scripts for advanced scenarios.
+
+**Install from marketplace:**
+
+```
+/plugin marketplace add parkerhancock/python-docx-redline
+```
+
+**Or install directly:**
+
+```
+/plugin install python-docx-redline@parkerhancock/python-docx-redline
+```
+
+After installation, restart Claude Code. The skill provides:
+- OOXML reference documentation for Word document internals
+- Helper scripts for adding comments with tracked changes
+- XML validation utilities with XSD schemas
+
 ## Quick Start
 
 ### Basic Operations
