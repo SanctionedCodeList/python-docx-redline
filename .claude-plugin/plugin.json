@@ -1,0 +1,9 @@
+{
+  "name": "python-docx-redline",
+  "description": "Word document editing with tracked changes. Use python-docx for creation, python-docx-redline for redlining.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Parker Hancock"
+  },
+  "repository": "https://github.com/parkerhancock/python-docx-redline"
+}
