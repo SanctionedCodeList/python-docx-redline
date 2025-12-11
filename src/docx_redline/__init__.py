@@ -17,6 +17,8 @@ __author__ = "Parker Hancock"
 __all__ = [
     "Document",
     "AuthorIdentity",
+    "from_python_docx",
+    "to_python_docx",
     "DocxRedlineError",
     "TextNotFoundError",
     "AmbiguousTextError",
@@ -40,6 +42,9 @@ __all__ = [
 
 # Import author identity
 from .author import AuthorIdentity
+
+# Import compatibility helpers (python-docx integration)
+from .compat import from_python_docx, to_python_docx
 
 # Import error classes
 # Import document class

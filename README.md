@@ -74,10 +74,12 @@ doc.save("contract_edited.docx")
 - ✅ **Helpful suggestions** - actionable guidance when issues detected
 
 **General:**
+- ✅ **python-docx integration** - seamlessly convert between libraries
+- ✅ **In-memory workflows** - load from bytes/BytesIO, save to bytes
 - ✅ **Batch operations** - apply multiple edits efficiently
 - ✅ **YAML/JSON support** - define edits in configuration files
 - ✅ **Type hints** - full type annotation support
-- ✅ **Thoroughly tested** - 270 tests with 77% coverage
+- ✅ **Thoroughly tested** - 514 tests with 81% coverage
 
 ## Installation
 
@@ -115,6 +117,59 @@ doc.delete_tracked("for any reason")
 
 # Save the modified document
 doc.save("contract_edited.docx")
+```
+
+### python-docx Integration
+
+Seamlessly integrate with python-docx for the best of both libraries:
+
+```python
+from docx import Document as PythonDocxDocument
+from docx_redline import Document, from_python_docx, to_python_docx
+
+# Create a document with python-docx
+py_doc = PythonDocxDocument()
+py_doc.add_heading("Contract", 0)
+py_doc.add_paragraph("Payment terms: net 30 days")
+py_doc.add_paragraph("Effective date: January 1, 2025")
+
+# Convert to docx_redline for tracked changes
+doc = from_python_docx(py_doc, author="Legal Team")
+
+# Make tracked edits
+doc.replace_tracked("net 30 days", "net 45 days")
+doc.insert_tracked(" (as amended)", after="Contract")
+
+# Save the result
+doc.save("contract_redlined.docx")
+```
+
+**In-memory workflows** (no filesystem required):
+
+```python
+# Load from bytes
+with open("contract.docx", "rb") as f:
+    doc = Document(f.read())
+
+# Make changes
+doc.insert_tracked(" [REVIEWED]", after="Section 1")
+
+# Get bytes for storage/transmission
+doc_bytes = doc.save_to_bytes(validate=False)
+# Store in database, send over network, etc.
+```
+
+**Round-trip between libraries**:
+
+```python
+# Start with docx_redline
+doc = Document("contract.docx")
+doc.replace_tracked("old term", "new term")
+
+# Convert back to python-docx for additional operations
+py_doc = to_python_docx(doc, validate=False)
+py_doc.add_paragraph("Added with python-docx")
+py_doc.save("final.docx")
 ```
 
 ### Structural Operations (Phase 2)
@@ -476,8 +531,19 @@ Apply multiple edits in sequence. Returns `list[EditResult]`.
 #### `apply_edit_file(path, format="yaml", stop_on_error=False)`
 Load and apply edits from a YAML or JSON file.
 
-#### `save(path=None)`
-Save the document. If path is None, overwrites the original file.
+#### `save(path=None, validate=True)`
+Save the document. If path is None, overwrites the original file. For in-memory documents, `path` is required.
+
+#### `save_to_bytes(validate=True)`
+Save the document to bytes (in-memory). Useful for passing documents between libraries, storing in databases, or sending over network.
+
+### Compatibility Functions
+
+#### `from_python_docx(python_docx_doc, author="Claude")`
+Create a docx_redline Document from a python-docx Document. Enables workflows where you create documents with python-docx and then add tracked changes.
+
+#### `to_python_docx(doc, validate=True)`
+Convert a docx_redline Document back to a python-docx Document. Useful when you need python-docx's document creation features after making tracked changes.
 
 ### Scope Specifications
 

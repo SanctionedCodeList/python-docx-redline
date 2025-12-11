@@ -6,13 +6,14 @@ inserting tracked changes, and saving the modified documents.
 """
 
 import difflib
+import io
 import re
 import shutil
 import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 if TYPE_CHECKING:
     from docx_redline.models.comment import Comment
@@ -45,23 +46,43 @@ class Document:
     edits, and saving the results. It provides a high-level API that hides the
     complexity of OOXML manipulation.
 
+    Documents can be loaded from:
+    - File paths (str or Path)
+    - Raw bytes
+    - BytesIO objects
+    - Open file objects (in binary mode)
+
     Example:
         >>> doc = Document("contract.docx")
         >>> doc.insert_tracked("new clause text", after="Section 2.1")
         >>> doc.save("contract_edited.docx")
 
+    Example with bytes:
+        >>> with open("contract.docx", "rb") as f:
+        ...     doc = Document(f.read())
+        >>> doc.insert_tracked(" [REVIEWED]", after="Section 1")
+        >>> doc_bytes = doc.save_to_bytes()
+
     Attributes:
-        path: Path to the document file
+        path: Path to the document file (None for in-memory documents)
         author: Author name for tracked changes
         xml_tree: Parsed XML tree of the document
         xml_root: Root element of the XML tree
     """
 
-    def __init__(self, path: str | Path, author: str | AuthorIdentity = "Claude") -> None:
-        """Initialize a Document from a .docx file.
+    def __init__(
+        self,
+        source: str | Path | bytes | BinaryIO,
+        author: str | AuthorIdentity = "Claude",
+    ) -> None:
+        """Initialize a Document from a .docx file or in-memory data.
 
         Args:
-            path: Path to the .docx file
+            source: Document source - can be:
+                    - Path to a .docx file (str or Path)
+                    - Raw bytes of a .docx file
+                    - BytesIO object containing a .docx file
+                    - Open file object in binary mode
             author: Author name (str) or full AuthorIdentity for MS365 integration
                    (default: "Claude")
 
@@ -69,8 +90,17 @@ class Document:
             ValidationError: If the document cannot be loaded or is invalid
 
         Example:
-            >>> # Simple author name
+            >>> # From file path
             >>> doc = Document("contract.docx", author="John Doe")
+            >>>
+            >>> # From bytes
+            >>> with open("contract.docx", "rb") as f:
+            ...     doc = Document(f.read())
+            >>>
+            >>> # From BytesIO
+            >>> import io
+            >>> buffer = io.BytesIO(doc_bytes)
+            >>> doc = Document(buffer)
             >>>
             >>> # Full MS365 identity
             >>> identity = AuthorIdentity(
@@ -81,7 +111,16 @@ class Document:
             ... )
             >>> doc = Document("contract.docx", author=identity)
         """
-        self.path = Path(path)
+        # Detect and normalize source type
+        if isinstance(source, bytes):
+            self._source_stream: BinaryIO | None = io.BytesIO(source)
+            self.path: Path | None = None
+        elif hasattr(source, "read"):
+            self._source_stream = source  # type: ignore[assignment]
+            self.path = None
+        else:
+            self._source_stream = None
+            self.path = Path(source)
 
         # Store author identity (convert string to AuthorIdentity if needed)
         if isinstance(author, str):
@@ -109,21 +148,38 @@ class Document:
         If the document is a .docx file (ZIP archive), it will be extracted
         to a temporary directory. The main document.xml is then parsed.
 
+        Supports loading from file paths or in-memory streams (BytesIO).
+
         Raises:
             ValidationError: If the document cannot be loaded
         """
-        if not self.path.exists():
-            raise ValidationError(f"Document not found: {self.path}")
+        # Determine source: stream or path
+        if self._source_stream is not None:
+            zip_source: Path | BinaryIO = self._source_stream
+            source_desc = "<in-memory document>"
+        else:
+            assert self.path is not None
+            if not self.path.exists():
+                raise ValidationError(f"Document not found: {self.path}")
+            zip_source = self.path
+            source_desc = str(self.path)
 
         # Check if it's a ZIP file (.docx)
         try:
-            if zipfile.is_zipfile(self.path):
+            if zipfile.is_zipfile(zip_source):
                 self._is_zip = True
-                self._extract_docx()
+                # Reset stream position if it was checked by is_zipfile
+                if self._source_stream is not None and hasattr(self._source_stream, "seek"):
+                    self._source_stream.seek(0)
+                self._extract_docx(zip_source)
             else:
+                if self._source_stream is not None:
+                    raise ValidationError("In-memory source must be a valid .docx (ZIP) file")
                 # Assume it's already an unpacked XML file
                 self._is_zip = False
-                self._temp_dir = self.path.parent
+                self._temp_dir = self.path.parent  # type: ignore
+        except ValidationError:
+            raise
         except Exception as e:
             raise ValidationError(f"Failed to load document: {e}") from e
 
@@ -132,10 +188,10 @@ class Document:
             if self._is_zip:
                 document_xml = self._temp_dir / "word" / "document.xml"  # type: ignore
             else:
-                document_xml = self.path
+                document_xml = self.path  # type: ignore
 
             if not document_xml.exists():
-                raise ValidationError(f"document.xml not found in {self.path}")
+                raise ValidationError(f"document.xml not found in {source_desc}")
 
             # Parse XML with lxml
             parser = etree.XMLParser(remove_blank_text=False)
@@ -144,15 +200,21 @@ class Document:
 
         except etree.XMLSyntaxError as e:
             raise ValidationError(f"Invalid XML in document: {e}") from e
+        except ValidationError:
+            raise
         except Exception as e:
             raise ValidationError(f"Failed to parse document XML: {e}") from e
 
-    def _extract_docx(self) -> None:
-        """Extract the .docx ZIP archive to a temporary directory."""
+    def _extract_docx(self, source: Path | BinaryIO) -> None:
+        """Extract the .docx ZIP archive to a temporary directory.
+
+        Args:
+            source: Path to the .docx file or a file-like object containing it
+        """
         self._temp_dir = Path(tempfile.mkdtemp(prefix="docx_redline_"))
 
         try:
-            with zipfile.ZipFile(self.path, "r") as zip_ref:
+            with zipfile.ZipFile(source, "r") as zip_ref:
                 zip_ref.extractall(self._temp_dir)
         except Exception as e:
             # Clean up on failure
@@ -1133,8 +1195,7 @@ class Document:
 
         # Common date patterns with their corresponding datetime format strings
         months_long = (
-            "January|February|March|April|May|June|July|"
-            "August|September|October|November|December"
+            "January|February|March|April|May|June|July|August|September|October|November|December"
         )
         months_short = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
 
@@ -3146,7 +3207,7 @@ class Document:
         ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
         part_name = "/word/commentsExtended.xml"
         content_type = (
-            "application/vnd.openxmlformats-officedocument.wordprocessingml" ".commentsExtended+xml"
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"
         )
 
         if content_types_path.exists():
@@ -3327,7 +3388,7 @@ class Document:
         """
         tables = self.tables
         if table_index < 0 or table_index >= len(tables):
-            raise IndexError(f"Table index {table_index} out of range (0-{len(tables)-1})")
+            raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
 
         table = tables[table_index]
         cell = table.get_cell(row, col)
@@ -3431,7 +3492,7 @@ class Document:
         tables = self.tables
         if table_index is not None:
             if table_index < 0 or table_index >= len(tables):
-                raise IndexError(f"Table index {table_index} out of range (0-{len(tables)-1})")
+                raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
             tables = [tables[table_index]]
 
         # Search and replace in each table
@@ -3521,14 +3582,14 @@ class Document:
 
         tables = self.tables
         if table_index < 0 or table_index >= len(tables):
-            raise IndexError(f"Table index {table_index} out of range (0-{len(tables)-1})")
+            raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
 
         table = tables[table_index]
 
         # Find the row to insert after
         if isinstance(after_row, int):
             if after_row < 0 or after_row >= table.row_count:
-                raise IndexError(f"Row index {after_row} out of range (0-{table.row_count-1})")
+                raise IndexError(f"Row index {after_row} out of range (0-{table.row_count - 1})")
             insert_after_index = after_row
         else:
             # Find row containing text
@@ -3636,14 +3697,14 @@ class Document:
 
         tables = self.tables
         if table_index < 0 or table_index >= len(tables):
-            raise IndexError(f"Table index {table_index} out of range (0-{len(tables)-1})")
+            raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
 
         table = tables[table_index]
 
         # Find the row to delete
         if isinstance(row, int):
             if row < 0 or row >= table.row_count:
-                raise IndexError(f"Row index {row} out of range (0-{table.row_count-1})")
+                raise IndexError(f"Row index {row} out of range (0-{table.row_count - 1})")
             delete_index = row
         else:
             # Find row containing text
@@ -3893,14 +3954,22 @@ class Document:
 
         Args:
             output_path: Path to save the document. If None, saves to original path.
+                        For in-memory documents (loaded from bytes), output_path is required.
             validate: Whether to run full OOXML validation before saving (default: True).
                      Validation is strongly recommended to catch errors before production.
+                     Set to False for in-memory documents without an original file.
 
         Raises:
             ValidationError: If document validation fails. Error includes detailed
                 list of validation issues for bug reporting.
+            ValueError: If output_path is not provided for in-memory documents.
         """
         if output_path is None:
+            if self.path is None:
+                raise ValueError(
+                    "output_path is required for in-memory documents. "
+                    "Use doc.save(path) or doc.save_to_bytes() instead."
+                )
             output_path = self.path
         else:
             output_path = Path(output_path)
@@ -3962,6 +4031,80 @@ class Document:
             raise
         except Exception as e:
             raise ValidationError(f"Failed to save document: {e}") from e
+
+    def save_to_bytes(self, validate: bool = True) -> bytes:
+        """Save the document to bytes (in-memory).
+
+        This is useful for:
+        - Passing documents between libraries without filesystem
+        - Storing documents in databases
+        - Sending documents over network
+
+        Args:
+            validate: Whether to run OOXML validation (default: True).
+                     Set to False for in-memory documents without an original file,
+                     as validation compares against the original.
+
+        Returns:
+            bytes: The complete .docx file as bytes
+
+        Raises:
+            ValidationError: If validation fails
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> doc.replace_tracked("old", "new")
+            >>> doc_bytes = doc.save_to_bytes()
+            >>> # Store in database, send over network, etc.
+        """
+        if not self._is_zip or not self._temp_dir:
+            raise ValidationError("save_to_bytes only supported for .docx files")
+
+        try:
+            # Write the modified XML back to the temp directory
+            document_xml = self._temp_dir / "word" / "document.xml"
+            self.xml_tree.write(
+                str(document_xml),
+                encoding="utf-8",
+                xml_declaration=True,
+                pretty_print=False,
+            )
+
+            # Fix encoding declarations in all XML files
+            self._fix_encoding_declarations(self._temp_dir)
+
+            # Validate if requested and we have an original file to compare against
+            if validate and self.path is not None:
+                from .validation_docx import DOCXSchemaValidator
+
+                validator = DOCXSchemaValidator(
+                    unpacked_dir=self._temp_dir,
+                    original_file=self.path,
+                    verbose=False,
+                )
+                if not validator.validate():
+                    error_list = validator.all_errors if hasattr(validator, "all_errors") else []
+                    raise ValidationError(
+                        "Document validation failed. Please report this as a bug. "
+                        "See validation errors above for details.",
+                        errors=error_list,
+                    )
+
+            # Create ZIP in memory
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zip_ref:
+                for file in self._temp_dir.rglob("*"):
+                    if file.is_file():
+                        arcname = file.relative_to(self._temp_dir)
+                        zip_ref.write(file, arcname)
+
+            buffer.seek(0)
+            return buffer.read()
+
+        except ValidationError:
+            raise
+        except Exception as e:
+            raise ValidationError(f"Failed to save document to bytes: {e}") from e
 
     def apply_edits(
         self, edits: list[dict[str, Any]], stop_on_error: bool = False
