@@ -1,9 +1,13 @@
 ---
 name: docx
-description: "Word document creation, editing, and tracked changes. Use python-docx for creation, python-docx-redline for tracked changes/redlining."
+description: "Comprehensive document creation, editing, and analysis with support for tracked changes, comments, formatting preservation, and text extraction. When Claude needs to work with professional documents (.docx files) for: (1) Creating new documents, (2) Modifying or editing content, (3) Working with tracked changes, (4) Adding comments, or any other document tasks"
 ---
 
-# Word Document Editing Skill
+# DOCX creation, editing, and analysis
+
+## Overview
+
+A user may ask you to create, edit, or analyze the contents of a .docx file. A .docx file is essentially a ZIP archive containing XML files and other resources that you can read or edit. You have different tools and workflows available for different tasks.
 
 ## Installation
 
@@ -13,157 +17,45 @@ If imports fail, install the required packages in the relevant Python environmen
 # For document creation
 pip install python-docx
 
-# For tracked changes / redlining
+# For tracked changes / redlining (recommended for editing)
 pip install git+https://github.com/parkerhancock/python-docx-redline.git
+
+# For text extraction
+# Install pandoc: brew install pandoc (macOS) or apt-get install pandoc (Linux)
 ```
 
-## Quick Decision Tree
+## Workflow Decision Tree
 
-```
-What do you need to do?
-│
-├── Creating a new document from scratch?
-│   └── Use python-docx (Section 1)
-│
-├── Adding tracked changes (redlining)?
-│   └── Use python-docx-redline (Section 2) ★ RECOMMENDED
-│
-├── Reading/analyzing document content?
-│   └── Use python-docx-redline or python-docx (Section 3)
-│
-└── Complex edge cases (comments, images, nested changes)?
-    └── Use raw OOXML manipulation (Section 4)
-```
+### Reading/Analyzing Content
+Use "Text extraction" or "Raw XML access" sections below
 
----
+### Creating New Document
+Use python-docx - see "Creating a new Word document" section
 
-## Section 1: Creating New Documents (python-docx)
+### Editing Existing Document
+- **Simple tracked changes (insert/delete/replace)**
+  Use **python-docx-redline** (recommended) - see "Redlining with python-docx-redline"
 
-For creating new Word documents from scratch:
+- **Complex scenarios (comments, images, nested changes)**
+  Use raw OOXML manipulation - see "Advanced: Raw OOXML editing"
 
-```python
-from docx import Document
+- **Legal, academic, business, or government docs**
+  Use **python-docx-redline** for tracked changes
 
-# Create new document
-doc = Document()
+## Reading and analyzing content
 
-# Add content
-doc.add_heading("Contract Agreement", 0)
-doc.add_paragraph("This agreement is entered into on...")
-doc.add_heading("Terms and Conditions", level=1)
-doc.add_paragraph("1. Payment shall be due within 30 days.")
+### Text extraction
+If you just need to read the text contents of a document, you should convert the document to markdown using pandoc. Pandoc provides excellent support for preserving document structure and can show tracked changes:
 
-# Add a table
-table = doc.add_table(rows=2, cols=2)
-table.cell(0, 0).text = "Item"
-table.cell(0, 1).text = "Price"
-
-# Save
-doc.save("contract.docx")
+```bash
+# Convert document to markdown with tracked changes
+pandoc --track-changes=all path-to-file.docx -o output.md
+# Options: --track-changes=accept/reject/all
 ```
 
-**When to use python-docx:**
-- Creating documents from scratch
-- Adding paragraphs, headings, tables, images
-- Setting styles and formatting
-- You don't need tracked changes
+### Programmatic text access
+Use python-docx-redline for programmatic access:
 
----
-
-## Section 2: Tracked Changes / Redlining (python-docx-redline)
-
-For editing documents with tracked changes (redlining):
-
-```python
-from python_docx_redline import Document
-
-# Load existing document
-doc = Document("contract.docx")
-
-# Insert text with tracked changes
-doc.insert_tracked(" (as amended)", after="Section 2.1")
-
-# Replace text with tracked changes
-doc.replace_tracked("30 days", "45 days")
-
-# Delete text with tracked changes
-doc.delete_tracked("subject to approval")
-
-# Save - changes appear as tracked in Word
-doc.save("contract_redlined.docx")
-```
-
-### Key Features
-
-**Smart Text Search** - Handles text fragmented across XML runs:
-```python
-# Works even if "30 days" is split across multiple <w:r> elements
-doc.replace_tracked("30 days", "45 days")
-```
-
-**Regex Support** - Pattern matching with capture groups:
-```python
-# Update all occurrences of "X days" to "X business days"
-doc.replace_tracked(r"(\d+) days", r"\1 business days", regex=True)
-```
-
-**Scoped Edits** - Limit changes to specific sections:
-```python
-doc.replace_tracked(
-    "Client",
-    "Customer",
-    scope="section:Payment Terms"
-)
-```
-
-**Batch Operations** - Apply multiple edits from YAML:
-```python
-doc.apply_edit_file("edits.yaml")
-```
-
-**MS365 Identity** - Link changes to real users:
-```python
-from python_docx_redline import Document, AuthorIdentity
-
-identity = AuthorIdentity(
-    author="Parker Hancock",
-    email="parker@company.com",
-    provider_id="AD",
-    guid="c5c513d2-1f51-4d69-ae91-17e5787f9bfc"
-)
-doc = Document("contract.docx", author=identity)
-```
-
-### Integration with python-docx
-
-Create with python-docx, then add tracked changes:
-
-```python
-from docx import Document as PythonDocxDocument
-from python_docx_redline import from_python_docx
-
-# Create document with python-docx
-py_doc = PythonDocxDocument()
-py_doc.add_heading("Contract", 0)
-py_doc.add_paragraph("Payment terms: net 30 days")
-
-# Convert to python-docx-redline for tracked edits
-doc = from_python_docx(py_doc, author="Legal Team")
-doc.replace_tracked("net 30 days", "net 45 days")
-doc.save("contract_redlined.docx")
-```
-
-**When to use python-docx-redline:**
-- Adding tracked insertions, deletions, or replacements
-- Editing contracts, legal documents, or any document requiring revision history
-- Batch processing multiple similar edits
-- When you need changes to be visible in Word's Track Changes view
-
----
-
-## Section 3: Reading/Analyzing Documents
-
-### Programmatic access with python-docx-redline:
 ```python
 from python_docx_redline import Document
 
@@ -186,92 +78,124 @@ for section in doc.sections:
         print("  Contains payment terms")
 ```
 
-### Quick text extraction with pandoc:
-```bash
-pandoc --track-changes=all document.docx -o output.md
-```
+### Raw XML access
+You need raw XML access for: comments, complex formatting, document structure, embedded media, and metadata. For any of these features, you'll need to unpack a document and read its raw XML contents.
 
----
-
-## Section 4: Raw OOXML Manipulation (Advanced)
-
-Only use raw OOXML for scenarios not supported by the libraries above:
-- Adding comments with tracked changes
-- Modifying another author's tracked changes
-- Inserting images with tracked changes
-- Complex nested revision scenarios
-
-### Workflow:
-
-1. **Unpack** the document:
+#### Unpacking a file
 ```bash
 unzip document.docx -d unpacked/
 ```
 
-2. **Edit** `word/document.xml` directly with proper OOXML patterns
+#### Key file structures
+* `word/document.xml` - Main document contents
+* `word/comments.xml` - Comments referenced in document.xml
+* `word/media/` - Embedded images and media files
+* Tracked changes use `<w:ins>` (insertions) and `<w:del>` (deletions) tags
 
-3. **Repack**:
-```bash
-cd unpacked && zip -r ../modified.docx *
+## Creating a new Word document
+
+When creating a new Word document from scratch, use **python-docx**:
+
+```python
+from docx import Document
+
+# Create new document
+doc = Document()
+
+# Add content
+doc.add_heading("Contract Agreement", 0)
+doc.add_paragraph("This agreement is entered into on...")
+doc.add_heading("Terms and Conditions", level=1)
+doc.add_paragraph("1. Payment shall be due within 30 days.")
+
+# Add a table
+table = doc.add_table(rows=2, cols=2)
+table.cell(0, 0).text = "Item"
+table.cell(0, 1).text = "Price"
+
+# Save
+doc.save("contract.docx")
 ```
 
-### Tracked Change XML Patterns:
+### python-docx features
+- Add paragraphs, headings, tables, images
+- Set styles and formatting
+- Create lists (numbered and bulleted)
+- Add headers and footers
+- Insert page breaks
 
-**Insertion:**
-```xml
-<w:ins w:id="1" w:author="Claude" w:date="2025-01-15T10:00:00Z">
-  <w:r><w:t>inserted text</w:t></w:r>
-</w:ins>
-```
+## Redlining with python-docx-redline
 
-**Deletion:**
-```xml
-<w:del w:id="2" w:author="Claude" w:date="2025-01-15T10:00:00Z">
-  <w:r><w:delText>deleted text</w:delText></w:r>
-</w:del>
-```
+**This is the recommended approach for editing documents with tracked changes.** The python-docx-redline library handles the complexity of OOXML tracked changes automatically.
 
----
-
-## Comparison Table
-
-| Task | python-docx | python-docx-redline | Raw OOXML |
-|------|-------------|---------------------|-----------|
-| Create new document | **Best** | - | Possible |
-| Add paragraphs/headings | **Best** | - | Possible |
-| Add tables | **Best** | - | Possible |
-| Insert tracked text | - | **Best** | Possible |
-| Delete tracked text | - | **Best** | Possible |
-| Replace tracked text | - | **Best** | Possible |
-| Regex find/replace | - | **Best** | Manual |
-| Scoped edits | - | **Best** | Manual |
-| Batch from YAML | - | **Best** | Manual |
-| Add comments | - | - | **Required** |
-| Modify other's changes | - | - | **Required** |
-
----
-
-## Examples
-
-### Contract Redlining Workflow
+### Basic Operations
 
 ```python
 from python_docx_redline import Document
 
-# Load the contract
-doc = Document("original_contract.docx", author="Legal Team")
+# Load existing document
+doc = Document("contract.docx")
 
-# Apply standard amendments
-doc.replace_tracked("net 30 days", "net 45 days")
-doc.replace_tracked("Contractor", "Service Provider")
-doc.insert_tracked(" (as amended)", after="Agreement dated")
-doc.delete_tracked("subject to board approval")
+# Insert text with tracked changes
+doc.insert_tracked(" (as amended)", after="Section 2.1")
 
-# Save with tracked changes visible
+# Replace text with tracked changes
+doc.replace_tracked("30 days", "45 days")
+
+# Delete text with tracked changes
+doc.delete_tracked("subject to approval")
+
+# Save - changes appear as tracked in Word
 doc.save("contract_redlined.docx")
 ```
 
-### Batch Processing from YAML
+### Smart Text Search
+
+The library handles text fragmented across multiple XML runs automatically:
+
+```python
+# Works even if "30 days" is split across multiple <w:r> elements
+doc.replace_tracked("30 days", "45 days")
+```
+
+### Regex Support
+
+Use regular expressions with capture groups:
+
+```python
+# Update all occurrences of "X days" to "X business days"
+doc.replace_tracked(r"(\d+) days", r"\1 business days", regex=True)
+
+# Redact dollar amounts
+doc.replace_tracked(r"\$[\d,]+\.?\d*", "$XXX.XX", regex=True)
+
+# Swap date format from MM/DD/YYYY to DD/MM/YYYY
+doc.replace_tracked(r"(\d{2})/(\d{2})/(\d{4})", r"\2/\1/\3", regex=True)
+```
+
+### Scoped Edits
+
+Limit changes to specific sections:
+
+```python
+# Only modify in Payment Terms section
+doc.replace_tracked(
+    "Client",
+    "Customer",
+    scope="section:Payment Terms"
+)
+
+# Only modify paragraphs containing specific text
+doc.replace_tracked(
+    "30 days",
+    "45 days",
+    scope="paragraph_containing:payment"
+)
+```
+
+### Batch Operations from YAML
+
+Apply multiple edits from a configuration file:
 
 ```yaml
 # edits.yaml
@@ -290,6 +214,12 @@ edits:
 
   - type: delete_tracked
     text: "subject to board approval"
+
+  # Regex operations
+  - type: replace_tracked
+    find: "(\d+) days"
+    replace: "\\1 business days"
+    regex: true
 ```
 
 ```python
@@ -304,23 +234,249 @@ for result in results:
 doc.save("contract_edited.docx")
 ```
 
-### Create + Edit Workflow
+### MS365 Identity Integration
+
+Link changes to real MS365 users with full identity information:
+
+```python
+from python_docx_redline import Document, AuthorIdentity
+
+identity = AuthorIdentity(
+    author="Parker Hancock",
+    email="parker@company.com",
+    provider_id="AD",
+    guid="c5c513d2-1f51-4d69-ae91-17e5787f9bfc"
+)
+
+doc = Document("contract.docx", author=identity)
+doc.replace_tracked("old term", "new term")
+doc.save("contract_edited.docx")
+# Changes now appear in Word with full user profile
+```
+
+### Integration with python-docx
+
+Create with python-docx, then add tracked changes:
 
 ```python
 from docx import Document as PythonDocxDocument
 from python_docx_redline import from_python_docx
 
-# Step 1: Create with python-docx
+# Create document with python-docx
 py_doc = PythonDocxDocument()
-py_doc.add_heading("Service Agreement", 0)
-py_doc.add_paragraph("This agreement between Company and Contractor...")
-py_doc.add_paragraph("Payment: Net 30 days from invoice date.")
+py_doc.add_heading("Contract", 0)
+py_doc.add_paragraph("Payment terms: net 30 days")
 
-# Step 2: Add tracked changes with python-docx-redline
-doc = from_python_docx(py_doc, author="Legal Review")
-doc.replace_tracked("Contractor", "Service Provider")
-doc.replace_tracked("Net 30 days", "Net 45 days")
-
-# Step 3: Save
-doc.save("agreement_reviewed.docx")
+# Convert to python-docx-redline for tracked edits
+doc = from_python_docx(py_doc, author="Legal Team")
+doc.replace_tracked("net 30 days", "net 45 days")
+doc.save("contract_redlined.docx")
 ```
+
+### In-Memory Workflows
+
+Work without filesystem:
+
+```python
+# Load from bytes
+with open("contract.docx", "rb") as f:
+    doc = Document(f.read())
+
+# Make changes
+doc.replace_tracked("old", "new")
+
+# Get bytes for storage/transmission
+doc_bytes = doc.save_to_bytes()
+```
+
+## Advanced: Raw OOXML editing
+
+Use raw OOXML manipulation only for scenarios not supported by python-docx-redline:
+- Adding comments with tracked changes
+- Modifying another author's tracked changes
+- Inserting images with tracked changes
+- Complex nested revision scenarios
+
+### Workflow
+
+1. **Unpack** the document:
+   ```bash
+   unzip document.docx -d unpacked/
+   ```
+
+2. **Edit** `word/document.xml` directly with proper OOXML patterns
+
+3. **Repack**:
+   ```bash
+   cd unpacked && zip -r ../modified.docx *
+   ```
+
+### Schema Compliance
+- **Element ordering in `<w:pPr>`**: `<w:pStyle>`, `<w:numPr>`, `<w:spacing>`, `<w:ind>`, `<w:jc>`
+- **Whitespace**: Add `xml:space='preserve'` to `<w:t>` elements with leading/trailing spaces
+- **Unicode**: Escape characters in ASCII content: `"` becomes `&#8220;`
+- **RSIDs must be 8-digit hex**: Use values like `00AB1234` (only 0-9, A-F characters)
+
+### Tracked Change XML Patterns
+
+**Text Insertion:**
+```xml
+<w:ins w:id="1" w:author="Claude" w:date="2025-01-15T10:00:00Z">
+  <w:r w:rsidR="00AB1234">
+    <w:t>inserted text</w:t>
+  </w:r>
+</w:ins>
+```
+
+**Text Deletion:**
+```xml
+<w:del w:id="2" w:author="Claude" w:date="2025-01-15T10:00:00Z">
+  <w:r w:rsidDel="00AB1234">
+    <w:delText>deleted text</w:delText>
+  </w:r>
+</w:del>
+```
+
+**Minimal Edit Principle:**
+Only mark text that actually changes. Keep ALL unchanged text outside `<w:del>`/`<w:ins>` tags.
+
+```xml
+<!-- BAD - Replaces entire sentence -->
+<w:del><w:r><w:delText>The term is 30 days.</w:delText></w:r></w:del>
+<w:ins><w:r><w:t>The term is 60 days.</w:t></w:r></w:ins>
+
+<!-- GOOD - Only marks what changed -->
+<w:r><w:t>The term is </w:t></w:r>
+<w:del><w:r><w:delText>30</w:delText></w:r></w:del>
+<w:ins><w:r><w:t>60</w:t></w:r></w:ins>
+<w:r><w:t> days.</w:t></w:r>
+```
+
+**Deleting Another Author's Insertion:**
+```xml
+<!-- Nest deletion inside the original insertion -->
+<w:ins w:author="Jane Smith" w:id="16">
+  <w:del w:author="Claude" w:id="40">
+    <w:r><w:delText>monthly</w:delText></w:r>
+  </w:del>
+</w:ins>
+<w:ins w:author="Claude" w:id="41">
+  <w:r><w:t>weekly</w:t></w:r>
+</w:ins>
+```
+
+**Restoring Another Author's Deletion:**
+```xml
+<!-- Leave their deletion unchanged, add new insertion after it -->
+<w:del w:author="Jane Smith" w:id="50">
+  <w:r><w:delText>within 30 days</w:delText></w:r>
+</w:del>
+<w:ins w:author="Claude" w:id="51">
+  <w:r><w:t>within 30 days</w:t></w:r>
+</w:ins>
+```
+
+### Document Content Patterns
+
+**Basic Structure:**
+```xml
+<w:p>
+  <w:r><w:t>Text content</w:t></w:r>
+</w:p>
+```
+
+**Headings:**
+```xml
+<w:p>
+  <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+  <w:r><w:t>Section Heading</w:t></w:r>
+</w:p>
+```
+
+**Text Formatting:**
+```xml
+<!-- Bold -->
+<w:r><w:rPr><w:b/><w:bCs/></w:rPr><w:t>Bold</w:t></w:r>
+<!-- Italic -->
+<w:r><w:rPr><w:i/><w:iCs/></w:rPr><w:t>Italic</w:t></w:r>
+<!-- Underline -->
+<w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Underlined</w:t></w:r>
+```
+
+**Tables:**
+```xml
+<w:tbl>
+  <w:tblPr>
+    <w:tblStyle w:val="TableGrid"/>
+    <w:tblW w:w="0" w:type="auto"/>
+  </w:tblPr>
+  <w:tblGrid>
+    <w:gridCol w:w="4675"/><w:gridCol w:w="4675"/>
+  </w:tblGrid>
+  <w:tr>
+    <w:tc>
+      <w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>
+      <w:p><w:r><w:t>Cell 1</w:t></w:r></w:p>
+    </w:tc>
+    <w:tc>
+      <w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>
+      <w:p><w:r><w:t>Cell 2</w:t></w:r></w:p>
+    </w:tc>
+  </w:tr>
+</w:tbl>
+```
+
+## Converting Documents to Images
+
+To visually analyze Word documents, convert them to images using a two-step process:
+
+1. **Convert DOCX to PDF**:
+   ```bash
+   soffice --headless --convert-to pdf document.docx
+   ```
+
+2. **Convert PDF pages to JPEG images**:
+   ```bash
+   pdftoppm -jpeg -r 150 document.pdf page
+   ```
+   This creates files like `page-1.jpg`, `page-2.jpg`, etc.
+
+Options:
+- `-r 150`: Sets resolution to 150 DPI
+- `-jpeg`: Output JPEG format (use `-png` for PNG)
+- `-f N`: First page to convert
+- `-l N`: Last page to convert
+
+## Comparison Table
+
+| Task | python-docx | python-docx-redline | Raw OOXML |
+|------|-------------|---------------------|-----------|
+| Create new document | **Best** | - | Possible |
+| Add paragraphs/headings | **Best** | - | Possible |
+| Add tables | **Best** | - | Possible |
+| Insert tracked text | - | **Best** | Possible |
+| Delete tracked text | - | **Best** | Possible |
+| Replace tracked text | - | **Best** | Possible |
+| Regex find/replace | - | **Best** | Manual |
+| Scoped edits | - | **Best** | Manual |
+| Batch from YAML | - | **Best** | Manual |
+| Add comments | - | - | **Required** |
+| Modify other's changes | - | - | **Required** |
+| Insert images w/ tracking | - | - | **Required** |
+
+## Code Style Guidelines
+
+**IMPORTANT**: When generating code for DOCX operations:
+- Write concise code
+- Avoid verbose variable names and redundant operations
+- Avoid unnecessary print statements
+
+## Dependencies
+
+Required dependencies (install if not available):
+
+- **python-docx**: `pip install python-docx` (for creating new documents)
+- **python-docx-redline**: `pip install git+https://github.com/parkerhancock/python-docx-redline.git` (for tracked changes)
+- **pandoc**: `brew install pandoc` or `apt-get install pandoc` (for text extraction)
+- **LibreOffice**: `brew install --cask libreoffice` or `apt-get install libreoffice` (for PDF conversion)
+- **Poppler**: `brew install poppler` or `apt-get install poppler-utils` (for pdftoppm)
