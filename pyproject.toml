@@ -63,12 +63,16 @@ ignore = []
 [tool.ruff.lint.per-file-ignores]
 # Allow long lines in test files for XML fixtures
 "tests/*.py" = ["E501"]
+# Anthropic skill scripts - third-party code, exempt from strict checks
+"skills/docx/**/*.py" = ["E501", "E402", "N806", "N802", "N803", "N815"]
 
 [tool.mypy]
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
+# Exclude skill scripts from strict type checking (third-party code)
+exclude = ["skills/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

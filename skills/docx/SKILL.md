@@ -297,18 +297,38 @@ Use raw OOXML manipulation only for scenarios not supported by python-docx-redli
 - Inserting images with tracked changes
 - Complex nested revision scenarios
 
+### Helper Scripts
+
+This skill includes helper scripts from [Anthropic Skills](https://github.com/anthropics/skills) in the `scripts/` and `ooxml/` directories:
+
+```python
+# Using the Document class for comments and tracked changes
+from skills.docx.scripts.document import Document
+
+doc = Document('workspace/unpacked', author="Claude")
+node = doc["word/document.xml"].get_node(tag="w:del", attrs={"w:id": "1"})
+doc.add_comment(start=node, end=node, text="Please review this deletion")
+doc.save()
+```
+
+See `scripts/README.md` and `ooxml.md` for detailed documentation.
+
 ### Workflow
 
 1. **Unpack** the document:
    ```bash
    unzip document.docx -d unpacked/
+   # Or use the helper script:
+   python -m skills.docx.ooxml.scripts.unpack document.docx unpacked/
    ```
 
-2. **Edit** `word/document.xml` directly with proper OOXML patterns
+2. **Edit** `word/document.xml` directly with proper OOXML patterns (or use the helper scripts)
 
 3. **Repack**:
    ```bash
    cd unpacked && zip -r ../modified.docx *
+   # Or use the helper script:
+   python -m skills.docx.ooxml.scripts.pack unpacked/ modified.docx
    ```
 
 ### Schema Compliance

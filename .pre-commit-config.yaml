@@ -22,7 +22,7 @@ repos:
           - types-PyYAML
           - lxml-stubs
         args: [--ignore-missing-imports, --disable-error-code=import-untyped]
-        exclude: ^tests/
+        exclude: ^(tests/|skills/)
 
   # Pytest with coverage requirement
   - repo: local
