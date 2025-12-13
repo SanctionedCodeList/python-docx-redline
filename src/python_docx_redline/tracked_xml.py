@@ -306,7 +306,7 @@ class TrackedXMLGenerator:
         self,
         previous_rpr: etree._Element | None,
         author: str | None = None,
-    ) -> etree._Element:
+    ) -> tuple[etree._Element, int]:
         """Generate <w:rPrChange> element for tracking run property changes.
 
         This element should be appended as the last child of the current <w:rPr>.
@@ -318,10 +318,10 @@ class TrackedXMLGenerator:
             author: Override author (uses default if None)
 
         Returns:
-            <w:rPrChange> element ready to be appended to <w:rPr>
+            Tuple of (<w:rPrChange> element, change_id)
 
         Example:
-            >>> change = generator.create_run_property_change(old_rpr)
+            >>> change, change_id = generator.create_run_property_change(old_rpr)
             >>> current_rpr.append(change)
         """
         author = author if author is not None else self.author
@@ -353,13 +353,13 @@ class TrackedXMLGenerator:
             # Empty previous state
             rpr_change.append(etree.Element(_w("rPr")))
 
-        return rpr_change
+        return rpr_change, change_id
 
     def create_paragraph_property_change(
         self,
         previous_ppr: etree._Element | None,
         author: str | None = None,
-    ) -> etree._Element:
+    ) -> tuple[etree._Element, int]:
         """Generate <w:pPrChange> element for tracking paragraph property changes.
 
         This element should be appended as the last child of the current <w:pPr>.
@@ -371,10 +371,10 @@ class TrackedXMLGenerator:
             author: Override author (uses default if None)
 
         Returns:
-            <w:pPrChange> element ready to be appended to <w:pPr>
+            Tuple of (<w:pPrChange> element, change_id)
 
         Example:
-            >>> change = generator.create_paragraph_property_change(old_ppr)
+            >>> change, change_id = generator.create_paragraph_property_change(old_ppr)
             >>> current_ppr.append(change)
         """
         author = author if author is not None else self.author
@@ -409,7 +409,7 @@ class TrackedXMLGenerator:
             # Empty previous state
             ppr_change.append(etree.Element(_w("pPr")))
 
-        return ppr_change
+        return ppr_change, change_id
 
     def get_last_change_id(self) -> int:
         """Get the last change ID that was assigned.

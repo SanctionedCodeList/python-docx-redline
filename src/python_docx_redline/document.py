@@ -1673,18 +1673,87 @@ class Document:
         # Track results
         runs_affected = 0
         last_change_id = 0
-        all_previous_formatting: dict[str, object] = {}
+        all_previous_formatting: list[dict[str, object]] = []
+        para_index = -1
+
+        # Import run splitting helper
+        from .format_builder import get_run_text, split_run_at_offset
 
         # Apply formatting to each target match
         for match in target_matches:
-            # Get paragraph index for result
-            para = match.runs[0].getparent()
+            # Use match.paragraph directly (more reliable than getparent which may
+            # return wrappers like w:hyperlink, w:ins, etc.)
+            para = match.paragraph
             para_index = all_paragraphs.index(para) if para in all_paragraphs else -1
 
-            # Process each run in the match
+            # Build list of runs to format, handling mid-run splits
+            runs_to_format = []
+
             for run_idx in range(match.start_run_index, match.end_run_index + 1):
                 run = match.runs[run_idx]
+                run_text = get_run_text(run)
 
+                is_start = run_idx == match.start_run_index
+                is_end = run_idx == match.end_run_index
+                is_single = is_start and is_end
+
+                if is_single and (match.start_offset > 0 or match.end_offset < len(run_text)):
+                    # Match is within a single run - need to split at both ends
+                    if match.start_offset > 0:
+                        before_run, remainder = split_run_at_offset(run, match.start_offset)
+                        # Insert before_run before original run
+                        parent = run.getparent()
+                        idx = list(parent).index(run)
+                        parent.insert(idx, before_run)
+                        # Now split remainder at adjusted offset
+                        adjusted_end = match.end_offset - match.start_offset
+                        if adjusted_end < len(run_text) - match.start_offset:
+                            middle_run, after_run = split_run_at_offset(remainder, adjusted_end)
+                            # Replace original with middle and after
+                            parent.remove(run)
+                            parent.insert(idx + 1, middle_run)
+                            parent.insert(idx + 2, after_run)
+                            runs_to_format.append(middle_run)
+                        else:
+                            parent.remove(run)
+                            parent.insert(idx + 1, remainder)
+                            runs_to_format.append(remainder)
+                    else:
+                        # Only split at end
+                        middle_run, after_run = split_run_at_offset(run, match.end_offset)
+                        parent = run.getparent()
+                        idx = list(parent).index(run)
+                        parent.remove(run)
+                        parent.insert(idx, middle_run)
+                        parent.insert(idx + 1, after_run)
+                        runs_to_format.append(middle_run)
+
+                elif is_start and match.start_offset > 0:
+                    # Split start run - only format the part from start_offset onwards
+                    before_run, after_run = split_run_at_offset(run, match.start_offset)
+                    parent = run.getparent()
+                    idx = list(parent).index(run)
+                    parent.remove(run)
+                    parent.insert(idx, before_run)
+                    parent.insert(idx + 1, after_run)
+                    runs_to_format.append(after_run)
+
+                elif is_end and match.end_offset < len(run_text):
+                    # Split end run - only format the part up to end_offset
+                    before_run, after_run = split_run_at_offset(run, match.end_offset)
+                    parent = run.getparent()
+                    idx = list(parent).index(run)
+                    parent.remove(run)
+                    parent.insert(idx, before_run)
+                    parent.insert(idx + 1, after_run)
+                    runs_to_format.append(before_run)
+
+                else:
+                    # Whole run is within match - format entirely
+                    runs_to_format.append(run)
+
+            # Now apply formatting to only the runs that need it
+            for run in runs_to_format:
                 # Get or create run properties
                 existing_rpr = run.find(f"{{{WORD_NAMESPACE}}}rPr")
 
@@ -1693,9 +1762,9 @@ class Document:
 
                 previous_rpr = deepcopy(existing_rpr) if existing_rpr is not None else None
 
-                # Extract previous formatting for result
+                # Extract previous formatting for result (per-run)
                 prev_formatting = RunPropertyBuilder.extract(previous_rpr)
-                all_previous_formatting.update(prev_formatting)
+                all_previous_formatting.append(prev_formatting)
 
                 # Create new rPr with merged formatting
                 new_rpr = RunPropertyBuilder.merge(existing_rpr, format_updates)
@@ -1704,9 +1773,10 @@ class Document:
                 if not RunPropertyBuilder.has_changes(previous_rpr, new_rpr):
                     continue  # No-op for this run
 
-                # Create the tracked change element
-                rpr_change = self._xml_generator.create_run_property_change(previous_rpr, author)
-                last_change_id = self._xml_generator.get_last_change_id()
+                # Create the tracked change element (returns tuple now)
+                rpr_change, last_change_id = self._xml_generator.create_run_property_change(
+                    previous_rpr, author
+                )
 
                 # Append the change tracking element to the new rPr
                 new_rpr.append(rpr_change)
@@ -1719,9 +1789,10 @@ class Document:
                 runs_affected += 1
 
         return FormatResult(
-            success=runs_affected > 0,
+            success=True,  # Operation completed without error
+            changed=runs_affected > 0,  # Whether any changes were made
             text_matched=text,
-            paragraph_index=para_index if target_matches else -1,
+            paragraph_index=para_index if len(target_matches) == 1 else -1,
             changes_applied=format_updates,
             previous_formatting=all_previous_formatting,
             change_id=last_change_id,
@@ -1853,7 +1924,7 @@ class Document:
         existing_ppr = target_para.find(f"{{{WORD_NAMESPACE}}}pPr")
         previous_ppr = deepcopy(existing_ppr) if existing_ppr is not None else None
 
-        # Extract previous formatting for result
+        # Extract previous formatting for result (as single-item list for consistency)
         prev_formatting = ParagraphPropertyBuilder.extract(previous_ppr)
 
         # Create new pPr with merged formatting
@@ -1862,18 +1933,20 @@ class Document:
         # Check if there are actual changes
         if not ParagraphPropertyBuilder.has_changes(previous_ppr, new_ppr):
             return FormatResult(
-                success=False,
+                success=True,  # Operation completed without error
+                changed=False,  # No changes needed
                 text_matched=self._get_paragraph_text(target_para)[:50],
                 paragraph_index=para_index,
                 changes_applied={},
-                previous_formatting=prev_formatting,
+                previous_formatting=[prev_formatting],
                 change_id=0,
                 runs_affected=0,
             )
 
-        # Create the tracked change element
-        ppr_change = self._xml_generator.create_paragraph_property_change(previous_ppr, author)
-        change_id = self._xml_generator.get_last_change_id()
+        # Create the tracked change element (returns tuple now)
+        ppr_change, change_id = self._xml_generator.create_paragraph_property_change(
+            previous_ppr, author
+        )
 
         # Append the change tracking element to the new pPr
         new_ppr.append(ppr_change)
@@ -1885,10 +1958,11 @@ class Document:
 
         return FormatResult(
             success=True,
+            changed=True,
             text_matched=self._get_paragraph_text(target_para)[:50],
             paragraph_index=para_index,
             changes_applied=format_updates,
-            previous_formatting=prev_formatting,
+            previous_formatting=[prev_formatting],
             change_id=change_id,
             runs_affected=1,
         )
@@ -3005,6 +3079,21 @@ class Document:
                 self._remove_element(del_elem)
                 count += 1
 
+        # Accept format changes by this author (remove rPrChange/pPrChange, keep new formatting)
+        for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
+            if rpr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
+                parent = rpr_change.getparent()
+                if parent is not None:
+                    parent.remove(rpr_change)
+                count += 1
+
+        for ppr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange")):
+            if ppr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
+                parent = ppr_change.getparent()
+                if parent is not None:
+                    parent.remove(ppr_change)
+                count += 1
+
         return count
 
     def reject_by_author(self, author: str) -> int:
@@ -3032,6 +3121,48 @@ class Document:
         for del_elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del")):
             if del_elem.get(f"{{{WORD_NAMESPACE}}}author") == author:
                 self._unwrap_deletion(del_elem)
+                count += 1
+
+        # Reject format changes by this author (restore previous formatting)
+        for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
+            if rpr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
+                parent_rpr = rpr_change.getparent()
+                if parent_rpr is not None:
+                    # Get the previous rPr from inside the change element
+                    prev_rpr = rpr_change.find(f"{{{WORD_NAMESPACE}}}rPr")
+                    if prev_rpr is not None:
+                        # Replace current rPr content with previous
+                        # Clear all children except rPrChange
+                        for child in list(parent_rpr):
+                            if child.tag != f"{{{WORD_NAMESPACE}}}rPrChange":
+                                parent_rpr.remove(child)
+                        # Copy previous formatting back
+                        for child in prev_rpr:
+                            parent_rpr.insert(0, child)
+                    # Remove the change tracking element
+                    parent_rpr.remove(rpr_change)
+                count += 1
+
+        for ppr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange")):
+            if ppr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
+                parent_ppr = ppr_change.getparent()
+                if parent_ppr is not None:
+                    # Get the previous pPr from inside the change element
+                    prev_ppr = ppr_change.find(f"{{{WORD_NAMESPACE}}}pPr")
+                    if prev_ppr is not None:
+                        # Replace current pPr content with previous
+                        # Clear all children except pPrChange and rPr (run props are separate)
+                        for child in list(parent_ppr):
+                            if child.tag not in (
+                                f"{{{WORD_NAMESPACE}}}pPrChange",
+                                f"{{{WORD_NAMESPACE}}}rPr",
+                            ):
+                                parent_ppr.remove(child)
+                        # Copy previous formatting back
+                        for child in prev_ppr:
+                            parent_ppr.insert(0, child)
+                    # Remove the change tracking element
+                    parent_ppr.remove(ppr_change)
                 count += 1
 
         return count

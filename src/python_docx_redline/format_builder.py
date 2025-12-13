@@ -182,9 +182,17 @@ class RunPropertyBuilder:
                 elem = rpr.find(_w(elem_name))
 
                 if value is False:
-                    # Remove the element if setting to False
-                    if elem is not None:
-                        rpr.remove(elem)
+                    # For boolean toggles, use w:val="0" to explicitly turn off
+                    # This overrides style defaults (just removing element reverts to style)
+                    if val_attr is None:
+                        # Boolean property - set w:val="0" to explicitly disable
+                        if elem is None:
+                            elem = etree.SubElement(rpr, _w(elem_name))
+                        elem.set(_w("val"), "0")
+                    else:
+                        # Value property - remove it entirely
+                        if elem is not None:
+                            rpr.remove(elem)
                 else:
                     if elem is None:
                         elem = etree.SubElement(rpr, _w(elem_name))
@@ -193,6 +201,10 @@ class RunPropertyBuilder:
                         # Apply converter if present
                         xml_val = to_xml(value) if to_xml else value
                         elem.set(_w(val_attr), str(xml_val))
+                    else:
+                        # Boolean property with True - remove any w:val="0"
+                        if _w("val") in elem.attrib:
+                            del elem.attrib[_w("val")]
 
                 # Handle font_size_cs automatically when font_size is set
                 if prop_name == "font_size" and value is not False:
@@ -603,3 +615,82 @@ class ParagraphPropertyBuilder:
             True if properties differ, False if identical
         """
         return bool(cls.diff(old, new))
+
+
+# Run splitting utilities for format_tracked
+
+
+def split_run_at_offset(run: etree._Element, offset: int) -> tuple[etree._Element, etree._Element]:
+    """Split a run at the specified character offset.
+
+    Creates two runs: one containing text before the offset, one containing
+    text from the offset onwards. Both runs inherit the original run's properties.
+
+    Args:
+        run: The <w:r> element to split
+        offset: Character position to split at (0-based)
+
+    Returns:
+        Tuple of (before_run, after_run)
+
+    Example:
+        If run contains "Hello World" and offset=6:
+        Returns (run with "Hello "), (run with "World")
+    """
+    # Get all text from the run
+    text_elem = run.find(_w("t"))
+    if text_elem is None or text_elem.text is None:
+        # No text to split - return original and empty
+        empty_run = deepcopy(run)
+        for t in empty_run.findall(_w("t")):
+            t.text = ""
+        return run, empty_run
+
+    full_text = text_elem.text
+    if offset <= 0:
+        # Split at beginning - return empty before, original after
+        empty_run = deepcopy(run)
+        for t in empty_run.findall(_w("t")):
+            t.text = ""
+        return empty_run, run
+    if offset >= len(full_text):
+        # Split at end - return original before, empty after
+        empty_run = deepcopy(run)
+        for t in empty_run.findall(_w("t")):
+            t.text = ""
+        return run, empty_run
+
+    # Create before run
+    before_run = deepcopy(run)
+    before_text = full_text[:offset]
+    before_t = before_run.find(_w("t"))
+    if before_t is not None:
+        before_t.text = before_text
+        # Preserve xml:space if needed
+        if before_text and (before_text[0].isspace() or before_text[-1].isspace()):
+            before_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+
+    # Create after run
+    after_run = deepcopy(run)
+    after_text = full_text[offset:]
+    after_t = after_run.find(_w("t"))
+    if after_t is not None:
+        after_t.text = after_text
+        # Preserve xml:space if needed
+        if after_text and (after_text[0].isspace() or after_text[-1].isspace()):
+            after_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+
+    return before_run, after_run
+
+
+def get_run_text(run: etree._Element) -> str:
+    """Extract text content from a run element.
+
+    Args:
+        run: The <w:r> element
+
+    Returns:
+        Text content of all <w:t> elements in the run
+    """
+    text_elements = run.findall(_w("t"))
+    return "".join(elem.text or "" for elem in text_elements)

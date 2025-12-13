@@ -75,26 +75,30 @@ class FormatResult:
     """Result of a format operation.
 
     Attributes:
-        success: Whether the formatting was applied successfully
+        success: Whether the operation completed without error
+        changed: Whether any formatting changes were actually applied
         text_matched: The text that was formatted
-        paragraph_index: Index of the affected paragraph
+        paragraph_index: Index of the affected paragraph (or -1 for multi-para)
         changes_applied: Dictionary of formatting changes applied
-        previous_formatting: Dictionary of previous formatting values
-        change_id: The w:id assigned to this tracked change
+        previous_formatting: List of dicts, one per affected run, with previous values
+        change_id: The w:id assigned to this tracked change (last one if multiple)
         runs_affected: Number of runs that were modified
     """
 
     success: bool
+    changed: bool
     text_matched: str
     paragraph_index: int
     changes_applied: dict[str, object]
-    previous_formatting: dict[str, object]
+    previous_formatting: list[dict[str, object]]
     change_id: int
     runs_affected: int = 1
 
     def __str__(self) -> str:
         """Get string representation of the result."""
-        if self.success:
+        if not self.success:
+            return f"✗ Failed to format '{self.text_matched}'"
+        if self.changed:
             changes = ", ".join(f"{k}={v}" for k, v in self.changes_applied.items())
             return f"✓ Formatted '{self.text_matched}': {changes}"
-        return f"✗ Failed to format '{self.text_matched}'"
+        return f"○ No change to '{self.text_matched}' (already formatted)"

@@ -665,10 +665,11 @@ class TestTrackedXMLGeneratorFormats:
         gen = TrackedXMLGenerator(author="Test Author")
         prev_rpr = RunPropertyBuilder.build(italic=True)
 
-        change = gen.create_run_property_change(prev_rpr)
+        change, change_id = gen.create_run_property_change(prev_rpr)
 
         assert change.tag == _w("rPrChange")
         assert change.get(_w("id")) == "1"
+        assert change_id == 1
         assert change.get(_w("author")) == "Test Author"
         assert change.get(_w("date")) is not None
 
@@ -685,10 +686,11 @@ class TestTrackedXMLGeneratorFormats:
         gen = TrackedXMLGenerator(author="Test Author")
         prev_ppr = ParagraphPropertyBuilder.build(alignment="left")
 
-        change = gen.create_paragraph_property_change(prev_ppr)
+        change, change_id = gen.create_paragraph_property_change(prev_ppr)
 
         assert change.tag == _w("pPrChange")
         assert change.get(_w("id")) == "1"
+        assert change_id == 1
         assert change.get(_w("author")) == "Test Author"
 
         # Verify previous pPr is included
@@ -702,10 +704,197 @@ class TestTrackedXMLGeneratorFormats:
 
         gen = TrackedXMLGenerator()
 
-        change1 = gen.create_run_property_change(None)
-        change2 = gen.create_paragraph_property_change(None)
-        change3 = gen.create_run_property_change(None)
+        change1, id1 = gen.create_run_property_change(None)
+        change2, id2 = gen.create_paragraph_property_change(None)
+        change3, id3 = gen.create_run_property_change(None)
 
         assert change1.get(_w("id")) == "1"
         assert change2.get(_w("id")) == "2"
         assert change3.get(_w("id")) == "3"
+        assert id1 == 1
+        assert id2 == 2
+        assert id3 == 3
+
+
+class TestEdgeCases:
+    """Tests for edge cases identified in PR review."""
+
+    def test_mid_run_substring_format(self):
+        """Test formatting a substring within a single run splits correctly."""
+        # Create a document with "Hello World Today" in a single run
+        doc_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Hello World Today</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+        docx_path = create_test_docx(doc_content)
+
+        try:
+            doc = Document(docx_path, author="Test")
+
+            # Format just "World" - mid-run substring
+            result = doc.format_tracked("World", bold=True)
+
+            assert result.success
+            assert result.changed
+            assert result.runs_affected == 1
+
+            # Verify we have multiple runs now (split occurred)
+            runs = list(doc.xml_root.iter(_w("r")))
+            assert len(runs) >= 3, f"Expected at least 3 runs after split, got {len(runs)}"
+
+            # Verify rPrChange was created for tracked formatting
+            rpr_changes = list(doc.xml_root.iter(_w("rPrChange")))
+            assert len(rpr_changes) == 1
+
+            # Save and reload to verify valid OOXML
+            import tempfile
+
+            with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+            doc.save(tmp_path)
+
+            # Reload and verify document is valid
+            doc2 = Document(tmp_path, author="Test")
+            rpr_changes2 = list(doc2.xml_root.iter(_w("rPrChange")))
+            assert len(rpr_changes2) == 1
+            tmp_path.unlink()
+        finally:
+            docx_path.unlink()
+            docx_path.parent.rmdir()
+
+    def test_explicit_false_generates_val_zero(self):
+        """Test that setting bold=False explicitly generates w:val='0'."""
+        from python_docx_redline.format_builder import RunPropertyBuilder
+
+        # Build rPr with bold explicitly False
+        rpr = RunPropertyBuilder.build(bold=False)
+        b_elem = rpr.find(_w("b"))
+
+        # Should have w:b element with w:val="0", not be absent
+        assert b_elem is not None, "bold=False should create <w:b> element"
+        assert b_elem.get(_w("val")) == "0", "bold=False should set w:val='0'"
+
+    def test_format_result_changed_vs_success(self):
+        """Test that success and changed have distinct meanings."""
+        doc_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:rPr><w:b/></w:rPr>
+        <w:t>Already Bold</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+        docx_path = create_test_docx(doc_content)
+
+        try:
+            doc = Document(docx_path, author="Test")
+
+            # Format text that's already bold with bold=True
+            result = doc.format_tracked("Already Bold", bold=True)
+
+            # Operation succeeded (no error)
+            assert result.success is True
+            # But no changes were made (already formatted)
+            assert result.changed is False
+            assert result.runs_affected == 0
+        finally:
+            docx_path.unlink()
+            docx_path.parent.rmdir()
+
+    def test_previous_formatting_is_per_run_list(self):
+        """Test that previous_formatting returns a list with per-run data."""
+        doc_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:rPr><w:i/></w:rPr>
+        <w:t>Italic </w:t>
+      </w:r>
+      <w:r>
+        <w:rPr><w:b/></w:rPr>
+        <w:t>Bold Text</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+        docx_path = create_test_docx(doc_content)
+
+        try:
+            doc = Document(docx_path, author="Test")
+
+            # Format both runs with underline
+            result = doc.format_tracked("Italic Bold Text", underline=True)
+
+            assert result.success
+            assert result.changed
+            # previous_formatting should be a list
+            assert isinstance(result.previous_formatting, list)
+            # Should have entries for each run that was formatted
+            assert len(result.previous_formatting) >= 1
+        finally:
+            docx_path.unlink()
+            docx_path.parent.rmdir()
+
+    def test_accept_by_author_includes_format_changes(self):
+        """Test that accept_by_author handles format changes."""
+        docx_path = create_test_docx()
+
+        try:
+            doc = Document(docx_path, author="Reviewer")
+
+            # Add a format change (using text that exists in test doc: "IMPORTANT")
+            doc.format_tracked("IMPORTANT", bold=True)
+
+            # Verify format change was added
+            rpr_changes_before = list(doc.xml_root.iter(_w("rPrChange")))
+            assert len(rpr_changes_before) == 1
+
+            # Accept by author
+            count = doc.accept_by_author("Reviewer")
+
+            # Should have accepted the format change
+            assert count >= 1
+
+            # Verify no rPrChange elements remain
+            rpr_changes_after = list(doc.xml_root.iter(_w("rPrChange")))
+            assert len(rpr_changes_after) == 0
+        finally:
+            docx_path.unlink()
+            docx_path.parent.rmdir()
+
+    def test_reject_by_author_includes_format_changes(self):
+        """Test that reject_by_author handles format changes."""
+        docx_path = create_test_docx()
+
+        try:
+            doc = Document(docx_path, author="Reviewer")
+
+            # Add a format change (using text that exists in test doc: "IMPORTANT")
+            doc.format_tracked("IMPORTANT", bold=True)
+
+            # Verify bold was applied
+            bold_elems_before = list(doc.xml_root.iter(_w("b")))
+            assert len(bold_elems_before) >= 1
+
+            # Reject by author
+            count = doc.reject_by_author("Reviewer")
+
+            # Should have rejected the format change
+            assert count >= 1
+
+            # Verify no rPrChange elements remain
+            rpr_changes_after = list(doc.xml_root.iter(_w("rPrChange")))
+            assert len(rpr_changes_after) == 0
+        finally:
+            docx_path.unlink()
+            docx_path.parent.rmdir()
