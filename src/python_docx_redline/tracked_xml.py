@@ -3,6 +3,12 @@ XML generation for tracked changes in Word documents.
 
 This module provides the TrackedXMLGenerator class which automatically generates
 proper OOXML for tracked insertions and deletions with all required attributes.
+
+Supports markdown formatting in inserted text:
+- **bold** -> <w:b/>
+- *italic* -> <w:i/>
+- ++underline++ -> <w:u w:val="single"/>
+- ~~strikethrough~~ -> <w:strike/>
 """
 
 import random
@@ -14,6 +20,7 @@ from lxml import etree
 
 if TYPE_CHECKING:
     from python_docx_redline.author import AuthorIdentity
+    from python_docx_redline.markdown_parser import TextSegment
 
 # Word namespaces
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -73,17 +80,78 @@ class TrackedXMLGenerator:
     def create_insertion(self, text: str, author: str | None = None) -> str:
         """Generate <w:ins> XML for a tracked insertion.
 
+        The text parameter supports markdown formatting:
+        - **bold** -> bold text
+        - *italic* -> italic text
+        - ++underline++ -> underlined text
+        - ~~strikethrough~~ -> strikethrough text
+
         Args:
-            text: The text to insert
+            text: The text to insert (supports markdown formatting)
             author: Override author (uses default if None)
 
         Returns:
             Complete OOXML string for the insertion with MS365 identity if available
         """
+        from python_docx_redline.markdown_parser import parse_markdown
+
         author = author if author is not None else self.author
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         change_id = self.next_change_id
         self.next_change_id += 1
+
+        # Build MS365 identity attributes if available
+        identity_attrs = ""
+        if self._author_identity:
+            if self._author_identity.guid:
+                identity_attrs += f' w15:userId="{self._author_identity.guid}"'
+            identity_attrs += f' w15:providerId="{self._author_identity.provider_id}"'
+
+        # Parse markdown to get formatted segments
+        segments = parse_markdown(text)
+
+        # Generate runs for each segment
+        runs_xml = self._generate_runs(segments)
+
+        # Generate the OOXML
+        xml = (
+            f'<w:ins w:id="{change_id}" w:author="{author}" '
+            f'w:date="{timestamp}" w16du:dateUtc="{timestamp}"{identity_attrs}>\n'
+            f"{runs_xml}"
+            f"</w:ins>"
+        )
+
+        return xml
+
+    def _generate_runs(self, segments: list["TextSegment"]) -> str:
+        """Generate <w:r> elements for a list of text segments.
+
+        Args:
+            segments: List of TextSegment objects with formatting info
+
+        Returns:
+            XML string containing all runs
+        """
+        runs = []
+        for segment in segments:
+            run_xml = self._generate_run(segment)
+            runs.append(run_xml)
+        return "".join(runs)
+
+    def _generate_run(self, segment: "TextSegment") -> str:
+        """Generate a single <w:r> element for a text segment.
+
+        Args:
+            segment: TextSegment with text and formatting
+
+        Returns:
+            XML string for the run
+        """
+        # Handle linebreak segments - emit <w:br/> instead of <w:t>
+        if segment.is_linebreak:
+            return f'  <w:r w:rsidR="{self.rsid}">\n' f"    <w:br/>\n" f"  </w:r>\n"
+
+        text = segment.text
 
         # Handle xml:space for leading/trailing whitespace
         xml_space = (
@@ -93,24 +161,49 @@ class TrackedXMLGenerator:
         # Escape XML special characters
         escaped_text = self._escape_xml(text)
 
-        # Build MS365 identity attributes if available
-        identity_attrs = ""
-        if self._author_identity:
-            if self._author_identity.guid:
-                identity_attrs += f' w15:userId="{self._author_identity.guid}"'
-            identity_attrs += f' w15:providerId="{self._author_identity.provider_id}"'
+        # Generate run properties if any formatting is applied
+        rpr_xml = self._generate_run_properties(segment)
 
-        # Generate the OOXML
-        xml = (
-            f'<w:ins w:id="{change_id}" w:author="{author}" '
-            f'w:date="{timestamp}" w16du:dateUtc="{timestamp}"{identity_attrs}>\n'
-            f'  <w:r w:rsidR="{self.rsid}">\n'
-            f"    <w:t{xml_space}>{escaped_text}</w:t>\n"
-            f"  </w:r>\n"
-            f"</w:ins>"
-        )
+        # Build the run
+        if rpr_xml:
+            return (
+                f'  <w:r w:rsidR="{self.rsid}">\n'
+                f"{rpr_xml}"
+                f"    <w:t{xml_space}>{escaped_text}</w:t>\n"
+                f"  </w:r>\n"
+            )
+        else:
+            return (
+                f'  <w:r w:rsidR="{self.rsid}">\n'
+                f"    <w:t{xml_space}>{escaped_text}</w:t>\n"
+                f"  </w:r>\n"
+            )
 
-        return xml
+    def _generate_run_properties(self, segment: "TextSegment") -> str:
+        """Generate <w:rPr> element for formatting.
+
+        Args:
+            segment: TextSegment with formatting flags
+
+        Returns:
+            XML string for run properties, or empty string if no formatting
+        """
+        if not segment.has_formatting():
+            return ""
+
+        props = []
+        if segment.bold:
+            props.append("      <w:b/>\n")
+        if segment.italic:
+            props.append("      <w:i/>\n")
+        if segment.underline:
+            props.append('      <w:u w:val="single"/>\n')
+        if segment.strikethrough:
+            props.append("      <w:strike/>\n")
+
+        if props:
+            return "    <w:rPr>\n" + "".join(props) + "    </w:rPr>\n"
+        return ""
 
     def create_deletion(self, text: str, author: str | None = None) -> str:
         """Generate <w:del> XML for a tracked deletion.

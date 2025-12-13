@@ -32,6 +32,7 @@ repos:
         exclude: ^(tests/|skills/)
 
   # Pytest with coverage requirement
+  # Uses project venv to ensure pytest-cov is available
   - repo: local
     hooks:
       - id: pytest
