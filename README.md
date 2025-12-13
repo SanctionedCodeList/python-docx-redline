@@ -89,13 +89,31 @@ doc.save("contract_edited.docx")
 - ✅ **Smart heuristics** - detects lowercase starts, connecting phrases, continuation punctuation
 - ✅ **Helpful suggestions** - actionable guidance when issues detected
 
+**Phase 6 - Minimal Editing Mode:**
+- ✅ **Legal-style tracked changes** - only show actual text modifications
+- ✅ **Preserves formatting runs** - no spurious formatting changes in Word's review pane
+- ✅ **Clean diffs** - ideal for legal document review and contract redlining
+- ✅ **Optional per-operation** - enable with `minimal=True` parameter
+
+**Phase 7 - Markdown Formatting:**
+- ✅ **Inline formatting** - use `**bold**`, `*italic*`, `++underline++`, `~~strikethrough~~`
+- ✅ **Mixed formatting** - combine styles like `***bold italic***`
+- ✅ **Line breaks** - proper `<w:br/>` elements for multi-line insertions
+- ✅ **Always-on** - markdown syntax automatically parsed in insertions
+
+**Phase 8 - Format-Only Tracked Changes:**
+- ✅ **Track formatting changes** - bold, italic, underline, strikethrough with revision marks
+- ✅ **Run-level precision** - format specific text within paragraphs
+- ✅ **Paragraph formatting** - track alignment and style changes
+- ✅ **Accept/reject support** - `accept_by_author()` and `reject_by_author()` include format changes
+
 **General:**
 - ✅ **python-docx integration** - seamlessly convert between libraries
 - ✅ **In-memory workflows** - load from bytes/BytesIO, save to bytes
 - ✅ **Batch operations** - apply multiple edits efficiently
 - ✅ **YAML/JSON support** - define edits in configuration files
 - ✅ **Type hints** - full type annotation support
-- ✅ **Thoroughly tested** - 514 tests with 81% coverage
+- ✅ **Thoroughly tested** - 661 tests with 80% coverage
 
 ## Installation
 
@@ -108,6 +126,7 @@ pip install python-docx-redline
 - lxml
 - python-dateutil
 - pyyaml
+- mistune (for markdown formatting)
 
 ## Quick Start
 
@@ -406,6 +425,124 @@ doc.save("contract_edited.docx")
 - Detects continuation punctuation: ", and...", "; however...", etc.
 
 See [Context-Awareness Guide](docs/CONTEXT_AWARENESS_GUIDE.md) for detailed usage.
+
+### Minimal Editing Mode (Phase 6)
+
+For legal documents, use minimal editing mode to avoid spurious formatting changes:
+
+```python
+# Enable minimal editing for clean tracked changes
+doc.replace_tracked(
+    find="the Contractor",
+    replace="the Service Provider",
+    minimal=True  # Only shows actual text change in Word's review pane
+)
+
+# Perfect for legal document redlining
+doc.insert_tracked(
+    text=" (as amended and restated)",
+    after="Agreement",
+    minimal=True
+)
+
+doc.delete_tracked(
+    text="for any reason whatsoever",
+    minimal=True
+)
+```
+
+**Why use minimal mode?**
+- Legal reviewers see only the actual text modifications
+- No confusing formatting changes in Word's Track Changes pane
+- Cleaner diffs for contract comparison tools
+- Matches expectations for professional document review
+
+### Markdown Formatting (Phase 7)
+
+Use markdown syntax in tracked insertions for inline formatting:
+
+```python
+# Bold and italic formatting
+doc.insert_tracked(
+    "**Important:** See *Smith v. Jones* for precedent",
+    after="Section 2.1"
+)
+
+# Underline and strikethrough
+doc.insert_tracked(
+    "This clause is ++mandatory++ and ~~optional~~ required",
+    after="Terms"
+)
+
+# Combined formatting
+doc.insert_tracked(
+    "***Critical Notice:*** Review ++immediately++",
+    after="Exhibit A"
+)
+
+# Multi-line with proper line breaks
+doc.insert_tracked(
+    "First line  \nSecond line",  # Two spaces + newline = line break
+    after="Introduction"
+)
+```
+
+**Supported Markdown:**
+| Syntax | Result | OOXML |
+|--------|--------|-------|
+| `**text**` | **bold** | `<w:b/>` |
+| `*text*` | *italic* | `<w:i/>` |
+| `++text++` | underline | `<w:u/>` |
+| `~~text~~` | ~~strikethrough~~ | `<w:strike/>` |
+
+### Format-Only Tracked Changes (Phase 8)
+
+Track formatting changes without modifying text:
+
+```python
+# Track bold formatting change
+result = doc.format_tracked(
+    find="Important Notice",
+    bold=True
+)
+print(f"Applied bold to '{result.text_matched}'")
+
+# Track multiple formatting changes
+doc.format_tracked(
+    find="CONFIDENTIAL",
+    bold=True,
+    italic=True,
+    underline=True
+)
+
+# Remove formatting (explicit False)
+doc.format_tracked(
+    find="previously bold text",
+    bold=False  # Removes bold with tracked change
+)
+
+# Format entire paragraph
+doc.format_paragraph_tracked(
+    paragraph_index=0,
+    alignment="center",
+    style="Heading1"
+)
+
+# Accept/reject includes format changes
+doc.accept_by_author("Claude")  # Accepts text AND formatting changes
+doc.reject_by_author("Claude")  # Rejects text AND formatting changes
+```
+
+**FormatResult provides details:**
+```python
+result = doc.format_tracked(find="text", bold=True)
+print(result.success)           # True if operation succeeded
+print(result.changed)           # True if formatting actually changed
+print(result.text_matched)      # The text that was formatted
+print(result.changes_applied)   # {'bold': True}
+print(result.previous_formatting)  # Previous state per run
+print(result.change_id)         # OOXML change ID for tracking
+```
 
 ### Using Scopes
 
@@ -711,6 +848,21 @@ pre-commit run --all-files
 - ✅ Section and Paragraph wrapper classes
 - ✅ Full integration with batch/YAML workflows
 - ✅ Comprehensive integration tests
+
+**Phase 6 - Minimal Editing Mode: Complete** ✅
+- ✅ Legal-style tracked changes with `minimal=True`
+- ✅ Preserves formatting runs for clean review pane
+- ✅ Support for insert, delete, and replace operations
+
+**Phase 7 - Markdown Formatting: Complete** ✅
+- ✅ Bold, italic, underline, strikethrough via markdown syntax
+- ✅ Automatic parsing in `insert_tracked()` calls
+- ✅ Proper `<w:br/>` line break support
+
+**Phase 8 - Format-Only Tracked Changes: Complete** ✅
+- ✅ `format_tracked()` for run-level formatting changes
+- ✅ `format_paragraph_tracked()` for paragraph formatting
+- ✅ Accept/reject support for formatting changes
 
 ## Contributing
 
