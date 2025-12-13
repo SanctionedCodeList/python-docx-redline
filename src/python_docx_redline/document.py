@@ -28,11 +28,12 @@ from lxml import etree
 
 from .author import AuthorIdentity
 from .errors import AmbiguousTextError, TextNotFoundError
+from .format_builder import ParagraphPropertyBuilder, RunPropertyBuilder
 from .minimal_diff import (
     apply_minimal_edits_to_paragraph,
     should_use_minimal_editing,
 )
-from .results import EditResult
+from .results import EditResult, FormatResult
 from .scope import ScopeEvaluator
 from .suggestions import SuggestionGenerator
 from .text_search import TextSearch
@@ -1545,6 +1546,427 @@ class Document:
 
         return count
 
+    def format_tracked(
+        self,
+        text: str,
+        *,
+        bold: bool | None = None,
+        italic: bool | None = None,
+        underline: bool | str | None = None,
+        strikethrough: bool | None = None,
+        font_name: str | None = None,
+        font_size: float | None = None,
+        color: str | None = None,
+        highlight: str | None = None,
+        superscript: bool | None = None,
+        subscript: bool | None = None,
+        small_caps: bool | None = None,
+        all_caps: bool | None = None,
+        scope: str | dict | Any | None = None,
+        occurrence: int | str = "first",
+        author: str | None = None,
+        enable_quote_normalization: bool = True,
+    ) -> FormatResult:
+        """Apply character formatting to text with tracked changes.
+
+        This method finds text and applies formatting changes that are tracked
+        as revisions in Word. The previous formatting state is preserved in
+        <w:rPrChange> elements, allowing users to accept or reject the
+        formatting changes in Word.
+
+        Args:
+            text: The text to format (found via text search)
+            bold: Set bold on (True), off (False), or leave unchanged (None)
+            italic: Set italic on/off/unchanged
+            underline: Set underline on/off/unchanged, or underline style name
+            strikethrough: Set strikethrough on/off/unchanged
+            font_name: Set font family name
+            font_size: Set font size in points
+            color: Set text color as hex "#RRGGBB" or "auto"
+            highlight: Set highlight color name (e.g., "yellow", "green")
+            superscript: Set superscript on/off/unchanged
+            subscript: Set subscript on/off/unchanged
+            small_caps: Set small caps on/off/unchanged
+            all_caps: Set all caps on/off/unchanged
+            scope: Limit search to specific paragraphs/sections
+            occurrence: Which occurrence to format: 1, 2, "first", "last", or "all"
+            author: Override default author for this change
+            enable_quote_normalization: Auto-convert straight quotes to smart quotes
+                for matching (default: True)
+
+        Returns:
+            FormatResult with details of the formatting applied
+
+        Raises:
+            TextNotFoundError: If text is not found
+            AmbiguousTextError: If multiple matches and occurrence not specified
+
+        Example:
+            >>> doc.format_tracked("IMPORTANT", bold=True, color="#FF0000")
+            >>> doc.format_tracked("Section 2.1", italic=True, scope="section:Introduction")
+            >>> doc.format_tracked("Note:", underline=True, font_size=14)
+        """
+        # Build format updates dict (only non-None values)
+        format_updates: dict[str, Any] = {}
+        if bold is not None:
+            format_updates["bold"] = bold
+        if italic is not None:
+            format_updates["italic"] = italic
+        if underline is not None:
+            format_updates["underline"] = underline
+        if strikethrough is not None:
+            format_updates["strikethrough"] = strikethrough
+        if font_name is not None:
+            format_updates["font_name"] = font_name
+        if font_size is not None:
+            format_updates["font_size"] = font_size
+        if color is not None:
+            format_updates["color"] = color
+        if highlight is not None:
+            format_updates["highlight"] = highlight
+        if superscript is not None:
+            format_updates["superscript"] = superscript
+        if subscript is not None:
+            format_updates["subscript"] = subscript
+        if small_caps is not None:
+            format_updates["small_caps"] = small_caps
+        if all_caps is not None:
+            format_updates["all_caps"] = all_caps
+
+        if not format_updates:
+            raise ValueError("At least one formatting property must be specified")
+
+        # Get all paragraphs in the document
+        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+
+        # Apply scope filter if specified
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        # Search for the text
+        matches = self._text_search.find_text(
+            text,
+            paragraphs,
+            regex=False,
+            normalize_quotes_for_matching=enable_quote_normalization,
+        )
+
+        if not matches:
+            suggestions = SuggestionGenerator.generate_suggestions(text, paragraphs)
+            raise TextNotFoundError(text, suggestions=suggestions)
+
+        # Handle occurrence selection
+        if occurrence == "first" or occurrence == 1:
+            target_matches = [matches[0]]
+        elif occurrence == "last":
+            target_matches = [matches[-1]]
+        elif occurrence == "all":
+            target_matches = matches
+        elif isinstance(occurrence, int) and 1 <= occurrence <= len(matches):
+            target_matches = [matches[occurrence - 1]]
+        elif isinstance(occurrence, int):
+            raise ValueError(f"Occurrence {occurrence} out of range (1-{len(matches)})")
+        elif len(matches) > 1:
+            raise AmbiguousTextError(text, matches)
+        else:
+            target_matches = matches
+
+        # Track results
+        runs_affected = 0
+        last_change_id = 0
+        all_previous_formatting: list[dict[str, object]] = []
+        para_index = -1
+
+        # Import run splitting helper
+        from .format_builder import get_run_text, split_run_at_offset
+
+        # Apply formatting to each target match
+        for match in target_matches:
+            # Use match.paragraph directly (more reliable than getparent which may
+            # return wrappers like w:hyperlink, w:ins, etc.)
+            para = match.paragraph
+            para_index = all_paragraphs.index(para) if para in all_paragraphs else -1
+
+            # Build list of runs to format, handling mid-run splits
+            runs_to_format = []
+
+            for run_idx in range(match.start_run_index, match.end_run_index + 1):
+                run = match.runs[run_idx]
+                run_text = get_run_text(run)
+
+                is_start = run_idx == match.start_run_index
+                is_end = run_idx == match.end_run_index
+                is_single = is_start and is_end
+
+                if is_single and (match.start_offset > 0 or match.end_offset < len(run_text)):
+                    # Match is within a single run - need to split at both ends
+                    if match.start_offset > 0:
+                        before_run, remainder = split_run_at_offset(run, match.start_offset)
+                        # Insert before_run before original run
+                        parent = run.getparent()
+                        idx = list(parent).index(run)
+                        parent.insert(idx, before_run)
+                        # Now split remainder at adjusted offset
+                        adjusted_end = match.end_offset - match.start_offset
+                        if adjusted_end < len(run_text) - match.start_offset:
+                            middle_run, after_run = split_run_at_offset(remainder, adjusted_end)
+                            # Replace original with middle and after
+                            parent.remove(run)
+                            parent.insert(idx + 1, middle_run)
+                            parent.insert(idx + 2, after_run)
+                            runs_to_format.append(middle_run)
+                        else:
+                            parent.remove(run)
+                            parent.insert(idx + 1, remainder)
+                            runs_to_format.append(remainder)
+                    else:
+                        # Only split at end
+                        middle_run, after_run = split_run_at_offset(run, match.end_offset)
+                        parent = run.getparent()
+                        idx = list(parent).index(run)
+                        parent.remove(run)
+                        parent.insert(idx, middle_run)
+                        parent.insert(idx + 1, after_run)
+                        runs_to_format.append(middle_run)
+
+                elif is_start and match.start_offset > 0:
+                    # Split start run - only format the part from start_offset onwards
+                    before_run, after_run = split_run_at_offset(run, match.start_offset)
+                    parent = run.getparent()
+                    idx = list(parent).index(run)
+                    parent.remove(run)
+                    parent.insert(idx, before_run)
+                    parent.insert(idx + 1, after_run)
+                    runs_to_format.append(after_run)
+
+                elif is_end and match.end_offset < len(run_text):
+                    # Split end run - only format the part up to end_offset
+                    before_run, after_run = split_run_at_offset(run, match.end_offset)
+                    parent = run.getparent()
+                    idx = list(parent).index(run)
+                    parent.remove(run)
+                    parent.insert(idx, before_run)
+                    parent.insert(idx + 1, after_run)
+                    runs_to_format.append(before_run)
+
+                else:
+                    # Whole run is within match - format entirely
+                    runs_to_format.append(run)
+
+            # Now apply formatting to only the runs that need it
+            for run in runs_to_format:
+                # Get or create run properties
+                existing_rpr = run.find(f"{{{WORD_NAMESPACE}}}rPr")
+
+                # Deep copy to capture previous state
+                from copy import deepcopy
+
+                previous_rpr = deepcopy(existing_rpr) if existing_rpr is not None else None
+
+                # Extract previous formatting for result (per-run)
+                prev_formatting = RunPropertyBuilder.extract(previous_rpr)
+                all_previous_formatting.append(prev_formatting)
+
+                # Create new rPr with merged formatting
+                new_rpr = RunPropertyBuilder.merge(existing_rpr, format_updates)
+
+                # Check if there are actual changes
+                if not RunPropertyBuilder.has_changes(previous_rpr, new_rpr):
+                    continue  # No-op for this run
+
+                # Create the tracked change element (returns tuple now)
+                rpr_change, last_change_id = self._xml_generator.create_run_property_change(
+                    previous_rpr, author
+                )
+
+                # Append the change tracking element to the new rPr
+                new_rpr.append(rpr_change)
+
+                # Replace or insert the rPr in the run
+                if existing_rpr is not None:
+                    run.remove(existing_rpr)
+                run.insert(0, new_rpr)
+
+                runs_affected += 1
+
+        return FormatResult(
+            success=True,  # Operation completed without error
+            changed=runs_affected > 0,  # Whether any changes were made
+            text_matched=text,
+            paragraph_index=para_index if len(target_matches) == 1 else -1,
+            changes_applied=format_updates,
+            previous_formatting=all_previous_formatting,
+            change_id=last_change_id,
+            runs_affected=runs_affected,
+        )
+
+    def format_paragraph_tracked(
+        self,
+        *,
+        containing: str | None = None,
+        starting_with: str | None = None,
+        ending_with: str | None = None,
+        index: int | None = None,
+        alignment: str | None = None,
+        spacing_before: float | None = None,
+        spacing_after: float | None = None,
+        line_spacing: float | None = None,
+        indent_left: float | None = None,
+        indent_right: float | None = None,
+        indent_first_line: float | None = None,
+        indent_hanging: float | None = None,
+        scope: str | dict | Any | None = None,
+        author: str | None = None,
+    ) -> FormatResult:
+        """Apply paragraph formatting with tracked changes.
+
+        This method finds a paragraph and applies formatting changes that are
+        tracked as revisions in Word. The previous formatting state is preserved
+        in <w:pPrChange> elements.
+
+        Args:
+            containing: Find paragraph containing this text
+            starting_with: Find paragraph starting with this text
+            ending_with: Find paragraph ending with this text
+            index: Target paragraph by index (0-based)
+            alignment: Set paragraph alignment ("left", "center", "right", "justify")
+            spacing_before: Set space before paragraph (points)
+            spacing_after: Set space after paragraph (points)
+            line_spacing: Set line spacing multiplier (e.g., 1.0, 1.5, 2.0)
+            indent_left: Set left indent (inches)
+            indent_right: Set right indent (inches)
+            indent_first_line: Set first line indent (inches)
+            indent_hanging: Set hanging indent (inches)
+            scope: Limit search to specific sections
+            author: Override default author for this change
+
+        Returns:
+            FormatResult with details of the formatting applied
+
+        Raises:
+            TextNotFoundError: If no matching paragraph found
+            ValueError: If no targeting parameter or formatting parameter specified
+
+        Example:
+            >>> doc.format_paragraph_tracked(containing="WHEREAS", alignment="center")
+            >>> doc.format_paragraph_tracked(index=0, spacing_after=12)
+        """
+        # Validate at least one targeting parameter
+        if containing is None and starting_with is None and ending_with is None and index is None:
+            raise ValueError(
+                "At least one targeting parameter required: "
+                "containing, starting_with, ending_with, or index"
+            )
+
+        # Build format updates dict
+        format_updates: dict[str, Any] = {}
+        if alignment is not None:
+            format_updates["alignment"] = alignment
+        if spacing_before is not None:
+            format_updates["spacing_before"] = spacing_before
+        if spacing_after is not None:
+            format_updates["spacing_after"] = spacing_after
+        if line_spacing is not None:
+            format_updates["line_spacing"] = line_spacing
+        if indent_left is not None:
+            format_updates["indent_left"] = indent_left
+        if indent_right is not None:
+            format_updates["indent_right"] = indent_right
+        if indent_first_line is not None:
+            format_updates["indent_first_line"] = indent_first_line
+        if indent_hanging is not None:
+            format_updates["indent_hanging"] = indent_hanging
+
+        if not format_updates:
+            raise ValueError("At least one formatting property must be specified")
+
+        # Get all paragraphs
+        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        # Find target paragraph
+        target_para = None
+        para_index = -1
+
+        if index is not None:
+            if 0 <= index < len(paragraphs):
+                target_para = paragraphs[index]
+                para_index = (
+                    all_paragraphs.index(target_para) if target_para in all_paragraphs else index
+                )
+            else:
+                raise ValueError(f"Paragraph index {index} out of range (0-{len(paragraphs)-1})")
+        else:
+            # Search for paragraph by text content
+            for i, para in enumerate(paragraphs):
+                para_text = self._get_paragraph_text(para)
+
+                if containing is not None and containing not in para_text:
+                    continue
+                if starting_with is not None and not para_text.startswith(starting_with):
+                    continue
+                if ending_with is not None and not para_text.endswith(ending_with):
+                    continue
+
+                target_para = para
+                para_index = all_paragraphs.index(para) if para in all_paragraphs else i
+                break
+
+        if target_para is None:
+            search_text = containing or starting_with or ending_with or ""
+            raise TextNotFoundError(
+                search_text,
+                suggestions=["Check paragraph content", "Try a different search term"],
+            )
+
+        # Get or create paragraph properties
+        from copy import deepcopy
+
+        existing_ppr = target_para.find(f"{{{WORD_NAMESPACE}}}pPr")
+        previous_ppr = deepcopy(existing_ppr) if existing_ppr is not None else None
+
+        # Extract previous formatting for result (as single-item list for consistency)
+        prev_formatting = ParagraphPropertyBuilder.extract(previous_ppr)
+
+        # Create new pPr with merged formatting
+        new_ppr = ParagraphPropertyBuilder.merge(existing_ppr, format_updates)
+
+        # Check if there are actual changes
+        if not ParagraphPropertyBuilder.has_changes(previous_ppr, new_ppr):
+            return FormatResult(
+                success=True,  # Operation completed without error
+                changed=False,  # No changes needed
+                text_matched=self._get_paragraph_text(target_para)[:50],
+                paragraph_index=para_index,
+                changes_applied={},
+                previous_formatting=[prev_formatting],
+                change_id=0,
+                runs_affected=0,
+            )
+
+        # Create the tracked change element (returns tuple now)
+        ppr_change, change_id = self._xml_generator.create_paragraph_property_change(
+            previous_ppr, author
+        )
+
+        # Append the change tracking element to the new pPr
+        new_ppr.append(ppr_change)
+
+        # Replace or insert the pPr in the paragraph
+        if existing_ppr is not None:
+            target_para.remove(existing_ppr)
+        target_para.insert(0, new_ppr)
+
+        return FormatResult(
+            success=True,
+            changed=True,
+            text_matched=self._get_paragraph_text(target_para)[:50],
+            paragraph_index=para_index,
+            changes_applied=format_updates,
+            previous_formatting=[prev_formatting],
+            change_id=change_id,
+            runs_affected=1,
+        )
+
     def copy_format(
         self,
         from_text: str,
@@ -2270,13 +2692,28 @@ class Document:
         This removes all tracked change markup:
         - <w:ins> elements are unwrapped (content kept, wrapper removed)
         - <w:del> elements are completely removed (deleted content discarded)
+        - <w:rPrChange> elements are removed (current formatting kept)
+        - <w:pPrChange> elements are removed (current formatting kept)
 
         This is typically used as a preprocessing step before making new edits.
         """
         self.accept_insertions()
         self.accept_deletions()
+        self.accept_format_changes()
 
     # Helper methods for change management
+
+    def _get_paragraph_text(self, para: Any) -> str:
+        """Extract text from a paragraph element.
+
+        Args:
+            para: A <w:p> XML element
+
+        Returns:
+            Plain text content of the paragraph
+        """
+        text_elements = para.findall(f".//{{{WORD_NAMESPACE}}}t")
+        return "".join(elem.text or "" for elem in text_elements)
 
     def _unwrap_element(self, element: Any) -> None:
         """Unwrap an element by moving its children to its parent.
@@ -2381,6 +2818,123 @@ class Document:
             self._unwrap_deletion(del_elem)
         return len(deletions)
 
+    def accept_format_changes(self) -> int:
+        """Accept all tracked formatting changes in the document.
+
+        Removes all <w:rPrChange> and <w:pPrChange> elements, keeping the
+        current formatting as-is.
+
+        Returns:
+            Number of formatting changes accepted
+        """
+        count = 0
+
+        # Accept run property changes (character formatting)
+        for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
+            parent = rpr_change.getparent()
+            if parent is not None:
+                parent.remove(rpr_change)
+                count += 1
+
+        # Accept paragraph property changes
+        for ppr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange")):
+            parent = ppr_change.getparent()
+            if parent is not None:
+                parent.remove(ppr_change)
+                count += 1
+
+        return count
+
+    def reject_format_changes(self) -> int:
+        """Reject all tracked formatting changes in the document.
+
+        Restores the previous formatting from <w:rPrChange> and <w:pPrChange>
+        elements, then removes the change tracking elements.
+
+        Returns:
+            Number of formatting changes rejected
+        """
+        from copy import deepcopy
+
+        count = 0
+
+        # Reject run property changes - restore previous formatting
+        for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
+            parent_rpr = rpr_change.getparent()
+            if parent_rpr is None:
+                continue
+
+            # Get the previous rPr from inside the change element
+            previous_rpr = rpr_change.find(f"{{{WORD_NAMESPACE}}}rPr")
+
+            # Replace parent's children with previous state (except rPrChange)
+            # First, collect children to remove (excluding the change element)
+            children_to_remove = [
+                child for child in list(parent_rpr) if child.tag != f"{{{WORD_NAMESPACE}}}rPrChange"
+            ]
+            for child in children_to_remove:
+                parent_rpr.remove(child)
+
+            # Remove the rPrChange element
+            parent_rpr.remove(rpr_change)
+
+            # Add back the previous properties
+            if previous_rpr is not None:
+                for child in previous_rpr:
+                    parent_rpr.append(deepcopy(child))
+
+            count += 1
+
+        # Reject paragraph property changes - restore previous formatting
+        for ppr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange")):
+            parent_ppr = ppr_change.getparent()
+            if parent_ppr is None:
+                continue
+
+            # Get the previous pPr from inside the change element
+            previous_ppr = ppr_change.find(f"{{{WORD_NAMESPACE}}}pPr")
+
+            # Replace parent's children with previous state (except pPrChange and rPr)
+            # Note: rPr inside pPr is for paragraph mark formatting, keep it separate
+            children_to_remove = [
+                child
+                for child in list(parent_ppr)
+                if child.tag
+                not in (
+                    f"{{{WORD_NAMESPACE}}}pPrChange",
+                    f"{{{WORD_NAMESPACE}}}rPr",
+                )
+            ]
+            for child in children_to_remove:
+                parent_ppr.remove(child)
+
+            # Remove the pPrChange element
+            parent_ppr.remove(ppr_change)
+
+            # Add back the previous properties (insert at beginning, before rPr)
+            if previous_ppr is not None:
+                insert_idx = 0
+                for child in previous_ppr:
+                    parent_ppr.insert(insert_idx, deepcopy(child))
+                    insert_idx += 1
+
+            count += 1
+
+        return count
+
+    def reject_all_changes(self) -> None:
+        """Reject all tracked changes in the document.
+
+        This removes all tracked change markup by reverting to previous state:
+        - <w:ins> elements and their content are removed
+        - <w:del> elements are unwrapped (deleted content restored)
+        - <w:rPrChange> elements restore previous formatting
+        - <w:pPrChange> elements restore previous formatting
+        """
+        self.reject_insertions()
+        self.reject_deletions()
+        self.reject_format_changes()
+
     # Accept/Reject by change ID
 
     def accept_change(self, change_id: str | int) -> None:
@@ -2409,6 +2963,22 @@ class Document:
                 self._remove_element(del_elem)
                 return
 
+        # Search for run property change with this ID
+        for rpr_change in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange"):
+            if rpr_change.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
+                parent = rpr_change.getparent()
+                if parent is not None:
+                    parent.remove(rpr_change)
+                return
+
+        # Search for paragraph property change with this ID
+        for ppr_change in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange"):
+            if ppr_change.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
+                parent = ppr_change.getparent()
+                if parent is not None:
+                    parent.remove(ppr_change)
+                return
+
         raise ValueError(f"No tracked change found with ID: {change_id}")
 
     def reject_change(self, change_id: str | int) -> None:
@@ -2423,6 +2993,8 @@ class Document:
         Example:
             >>> doc.reject_change("5")
         """
+        from copy import deepcopy
+
         change_id_str = str(change_id)
 
         # Search for insertion with this ID
@@ -2435,6 +3007,45 @@ class Document:
         for del_elem in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del"):
             if del_elem.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
                 self._unwrap_deletion(del_elem)
+                return
+
+        # Search for run property change with this ID
+        for rpr_change in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange"):
+            if rpr_change.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
+                parent_rpr = rpr_change.getparent()
+                if parent_rpr is not None:
+                    previous_rpr = rpr_change.find(f"{{{WORD_NAMESPACE}}}rPr")
+                    # Remove current properties (except rPrChange)
+                    for child in list(parent_rpr):
+                        if child.tag != f"{{{WORD_NAMESPACE}}}rPrChange":
+                            parent_rpr.remove(child)
+                    parent_rpr.remove(rpr_change)
+                    # Restore previous
+                    if previous_rpr is not None:
+                        for child in previous_rpr:
+                            parent_rpr.append(deepcopy(child))
+                return
+
+        # Search for paragraph property change with this ID
+        for ppr_change in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange"):
+            if ppr_change.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
+                parent_ppr = ppr_change.getparent()
+                if parent_ppr is not None:
+                    previous_ppr = ppr_change.find(f"{{{WORD_NAMESPACE}}}pPr")
+                    # Remove current properties (except pPrChange and rPr)
+                    for child in list(parent_ppr):
+                        if child.tag not in (
+                            f"{{{WORD_NAMESPACE}}}pPrChange",
+                            f"{{{WORD_NAMESPACE}}}rPr",
+                        ):
+                            parent_ppr.remove(child)
+                    parent_ppr.remove(ppr_change)
+                    # Restore previous
+                    if previous_ppr is not None:
+                        insert_idx = 0
+                        for child in previous_ppr:
+                            parent_ppr.insert(insert_idx, deepcopy(child))
+                            insert_idx += 1
                 return
 
         raise ValueError(f"No tracked change found with ID: {change_id}")
@@ -2468,6 +3079,21 @@ class Document:
                 self._remove_element(del_elem)
                 count += 1
 
+        # Accept format changes by this author (remove rPrChange/pPrChange, keep new formatting)
+        for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
+            if rpr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
+                parent = rpr_change.getparent()
+                if parent is not None:
+                    parent.remove(rpr_change)
+                count += 1
+
+        for ppr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange")):
+            if ppr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
+                parent = ppr_change.getparent()
+                if parent is not None:
+                    parent.remove(ppr_change)
+                count += 1
+
         return count
 
     def reject_by_author(self, author: str) -> int:
@@ -2495,6 +3121,52 @@ class Document:
         for del_elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del")):
             if del_elem.get(f"{{{WORD_NAMESPACE}}}author") == author:
                 self._unwrap_deletion(del_elem)
+                count += 1
+
+        # Reject format changes by this author (restore previous formatting)
+        from copy import deepcopy
+
+        for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
+            if rpr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
+                parent_rpr = rpr_change.getparent()
+                if parent_rpr is not None:
+                    # Get the previous rPr from inside the change element
+                    prev_rpr = rpr_change.find(f"{{{WORD_NAMESPACE}}}rPr")
+                    if prev_rpr is not None:
+                        # Replace current rPr content with previous
+                        # Clear all children except rPrChange
+                        for child in list(parent_rpr):
+                            if child.tag != f"{{{WORD_NAMESPACE}}}rPrChange":
+                                parent_rpr.remove(child)
+                        # Copy previous formatting back using deepcopy and append
+                        # (preserves order and doesn't move nodes from prev_rpr)
+                        for child in list(prev_rpr):
+                            parent_rpr.append(deepcopy(child))
+                    # Remove the change tracking element
+                    parent_rpr.remove(rpr_change)
+                count += 1
+
+        for ppr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange")):
+            if ppr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
+                parent_ppr = ppr_change.getparent()
+                if parent_ppr is not None:
+                    # Get the previous pPr from inside the change element
+                    prev_ppr = ppr_change.find(f"{{{WORD_NAMESPACE}}}pPr")
+                    if prev_ppr is not None:
+                        # Replace current pPr content with previous
+                        # Clear all children except pPrChange and rPr (run props are separate)
+                        for child in list(parent_ppr):
+                            if child.tag not in (
+                                f"{{{WORD_NAMESPACE}}}pPrChange",
+                                f"{{{WORD_NAMESPACE}}}rPr",
+                            ):
+                                parent_ppr.remove(child)
+                        # Copy previous formatting back using deepcopy and append
+                        # (preserves order and doesn't move nodes from prev_ppr)
+                        for child in list(prev_ppr):
+                            parent_ppr.append(deepcopy(child))
+                    # Remove the change tracking element
+                    parent_ppr.remove(ppr_change)
                 count += 1
 
         return count
@@ -4361,6 +5033,116 @@ class Document:
                     success=True,
                     edit_type=edit_type,
                     message=f"Deleted section '{heading}'",
+                )
+
+            elif edit_type == "format_tracked":
+                text = edit.get("text")
+                if not text:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="Missing required parameter: 'text'",
+                        error=ValidationError("Missing required parameter"),
+                    )
+
+                # Extract formatting parameters
+                format_params = {
+                    k: v
+                    for k, v in edit.items()
+                    if k
+                    in (
+                        "bold",
+                        "italic",
+                        "underline",
+                        "strikethrough",
+                        "font_name",
+                        "font_size",
+                        "color",
+                        "highlight",
+                        "superscript",
+                        "subscript",
+                        "small_caps",
+                        "all_caps",
+                    )
+                    and v is not None
+                }
+
+                if not format_params:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="At least one formatting parameter required",
+                        error=ValidationError("Missing formatting parameter"),
+                    )
+
+                result = self.format_tracked(
+                    text,
+                    scope=edit.get("scope"),
+                    occurrence=edit.get("occurrence", "first"),
+                    author=edit.get("author"),
+                    **format_params,
+                )
+                return EditResult(
+                    success=result.success,
+                    edit_type=edit_type,
+                    message=f"Formatted '{text}' with {format_params}",
+                )
+
+            elif edit_type == "format_paragraph_tracked":
+                # Extract targeting parameters
+                containing = edit.get("containing")
+                starting_with = edit.get("starting_with")
+                ending_with = edit.get("ending_with")
+                index = edit.get("index")
+
+                if not any([containing, starting_with, ending_with, index is not None]):
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="At least one targeting parameter required",
+                        error=ValidationError("Missing targeting parameter"),
+                    )
+
+                # Extract formatting parameters
+                format_params = {
+                    k: v
+                    for k, v in edit.items()
+                    if k
+                    in (
+                        "alignment",
+                        "spacing_before",
+                        "spacing_after",
+                        "line_spacing",
+                        "indent_left",
+                        "indent_right",
+                        "indent_first_line",
+                        "indent_hanging",
+                    )
+                    and v is not None
+                }
+
+                if not format_params:
+                    return EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message="At least one formatting parameter required",
+                        error=ValidationError("Missing formatting parameter"),
+                    )
+
+                result = self.format_paragraph_tracked(
+                    containing=containing,
+                    starting_with=starting_with,
+                    ending_with=ending_with,
+                    index=index,
+                    scope=edit.get("scope"),
+                    author=edit.get("author"),
+                    **format_params,
+                )
+                target_desc = containing or starting_with or ending_with or f"index {index}"
+                return EditResult(
+                    success=result.success,
+                    edit_type=edit_type,
+                    message=f"Formatted paragraph '{target_desc}' with {format_params}",
                 )
 
             else:
