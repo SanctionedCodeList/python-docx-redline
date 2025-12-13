@@ -3124,6 +3124,8 @@ class Document:
                 count += 1
 
         # Reject format changes by this author (restore previous formatting)
+        from copy import deepcopy
+
         for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
             if rpr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
                 parent_rpr = rpr_change.getparent()
@@ -3136,9 +3138,10 @@ class Document:
                         for child in list(parent_rpr):
                             if child.tag != f"{{{WORD_NAMESPACE}}}rPrChange":
                                 parent_rpr.remove(child)
-                        # Copy previous formatting back
-                        for child in prev_rpr:
-                            parent_rpr.insert(0, child)
+                        # Copy previous formatting back using deepcopy and append
+                        # (preserves order and doesn't move nodes from prev_rpr)
+                        for child in list(prev_rpr):
+                            parent_rpr.append(deepcopy(child))
                     # Remove the change tracking element
                     parent_rpr.remove(rpr_change)
                 count += 1
@@ -3158,9 +3161,10 @@ class Document:
                                 f"{{{WORD_NAMESPACE}}}rPr",
                             ):
                                 parent_ppr.remove(child)
-                        # Copy previous formatting back
-                        for child in prev_ppr:
-                            parent_ppr.insert(0, child)
+                        # Copy previous formatting back using deepcopy and append
+                        # (preserves order and doesn't move nodes from prev_ppr)
+                        for child in list(prev_ppr):
+                            parent_ppr.append(deepcopy(child))
                     # Remove the change tracking element
                     parent_ppr.remove(ppr_change)
                 count += 1

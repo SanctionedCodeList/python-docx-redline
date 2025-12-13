@@ -411,14 +411,6 @@ class TrackedXMLGenerator:
 
         return ppr_change, change_id
 
-    def get_last_change_id(self) -> int:
-        """Get the last change ID that was assigned.
-
-        Returns:
-            The most recently assigned change ID, or 0 if none assigned
-        """
-        return self.next_change_id - 1 if self.next_change_id > 1 else 0
-
     @staticmethod
     def _get_max_change_id(doc: Any) -> int:
         """Find the maximum change ID in the document.

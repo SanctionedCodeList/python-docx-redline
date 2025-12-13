@@ -626,9 +626,12 @@ def split_run_at_offset(run: etree._Element, offset: int) -> tuple[etree._Elemen
     Creates two runs: one containing text before the offset, one containing
     text from the offset onwards. Both runs inherit the original run's properties.
 
+    Handles runs with multiple <w:t> nodes by finding which node the offset
+    falls within and splitting appropriately.
+
     Args:
         run: The <w:r> element to split
-        offset: Character position to split at (0-based)
+        offset: Character position to split at (0-based, across all w:t nodes)
 
     Returns:
         Tuple of (before_run, after_run)
@@ -637,16 +640,15 @@ def split_run_at_offset(run: etree._Element, offset: int) -> tuple[etree._Elemen
         If run contains "Hello World" and offset=6:
         Returns (run with "Hello "), (run with "World")
     """
-    # Get all text from the run
-    text_elem = run.find(_w("t"))
-    if text_elem is None or text_elem.text is None:
+    # Get all text elements and concatenate
+    text_elems = run.findall(_w("t"))
+    if not text_elems:
         # No text to split - return original and empty
         empty_run = deepcopy(run)
-        for t in empty_run.findall(_w("t")):
-            t.text = ""
         return run, empty_run
 
-    full_text = text_elem.text
+    full_text = "".join(elem.text or "" for elem in text_elems)
+
     if offset <= 0:
         # Split at beginning - return empty before, original after
         empty_run = deepcopy(run)
@@ -660,25 +662,56 @@ def split_run_at_offset(run: etree._Element, offset: int) -> tuple[etree._Elemen
             t.text = ""
         return run, empty_run
 
-    # Create before run
-    before_run = deepcopy(run)
-    before_text = full_text[:offset]
-    before_t = before_run.find(_w("t"))
-    if before_t is not None:
-        before_t.text = before_text
-        # Preserve xml:space if needed
-        if before_text and (before_text[0].isspace() or before_text[-1].isspace()):
-            before_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    # Find which w:t node the offset falls within
+    cumulative = 0
+    split_node_idx = 0
+    local_offset = 0
 
-    # Create after run
+    for i, elem in enumerate(text_elems):
+        elem_text = elem.text or ""
+        if cumulative + len(elem_text) > offset:
+            split_node_idx = i
+            local_offset = offset - cumulative
+            break
+        cumulative += len(elem_text)
+    else:
+        # Offset at very end
+        split_node_idx = len(text_elems) - 1
+        local_offset = len(text_elems[-1].text or "")
+
+    # Create before run - keep text up to and including split point
+    before_run = deepcopy(run)
+    before_text_elems = before_run.findall(_w("t"))
+    for i, t in enumerate(before_text_elems):
+        if i < split_node_idx:
+            # Keep entire text
+            pass
+        elif i == split_node_idx:
+            # Split this node
+            before_text = (t.text or "")[:local_offset]
+            t.text = before_text
+            if before_text and (before_text[0].isspace() or before_text[-1].isspace()):
+                t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        else:
+            # Clear text after split point
+            t.text = ""
+
+    # Create after run - keep text from split point onwards
     after_run = deepcopy(run)
-    after_text = full_text[offset:]
-    after_t = after_run.find(_w("t"))
-    if after_t is not None:
-        after_t.text = after_text
-        # Preserve xml:space if needed
-        if after_text and (after_text[0].isspace() or after_text[-1].isspace()):
-            after_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+    after_text_elems = after_run.findall(_w("t"))
+    for i, t in enumerate(after_text_elems):
+        if i < split_node_idx:
+            # Clear text before split point
+            t.text = ""
+        elif i == split_node_idx:
+            # Split this node
+            after_text = (t.text or "")[local_offset:]
+            t.text = after_text
+            if after_text and (after_text[0].isspace() or after_text[-1].isspace()):
+                t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        else:
+            # Keep entire text
+            pass
 
     return before_run, after_run
 
