@@ -27,8 +27,9 @@ MAX_TRACKED_HUNKS_PER_PARAGRAPH = 8
 # Tokenizer pattern:
 # - \s+ : whitespace runs
 # - [\w]+(?:[''\\-][\w]+)* : word tokens, including hyphenated/apostrophe words
+#   Apostrophe characters supported: ' (ASCII), ' (U+2019), ' (U+2018)
 # - [^\w\s] : single punctuation characters
-TOKENIZER_PATTERN = re.compile(r"(\s+|[\w]+(?:['''\-][\w]+)*|[^\w\s])")
+TOKENIZER_PATTERN = re.compile(r"(\s+|[\w]+(?:['\u2019\u2018\-][\w]+)*|[^\w\s])")
 
 
 def tokenize(text: str) -> list[str]:
@@ -282,6 +283,7 @@ def paragraph_has_unsupported_constructs(paragraph: Any) -> bool:
     - w:hyperlink (hyperlinks)
     - w:sdt (structured document tags / content controls)
     - w:customXml (custom XML)
+    - w:smartTag (smart tags that wrap runs)
 
     Args:
         paragraph: The w:p XML element to check
@@ -294,6 +296,7 @@ def paragraph_has_unsupported_constructs(paragraph: Any) -> bool:
         f"{{{WORD_NAMESPACE}}}hyperlink",
         f"{{{WORD_NAMESPACE}}}sdt",
         f"{{{WORD_NAMESPACE}}}customXml",
+        f"{{{WORD_NAMESPACE}}}smartTag",
     ]
 
     for tag in unsupported_tags:
@@ -301,6 +304,30 @@ def paragraph_has_unsupported_constructs(paragraph: Any) -> bool:
             return True
 
     return False
+
+
+def paragraph_has_nested_runs(paragraph: Any) -> bool:
+    """Check if paragraph has runs that are not direct children.
+
+    Our OOXML manipulation code uses list(paragraph).index(run) which
+    assumes runs are direct children of the paragraph. If runs are nested
+    inside wrapper elements (e.g., bookmarkStart/End ranges, comment ranges),
+    this will fail or corrupt structure.
+
+    Args:
+        paragraph: The w:p XML element to check
+
+    Returns:
+        True if any runs are nested (not direct children)
+    """
+    # Get all descendant runs
+    all_runs = paragraph.findall(f".//{{{WORD_NAMESPACE}}}r")
+
+    # Get only direct child runs
+    direct_runs = paragraph.findall(f"./{{{WORD_NAMESPACE}}}r")
+
+    # If counts differ, some runs are nested
+    return len(all_runs) != len(direct_runs)
 
 
 def should_use_minimal_editing(
@@ -329,6 +356,10 @@ def should_use_minimal_editing(
     # Check for unsupported constructs
     if paragraph_has_unsupported_constructs(orig_paragraph):
         return False, MinimalDiffResult(), "Paragraph has unsupported constructs"
+
+    # Check for nested runs (runs inside wrapper elements)
+    if paragraph_has_nested_runs(orig_paragraph):
+        return False, MinimalDiffResult(), "Paragraph has nested runs"
 
     # Compute the diff
     diff_result = compute_minimal_hunks(orig_text, new_text, max_hunks)
@@ -612,7 +643,7 @@ def _apply_insertion_only(
 
     # Insert into paragraph
     if insert_at_offset is not None and insert_at_offset > 0:
-        # Need to split the run
+        # Need to split the run - insertion point is in the middle of a run
         _split_run_and_insert(
             paragraph,
             run_span.runs,
@@ -620,20 +651,24 @@ def _apply_insertion_only(
             insert_at_offset,
             [ins_elem],
         )
+    elif insert_at_offset == 0 and insert_after_run_idx >= 0:
+        # Insert at the very beginning of a run - insert BEFORE the run
+        ref_run = run_span.runs[insert_after_run_idx]
+        ref_idx = list(paragraph).index(ref_run)
+        paragraph.insert(ref_idx, ins_elem)
+    elif insert_after_run_idx >= 0:
+        # Insert after the run (offset is None, meaning end of paragraph)
+        ref_run = run_span.runs[insert_after_run_idx]
+        ref_idx = list(paragraph).index(ref_run)
+        paragraph.insert(ref_idx + 1, ins_elem)
     else:
-        # Insert after the run (or at beginning if -1)
-        if insert_after_run_idx >= 0:
-            ref_run = run_span.runs[insert_after_run_idx]
-            ref_idx = list(paragraph).index(ref_run)
-            paragraph.insert(ref_idx + 1, ins_elem)
+        # insert_after_run_idx == -1: Insert at beginning of paragraph, after w:pPr if present
+        ppr = paragraph.find(f"{{{WORD_NAMESPACE}}}pPr")
+        if ppr is not None:
+            idx = list(paragraph).index(ppr) + 1
+            paragraph.insert(idx, ins_elem)
         else:
-            # Insert at beginning of paragraph, after w:pPr if present
-            ppr = paragraph.find(f"{{{WORD_NAMESPACE}}}pPr")
-            if ppr is not None:
-                idx = list(paragraph).index(ppr) + 1
-                paragraph.insert(idx, ins_elem)
-            else:
-                paragraph.insert(0, ins_elem)
+            paragraph.insert(0, ins_elem)
 
 
 def _apply_deletion_with_optional_insertion(

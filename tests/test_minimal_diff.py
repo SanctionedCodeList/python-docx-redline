@@ -4,6 +4,8 @@ These tests verify the minimal_diff module and the minimal_edits flag
 in Document.compare_to().
 """
 
+import atexit
+import shutil
 import tempfile
 import zipfile
 from pathlib import Path
@@ -15,6 +17,7 @@ from python_docx_redline.minimal_diff import (
     compute_minimal_hunks,
     is_punctuation_token,
     is_whitespace_token,
+    paragraph_has_nested_runs,
     paragraph_has_tracked_revisions,
     paragraph_has_unsupported_constructs,
     should_use_minimal_editing,
@@ -23,17 +26,35 @@ from python_docx_redline.minimal_diff import (
 
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
+# Track temp directories for cleanup
+_temp_dirs: list[Path] = []
 
-def create_test_docx(paragraphs: list[str]) -> Path:
+
+def _cleanup_temp_dirs() -> None:
+    """Clean up all temporary directories created during tests."""
+    for temp_dir in _temp_dirs:
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+atexit.register(_cleanup_temp_dirs)
+
+
+def create_test_docx(paragraphs: list[str], tmp_path: Path | None = None) -> Path:
     """Create a test .docx file with specified paragraph texts.
 
     Args:
         paragraphs: List of paragraph text strings
+        tmp_path: Optional directory for temp file (uses auto-cleanup temp dir if None)
 
     Returns:
         Path to the created .docx file
     """
-    temp_dir = Path(tempfile.mkdtemp())
+    if tmp_path is None:
+        temp_dir = Path(tempfile.mkdtemp())
+        _temp_dirs.append(temp_dir)
+    else:
+        temp_dir = tmp_path
     docx_path = temp_dir / "test.docx"
 
     # Build document XML with paragraphs
@@ -103,9 +124,9 @@ class TestTokenizer:
         assert tokens == ["party's", " ", "obligation"]
 
     def test_smart_apostrophe(self):
-        """Test tokenizing smart apostrophe words."""
-        tokens = tokenize("party's obligation")  # Unicode right single quote
-        assert tokens == ["party's", " ", "obligation"]
+        """Test tokenizing smart apostrophe words (U+2019)."""
+        tokens = tokenize("party\u2019s obligation")  # Unicode right single quote U+2019
+        assert tokens == ["party\u2019s", " ", "obligation"]
 
     def test_mixed_content(self):
         """Test tokenizing complex mixed content."""
@@ -290,6 +311,51 @@ class TestParagraphChecks:
         </w:p>"""
         para = etree.fromstring(xml)
         assert paragraph_has_unsupported_constructs(para) is False
+
+    def test_paragraph_with_smarttag(self):
+        """Test detection of smartTag construct (wraps runs)."""
+        xml = f"""<w:p xmlns:w="{WORD_NAMESPACE}">
+            <w:smartTag w:uri="test" w:element="test">
+                <w:r><w:t>Smart tag text</w:t></w:r>
+            </w:smartTag>
+        </w:p>"""
+        para = etree.fromstring(xml)
+        assert paragraph_has_unsupported_constructs(para) is True
+
+    def test_paragraph_with_nested_runs(self):
+        """Test detection of runs nested inside wrapper elements."""
+        # Runs inside a smartTag (nested)
+        xml = f"""<w:p xmlns:w="{WORD_NAMESPACE}">
+            <w:smartTag w:uri="test" w:element="test">
+                <w:r><w:t>Nested run</w:t></w:r>
+            </w:smartTag>
+        </w:p>"""
+        para = etree.fromstring(xml)
+        assert paragraph_has_nested_runs(para) is True
+
+    def test_paragraph_without_nested_runs(self):
+        """Test paragraph with direct child runs."""
+        xml = f"""<w:p xmlns:w="{WORD_NAMESPACE}">
+            <w:r><w:t>Direct run 1</w:t></w:r>
+            <w:r><w:t>Direct run 2</w:t></w:r>
+        </w:p>"""
+        para = etree.fromstring(xml)
+        assert paragraph_has_nested_runs(para) is False
+
+    def test_paragraph_with_bookmarks_and_direct_runs(self):
+        """Test paragraph with bookmark markers but direct child runs.
+
+        Bookmark markers (bookmarkStart/bookmarkEnd) are typically siblings
+        of runs, not wrappers, so this should return False.
+        """
+        xml = f"""<w:p xmlns:w="{WORD_NAMESPACE}">
+            <w:bookmarkStart w:id="0" w:name="test"/>
+            <w:r><w:t>Text inside bookmark range</w:t></w:r>
+            <w:bookmarkEnd w:id="0"/>
+        </w:p>"""
+        para = etree.fromstring(xml)
+        # Runs are still direct children, bookmarks don't wrap them
+        assert paragraph_has_nested_runs(para) is False
 
 
 class TestShouldUseMinimalEditing:
@@ -595,3 +661,154 @@ class TestMinimalEditsPersistence:
             assert not reloaded.has_tracked_changes()
             text = reloaded.paragraphs[0].text
             assert "45" in text
+
+
+def create_multi_run_docx(runs_per_para: list[list[str]], tmp_path: Path | None = None) -> Path:
+    """Create a test .docx file with multiple runs per paragraph.
+
+    Args:
+        runs_per_para: List of paragraphs, each containing a list of run texts
+        tmp_path: Optional directory for temp file (uses auto-cleanup temp dir if None)
+
+    Returns:
+        Path to the created .docx file
+    """
+    if tmp_path is None:
+        temp_dir = Path(tempfile.mkdtemp())
+        _temp_dirs.append(temp_dir)
+    else:
+        temp_dir = tmp_path
+    docx_path = temp_dir / "test_multi_run.docx"
+
+    # Build document XML with multiple runs per paragraph
+    para_xml = ""
+    for runs in runs_per_para:
+        runs_xml = ""
+        for text in runs:
+            text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            runs_xml += f"""
+      <w:r>
+        <w:t>{text}</w:t>
+      </w:r>"""
+        para_xml += f"""
+    <w:p>{runs_xml}
+    </w:p>"""
+
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>{para_xml}
+  </w:body>
+</w:document>"""
+
+    content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    with zipfile.ZipFile(docx_path, "w", zipfile.ZIP_DEFLATED) as docx:
+        docx.writestr("[Content_Types].xml", content_types)
+        docx.writestr("_rels/.rels", rels)
+        docx.writestr("word/document.xml", document_xml)
+
+    return docx_path
+
+
+class TestInsertionBoundaries:
+    """Tests for insertion at paragraph start and run boundaries (reviewer issue #2)."""
+
+    def test_pure_insertion_at_paragraph_start(self):
+        """Test inserting new text at the very beginning of a paragraph."""
+        original = Document(create_test_docx(["existing text"]))
+        modified = Document(create_test_docx(["NEW existing text"]))
+
+        count = original.compare_to(modified, minimal_edits=True)
+
+        assert count >= 1
+        assert original.has_tracked_changes()
+
+        xml_str = etree.tostring(original.xml_root, encoding="unicode")
+        assert "w:ins" in xml_str
+        # The inserted text should be "NEW "
+        assert "NEW" in xml_str
+        # Original text should still be present
+        assert "existing" in xml_str
+
+    def test_pure_insertion_at_paragraph_start_single_word(self):
+        """Test inserting a single word at the beginning."""
+        original = Document(create_test_docx(["world"]))
+        modified = Document(create_test_docx(["Hello world"]))
+
+        count = original.compare_to(modified, minimal_edits=True)
+
+        assert count >= 1
+        assert original.has_tracked_changes()
+
+        xml_str = etree.tostring(original.xml_root, encoding="unicode")
+        assert "w:ins" in xml_str
+        assert "Hello" in xml_str
+
+    def test_insertion_at_run_boundary_multi_run(self):
+        """Test insertion at the boundary between two runs in a multi-run paragraph."""
+        # Original: [Run1: "Hello "][Run2: "world"]
+        # Modified: [Run1: "Hello "][NEW: "beautiful "][Run2: "world"]
+        original = Document(create_multi_run_docx([["Hello ", "world"]]))
+        modified = Document(create_test_docx(["Hello beautiful world"]))
+
+        count = original.compare_to(modified, minimal_edits=True)
+
+        assert count >= 1
+        assert original.has_tracked_changes()
+
+        xml_str = etree.tostring(original.xml_root, encoding="unicode")
+        assert "w:ins" in xml_str
+        assert "beautiful" in xml_str
+
+    def test_replacement_at_run_boundary(self):
+        """Test replacement that spans a run boundary."""
+        # Original: [Run1: "net "][Run2: "30 days"]
+        # Modified: "net 45 days"
+        original = Document(create_multi_run_docx([["net ", "30 days"]]))
+        modified = Document(create_test_docx(["net 45 days"]))
+
+        count = original.compare_to(modified, minimal_edits=True)
+
+        assert count >= 1
+        assert original.has_tracked_changes()
+
+        xml_str = etree.tostring(original.xml_root, encoding="unicode")
+        assert "w:del" in xml_str
+        assert "w:ins" in xml_str
+
+    def test_deletion_at_paragraph_start(self):
+        """Test deleting text from the beginning of a paragraph."""
+        original = Document(create_test_docx(["OLD existing text"]))
+        modified = Document(create_test_docx(["existing text"]))
+
+        count = original.compare_to(modified, minimal_edits=True)
+
+        assert count >= 1
+        assert original.has_tracked_changes()
+
+        xml_str = etree.tostring(original.xml_root, encoding="unicode")
+        assert "w:del" in xml_str
+        # "OLD " should be in the deletion
+        assert "OLD" in xml_str
+
+    def test_insertion_preserves_run_order(self):
+        """Verify inserted text appears in correct position relative to existing runs."""
+        original = Document(create_test_docx(["Payment due"]))
+        modified = Document(create_test_docx(["URGENT Payment due"]))
+
+        original.compare_to(modified, minimal_edits=True)
+
+        # After accepting changes, the text should be in correct order
+        original.accept_all_changes()
+        text = original.paragraphs[0].text
+        assert text == "URGENT Payment due"

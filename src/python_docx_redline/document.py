@@ -7,6 +7,7 @@ inserting tracked changes, and saving the modified documents.
 
 import difflib
 import io
+import logging
 import re
 import shutil
 import tempfile
@@ -37,6 +38,8 @@ from .suggestions import SuggestionGenerator
 from .text_search import TextSearch
 from .tracked_xml import TrackedXMLGenerator
 from .validation import ValidationError
+
+logger = logging.getLogger(__name__)
 
 # Word namespace
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -4639,9 +4642,22 @@ class Document:
                             author,
                         )
                         minimal_replace_indices.add(idx)
-                        change_count += len(diff_result.hunks)
+                        # Count changes consistently with coarse mode:
+                        # Each hunk with delete_text counts as 1 deletion
+                        # Each hunk with insert_text counts as 1 insertion
+                        for hunk in diff_result.hunks:
+                            if hunk.delete_text:
+                                change_count += 1
+                            if hunk.insert_text:
+                                change_count += 1
                     elif not use_minimal:
                         # Fall back to coarse replacement
+                        if reason:
+                            logger.debug(
+                                "Minimal editing disabled for paragraph %d: %s",
+                                idx,
+                                reason,
+                            )
                         self._mark_paragraph_deleted(para_elem, author)
                         deleted_indices.add(idx)
                         change_count += 1
