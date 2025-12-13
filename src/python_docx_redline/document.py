@@ -7,6 +7,7 @@ inserting tracked changes, and saving the modified documents.
 
 import difflib
 import io
+import logging
 import re
 import shutil
 import tempfile
@@ -27,12 +28,18 @@ from lxml import etree
 
 from .author import AuthorIdentity
 from .errors import AmbiguousTextError, TextNotFoundError
+from .minimal_diff import (
+    apply_minimal_edits_to_paragraph,
+    should_use_minimal_editing,
+)
 from .results import EditResult
 from .scope import ScopeEvaluator
 from .suggestions import SuggestionGenerator
 from .text_search import TextSearch
 from .tracked_xml import TrackedXMLGenerator
 from .validation import ValidationError
+
+logger = logging.getLogger(__name__)
 
 # Word namespace
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -4458,6 +4465,7 @@ class Document:
         self,
         modified: "Document",
         author: str | None = None,
+        minimal_edits: bool = False,
     ) -> int:
         """Generate tracked changes by comparing this document to a modified version.
 
@@ -4473,6 +4481,10 @@ class Document:
         Args:
             modified: The modified Document to compare against
             author: Author name for the tracked changes (uses document default if None)
+            minimal_edits: If True, use word-level diffs for 1:1 paragraph replacements
+                instead of deleting/inserting entire paragraphs. This produces
+                legal-style redlines where only the changed words are marked.
+                (default: False)
 
         Returns:
             Number of changes made (insertions + deletions)
@@ -4484,11 +4496,17 @@ class Document:
             >>> original.save("contract_redlined.docx")
             >>> print(f"Found {num_changes} changes")
 
+            # For legal-style minimal diffs:
+            >>> num_changes = original.compare_to(modified, minimal_edits=True)
+
         Note:
             - This modifies the current document in place
             - The comparison uses paragraph text content
             - Formatting changes within paragraphs are not tracked separately
             - For best results, compare documents with similar structure
+            - When minimal_edits=True, whitespace-only changes are suppressed
+              for readability, and paragraphs with existing tracked changes
+              fall back to coarse replacement
         """
         # Get paragraph texts from both documents
         original_texts = [p.text for p in self.paragraphs]
@@ -4529,29 +4547,44 @@ class Document:
                         }
                     )
             elif tag == "replace":
-                # Paragraphs changed - delete old, insert new
-                # First mark deletions
-                for idx in range(i1, i2):
+                # Paragraphs changed
+                # Check if this is a 1:1 replacement and minimal_edits is enabled
+                is_one_to_one = (i2 - i1) == 1 and (j2 - j1) == 1
+
+                if minimal_edits and is_one_to_one:
+                    # Attempt minimal intra-paragraph edit for 1:1 replacement
                     operations.append(
                         {
-                            "type": "delete",
-                            "original_index": idx,
-                            "text": original_texts[idx],
+                            "type": "minimal_replace",
+                            "original_index": i1,
+                            "original_text": original_texts[i1],
+                            "new_text": modified_texts[j1],
                         }
                     )
-                # Then mark insertions
-                for j_idx in range(j1, j2):
-                    operations.append(
-                        {
-                            "type": "insert",
-                            "insert_after_index": i1 - 1,
-                            "text": modified_texts[j_idx],
-                            "modified_index": j_idx,
-                        }
-                    )
+                else:
+                    # Fall back to coarse delete + insert
+                    # First mark deletions
+                    for idx in range(i1, i2):
+                        operations.append(
+                            {
+                                "type": "delete",
+                                "original_index": idx,
+                                "text": original_texts[idx],
+                            }
+                        )
+                    # Then mark insertions
+                    for j_idx in range(j1, j2):
+                        operations.append(
+                            {
+                                "type": "insert",
+                                "insert_after_index": i1 - 1,
+                                "text": modified_texts[j_idx],
+                                "modified_index": j_idx,
+                            }
+                        )
 
         # Apply operations to the document
-        change_count = self._apply_comparison_changes(operations, author)
+        change_count = self._apply_comparison_changes(operations, author, minimal_edits)
 
         return change_count
 
@@ -4559,12 +4592,14 @@ class Document:
         self,
         operations: list[dict[str, Any]],
         author: str | None,
+        minimal_edits: bool = False,
     ) -> int:
         """Apply comparison operations to generate tracked changes.
 
         Args:
-            operations: List of delete/insert operations from compare_to()
+            operations: List of delete/insert/minimal_replace operations from compare_to()
             author: Author for tracked changes
+            minimal_edits: Whether minimal edits mode is enabled
 
         Returns:
             Number of changes applied
@@ -4581,11 +4616,66 @@ class Document:
         # Track which paragraphs have been marked as deleted
         deleted_indices: set[int] = set()
 
-        # Process deletions first (mark content as deleted)
+        # Track which paragraphs have been handled by minimal_replace
+        minimal_replace_indices: set[int] = set()
+
+        # Process minimal replacements first
+        for op in operations:
+            if op["type"] == "minimal_replace":
+                idx = op["original_index"]
+                if idx < len(paragraphs) and idx not in minimal_replace_indices:
+                    para_elem = paragraphs[idx]
+                    orig_text = op["original_text"]
+                    new_text = op["new_text"]
+
+                    # Check if minimal editing is viable for this paragraph
+                    use_minimal, diff_result, reason = should_use_minimal_editing(
+                        para_elem, new_text, orig_text
+                    )
+
+                    if use_minimal and diff_result.hunks:
+                        # Apply minimal edits
+                        apply_minimal_edits_to_paragraph(
+                            para_elem,
+                            diff_result.hunks,
+                            self._xml_generator,
+                            author,
+                        )
+                        minimal_replace_indices.add(idx)
+                        # Count changes consistently with coarse mode:
+                        # Each hunk with delete_text counts as 1 deletion
+                        # Each hunk with insert_text counts as 1 insertion
+                        for hunk in diff_result.hunks:
+                            if hunk.delete_text:
+                                change_count += 1
+                            if hunk.insert_text:
+                                change_count += 1
+                    elif not use_minimal:
+                        # Fall back to coarse replacement
+                        if reason:
+                            logger.debug(
+                                "Minimal editing disabled for paragraph %d: %s",
+                                idx,
+                                reason,
+                            )
+                        self._mark_paragraph_deleted(para_elem, author)
+                        deleted_indices.add(idx)
+                        change_count += 1
+
+                        # Insert new paragraph after the deleted one
+                        self._insert_comparison_paragraph(body, paragraphs, idx, new_text, author)
+                        change_count += 1
+                    # else: diff_result.hunks is empty (whitespace-only), no changes needed
+
+        # Process deletions (mark content as deleted)
         for op in operations:
             if op["type"] == "delete":
                 idx = op["original_index"]
-                if idx < len(paragraphs) and idx not in deleted_indices:
+                if (
+                    idx < len(paragraphs)
+                    and idx not in deleted_indices
+                    and idx not in minimal_replace_indices
+                ):
                     self._mark_paragraph_deleted(paragraphs[idx], author)
                     deleted_indices.add(idx)
                     change_count += 1
