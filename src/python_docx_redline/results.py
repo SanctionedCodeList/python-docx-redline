@@ -68,3 +68,33 @@ class RejectResult:
     def __str__(self) -> str:
         """Get string representation of the result."""
         return f"Rejected {self.insertions} insertions, {self.deletions} deletions"
+
+
+@dataclass
+class FormatResult:
+    """Result of a format operation.
+
+    Attributes:
+        success: Whether the formatting was applied successfully
+        text_matched: The text that was formatted
+        paragraph_index: Index of the affected paragraph
+        changes_applied: Dictionary of formatting changes applied
+        previous_formatting: Dictionary of previous formatting values
+        change_id: The w:id assigned to this tracked change
+        runs_affected: Number of runs that were modified
+    """
+
+    success: bool
+    text_matched: str
+    paragraph_index: int
+    changes_applied: dict[str, object]
+    previous_formatting: dict[str, object]
+    change_id: int
+    runs_affected: int = 1
+
+    def __str__(self) -> str:
+        """Get string representation of the result."""
+        if self.success:
+            changes = ", ".join(f"{k}={v}" for k, v in self.changes_applied.items())
+            return f"✓ Formatted '{self.text_matched}': {changes}"
+        return f"✗ Failed to format '{self.text_matched}'"

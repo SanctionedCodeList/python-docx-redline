@@ -32,6 +32,7 @@ __all__ = [
     "EditResult",
     "AcceptResult",
     "RejectResult",
+    "FormatResult",
     "Paragraph",
     "Section",
     "Comment",
@@ -64,7 +65,7 @@ from .models.paragraph import Paragraph
 from .models.section import Section
 
 # Import result types
-from .results import AcceptResult, EditResult, RejectResult
+from .results import AcceptResult, EditResult, FormatResult, RejectResult
 
 # Import scope evaluation
 from .scope import ScopeEvaluator

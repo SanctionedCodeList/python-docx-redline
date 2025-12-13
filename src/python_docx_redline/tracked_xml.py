@@ -6,11 +6,28 @@ proper OOXML for tracked insertions and deletions with all required attributes.
 """
 
 import random
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from lxml import etree
+
 if TYPE_CHECKING:
     from python_docx_redline.author import AuthorIdentity
+
+# Word namespaces
+WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+W15_NAMESPACE = "http://schemas.microsoft.com/office/word/2012/wordml"
+
+
+def _w(tag: str) -> str:
+    """Create a fully qualified Word namespace tag."""
+    return f"{{{WORD_NAMESPACE}}}" f"{tag}"
+
+
+def _w15(tag: str) -> str:
+    """Create a fully qualified W15 namespace tag."""
+    return f"{{{W15_NAMESPACE}}}" f"{tag}"
 
 
 class TrackedXMLGenerator:
@@ -284,6 +301,123 @@ class TrackedXMLGenerator:
         )
 
         return xml, range_id, move_id
+
+    def create_run_property_change(
+        self,
+        previous_rpr: etree._Element | None,
+        author: str | None = None,
+    ) -> etree._Element:
+        """Generate <w:rPrChange> element for tracking run property changes.
+
+        This element should be appended as the last child of the current <w:rPr>.
+        It stores the previous state of run properties before the change.
+
+        Args:
+            previous_rpr: The <w:rPr> element representing the previous state,
+                         or None for empty previous state
+            author: Override author (uses default if None)
+
+        Returns:
+            <w:rPrChange> element ready to be appended to <w:rPr>
+
+        Example:
+            >>> change = generator.create_run_property_change(old_rpr)
+            >>> current_rpr.append(change)
+        """
+        author = author if author is not None else self.author
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        change_id = self.next_change_id
+        self.next_change_id += 1
+
+        # Create the rPrChange element
+        rpr_change = etree.Element(_w("rPrChange"))
+        rpr_change.set(_w("id"), str(change_id))
+        rpr_change.set(_w("author"), author)
+        rpr_change.set(_w("date"), timestamp)
+
+        # Add MS365 identity attributes if available
+        if self._author_identity:
+            if self._author_identity.guid:
+                rpr_change.set(_w15("userId"), self._author_identity.guid)
+            rpr_change.set(_w15("providerId"), self._author_identity.provider_id)
+
+        # Add the previous rPr state as a child
+        if previous_rpr is not None:
+            # Deep copy to avoid modifying the original
+            prev_copy = deepcopy(previous_rpr)
+            # Remove any existing rPrChange from the copy (shouldn't nest)
+            for existing_change in prev_copy.findall(_w("rPrChange")):
+                prev_copy.remove(existing_change)
+            rpr_change.append(prev_copy)
+        else:
+            # Empty previous state
+            rpr_change.append(etree.Element(_w("rPr")))
+
+        return rpr_change
+
+    def create_paragraph_property_change(
+        self,
+        previous_ppr: etree._Element | None,
+        author: str | None = None,
+    ) -> etree._Element:
+        """Generate <w:pPrChange> element for tracking paragraph property changes.
+
+        This element should be appended as the last child of the current <w:pPr>.
+        It stores the previous state of paragraph properties before the change.
+
+        Args:
+            previous_ppr: The <w:pPr> element representing the previous state,
+                         or None for empty previous state
+            author: Override author (uses default if None)
+
+        Returns:
+            <w:pPrChange> element ready to be appended to <w:pPr>
+
+        Example:
+            >>> change = generator.create_paragraph_property_change(old_ppr)
+            >>> current_ppr.append(change)
+        """
+        author = author if author is not None else self.author
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        change_id = self.next_change_id
+        self.next_change_id += 1
+
+        # Create the pPrChange element
+        ppr_change = etree.Element(_w("pPrChange"))
+        ppr_change.set(_w("id"), str(change_id))
+        ppr_change.set(_w("author"), author)
+        ppr_change.set(_w("date"), timestamp)
+
+        # Add MS365 identity attributes if available
+        if self._author_identity:
+            if self._author_identity.guid:
+                ppr_change.set(_w15("userId"), self._author_identity.guid)
+            ppr_change.set(_w15("providerId"), self._author_identity.provider_id)
+
+        # Add the previous pPr state as a child
+        if previous_ppr is not None:
+            # Deep copy to avoid modifying the original
+            prev_copy = deepcopy(previous_ppr)
+            # Remove any existing pPrChange from the copy (shouldn't nest)
+            for existing_change in prev_copy.findall(_w("pPrChange")):
+                prev_copy.remove(existing_change)
+            # Also remove rPr from pPr copy (run props tracked separately)
+            for rpr in prev_copy.findall(_w("rPr")):
+                prev_copy.remove(rpr)
+            ppr_change.append(prev_copy)
+        else:
+            # Empty previous state
+            ppr_change.append(etree.Element(_w("pPr")))
+
+        return ppr_change
+
+    def get_last_change_id(self) -> int:
+        """Get the last change ID that was assigned.
+
+        Returns:
+            The most recently assigned change ID, or 0 if none assigned
+        """
+        return self.next_change_id - 1 if self.next_change_id > 1 else 0
 
     @staticmethod
     def _get_max_change_id(doc: Any) -> int:
