@@ -39,6 +39,9 @@ __all__ = [
     "CommentRange",
     "Footnote",
     "Endnote",
+    "Header",
+    "Footer",
+    "HeaderFooterType",
     "TrackedChange",
     "ChangeType",
 ]
@@ -63,6 +66,7 @@ from .errors import (
 # Import model classes
 from .models.comment import Comment, CommentRange
 from .models.footnote import Endnote, Footnote
+from .models.header_footer import Footer, Header, HeaderFooterType
 from .models.paragraph import Paragraph
 from .models.section import Section
 from .models.tracked_change import ChangeType, TrackedChange
