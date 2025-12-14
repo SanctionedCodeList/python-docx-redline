@@ -3442,6 +3442,159 @@ class Document:
             format_changes=format_changes,
         )
 
+    def export_changes_json(
+        self,
+        include_context: bool = True,
+        context_chars: int = 50,
+        indent: int | None = 2,
+    ) -> str:
+        """Export all tracked changes to JSON format.
+
+        Creates a JSON representation of all tracked changes with metadata,
+        suitable for integration with external tools or further processing.
+
+        Args:
+            include_context: Whether to include surrounding text context
+            context_chars: Number of context characters to include on each side
+            indent: JSON indentation level, or None for compact output
+
+        Returns:
+            JSON string containing all tracked changes
+
+        Example:
+            >>> json_data = doc.export_changes_json()
+            >>> import json
+            >>> changes = json.loads(json_data)
+            >>> print(f"Found {changes['total_changes']} changes")
+        """
+        from .export import export_changes_json
+
+        return export_changes_json(
+            self,
+            include_context=include_context,
+            context_chars=context_chars,
+            indent=indent,
+        )
+
+    def export_changes_markdown(
+        self,
+        include_context: bool = True,
+        context_chars: int = 50,
+        group_by: str | None = None,
+    ) -> str:
+        """Export tracked changes to Markdown format.
+
+        Creates a human-readable Markdown document showing all tracked changes
+        with optional context and grouping. Useful for code reviews or
+        generating documentation.
+
+        Args:
+            include_context: Whether to include surrounding text context
+            context_chars: Number of context characters to include on each side
+            group_by: How to group changes: "author", "type", or None for no grouping
+
+        Returns:
+            Markdown formatted string with all tracked changes
+
+        Example:
+            >>> md = doc.export_changes_markdown(group_by="author")
+            >>> with open("changes.md", "w") as f:
+            ...     f.write(md)
+        """
+        from .export import export_changes_markdown
+
+        return export_changes_markdown(
+            self,
+            include_context=include_context,
+            context_chars=context_chars,
+            group_by=group_by,  # type: ignore[arg-type]
+        )
+
+    def export_changes_html(
+        self,
+        include_context: bool = True,
+        context_chars: int = 50,
+        group_by: str | None = None,
+        inline_styles: bool = True,
+    ) -> str:
+        """Export tracked changes to HTML format.
+
+        Creates an HTML document with a code-review style visualization of
+        tracked changes, similar to diff views in version control systems.
+        Includes syntax highlighting for insertions, deletions, and other
+        change types.
+
+        Args:
+            include_context: Whether to include surrounding text context
+            context_chars: Number of context characters to include on each side
+            group_by: How to group changes: "author", "type", or None for no grouping
+            inline_styles: Whether to include inline CSS styles (True) or just classes (False)
+
+        Returns:
+            HTML formatted string with all tracked changes
+
+        Example:
+            >>> html_content = doc.export_changes_html(group_by="author")
+            >>> with open("changes.html", "w") as f:
+            ...     f.write(html_content)
+        """
+        from .export import export_changes_html
+
+        return export_changes_html(
+            self,
+            include_context=include_context,
+            context_chars=context_chars,
+            group_by=group_by,  # type: ignore[arg-type]
+            inline_styles=inline_styles,
+        )
+
+    def generate_change_report(
+        self,
+        format: str = "html",
+        include_context: bool = True,
+        context_chars: int = 50,
+        group_by: str | None = "author",
+        title: str | None = None,
+    ) -> str:
+        """Generate a comprehensive change report in the specified format.
+
+        This is a convenience method that generates a formatted report of all
+        tracked changes in the document. The report includes a summary with
+        statistics and optionally groups changes by author or type.
+
+        Args:
+            format: Output format: "html", "markdown", or "json"
+            include_context: Whether to include surrounding text context
+            context_chars: Number of context characters to include on each side
+            group_by: How to group changes: "author", "type", or None for no grouping
+            title: Optional custom title for the report
+
+        Returns:
+            Formatted report string in the specified format
+
+        Example:
+            >>> # Generate HTML report grouped by author
+            >>> report = doc.generate_change_report(format="html", group_by="author")
+            >>> with open("report.html", "w") as f:
+            ...     f.write(report)
+            >>>
+            >>> # Generate Markdown report grouped by type
+            >>> md_report = doc.generate_change_report(format="markdown", group_by="type")
+            >>>
+            >>> # Generate JSON report
+            >>> json_report = doc.generate_change_report(format="json")
+        """
+        from .export import generate_change_report
+
+        return generate_change_report(
+            self,
+            format=format,  # type: ignore[arg-type]
+            include_context=include_context,
+            context_chars=context_chars,
+            group_by=group_by,  # type: ignore[arg-type]
+            title=title,
+        )
+
     def delete_all_comments(self) -> None:
         """Delete all comments from the document.
 

@@ -46,6 +46,14 @@ __all__ = [
     "HeaderFooterType",
     "TrackedChange",
     "ChangeType",
+    # Export functionality
+    "ChangeContext",
+    "ExportedChange",
+    "ChangeReport",
+    "export_changes_json",
+    "export_changes_markdown",
+    "export_changes_html",
+    "generate_change_report",
 ]
 
 # Import author identity
@@ -63,6 +71,17 @@ from .errors import (
     DocxRedlineError,
     TextNotFoundError,
     ValidationError,
+)
+
+# Import export functionality
+from .export import (
+    ChangeContext,
+    ChangeReport,
+    ExportedChange,
+    export_changes_html,
+    export_changes_json,
+    export_changes_markdown,
+    generate_change_report,
 )
 
 # Import model classes
