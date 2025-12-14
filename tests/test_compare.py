@@ -361,3 +361,149 @@ class TestCompareToSpecialContent:
 
         assert count == 2  # Delete + Insert for modified long paragraph
         assert original.has_tracked_changes()
+
+
+class TestCompareDocumentsFunction:
+    """Tests for the standalone compare_documents() function."""
+
+    def test_basic_comparison(self):
+        """Test basic function usage with file paths."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1", "Line 2"])
+        modified_path = create_test_docx(["Line 1", "New Line", "Line 2"])
+
+        redline = compare_documents(original_path, modified_path)
+
+        assert redline.has_tracked_changes()
+        xml_str = etree.tostring(redline.xml_root, encoding="unicode")
+        assert "w:ins" in xml_str
+        assert "New Line" in xml_str
+
+    def test_returns_document(self):
+        """Test that function returns a Document object."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Test"])
+        modified_path = create_test_docx(["Test"])
+
+        result = compare_documents(original_path, modified_path)
+
+        assert isinstance(result, Document)
+
+    def test_identical_documents_no_changes(self):
+        """Test comparing identical documents produces no changes."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1", "Line 2", "Line 3"])
+        modified_path = create_test_docx(["Line 1", "Line 2", "Line 3"])
+
+        redline = compare_documents(original_path, modified_path)
+
+        assert not redline.has_tracked_changes()
+
+    def test_author_parameter(self):
+        """Test custom author is used."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1"])
+        modified_path = create_test_docx(["Line 1", "New"])
+
+        redline = compare_documents(original_path, modified_path, author="Custom Author")
+
+        xml_str = etree.tostring(redline.xml_root, encoding="unicode")
+        assert 'w:author="Custom Author"' in xml_str
+
+    def test_default_author(self):
+        """Test default author is 'Comparison'."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1"])
+        modified_path = create_test_docx(["Line 1", "New"])
+
+        redline = compare_documents(original_path, modified_path)
+
+        xml_str = etree.tostring(redline.xml_root, encoding="unicode")
+        assert 'w:author="Comparison"' in xml_str
+
+    def test_minimal_edits_parameter(self):
+        """Test minimal_edits works through the function."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["The quick brown fox"])
+        modified_path = create_test_docx(["The slow brown fox"])
+
+        redline = compare_documents(original_path, modified_path, minimal_edits=True)
+
+        assert redline.has_tracked_changes()
+        # Minimal edit should show word-level changes
+        xml_str = etree.tostring(redline.xml_root, encoding="unicode")
+        assert "quick" in xml_str
+        assert "slow" in xml_str
+
+    def test_with_bytes_input(self):
+        """Test function works with bytes input."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Test"])
+        modified_path = create_test_docx(["Test modified"])
+
+        with open(original_path, "rb") as f:
+            original_bytes = f.read()
+        with open(modified_path, "rb") as f:
+            modified_bytes = f.read()
+
+        redline = compare_documents(original_bytes, modified_bytes)
+
+        assert redline.has_tracked_changes()
+
+    def test_deletion(self):
+        """Test detecting paragraph deletion."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1", "Line 2", "Line 3"])
+        modified_path = create_test_docx(["Line 1", "Line 3"])
+
+        redline = compare_documents(original_path, modified_path)
+
+        assert redline.has_tracked_changes()
+        xml_str = etree.tostring(redline.xml_root, encoding="unicode")
+        assert "w:del" in xml_str
+        assert "w:delText" in xml_str
+
+    def test_replacement(self):
+        """Test detecting paragraph replacement."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1", "Original", "Line 3"])
+        modified_path = create_test_docx(["Line 1", "Modified", "Line 3"])
+
+        redline = compare_documents(original_path, modified_path)
+
+        assert redline.has_tracked_changes()
+        xml_str = etree.tostring(redline.xml_root, encoding="unicode")
+        assert "w:del" in xml_str
+        assert "w:ins" in xml_str
+
+    def test_saveable(self):
+        """Test that returned document can be saved."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1"])
+        modified_path = create_test_docx(["Line 1", "New"])
+
+        redline = compare_documents(original_path, modified_path)
+
+        # Save to a temporary location
+        temp_dir = Path(tempfile.mkdtemp())
+        output_path = temp_dir / "output.docx"
+
+        # Use validate=False since the test document is minimal
+        redline.save(output_path, validate=False)
+
+        # Verify it saved correctly
+        assert output_path.exists()
+
+        # Verify we can reload it
+        reloaded = Document(output_path)
+        assert reloaded.has_tracked_changes()

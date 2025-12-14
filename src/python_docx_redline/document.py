@@ -7279,3 +7279,52 @@ class Document:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Context manager cleanup."""
         self.__del__()
+
+
+def compare_documents(
+    original: str | Path | bytes | BinaryIO,
+    modified: str | Path | bytes | BinaryIO,
+    author: str = "Comparison",
+    minimal_edits: bool = False,
+) -> Document:
+    """Compare two documents and return a redline document with tracked changes.
+
+    This is a convenience function that loads two documents, compares them,
+    and returns a new Document containing tracked changes showing the differences.
+
+    Args:
+        original: Path, bytes, or file object for the original document
+        modified: Path, bytes, or file object for the modified document
+        author: Author name for the tracked changes (default: "Comparison")
+        minimal_edits: If True, use word-level diffs for cleaner legal-style redlines
+            (default: False)
+
+    Returns:
+        A new Document with tracked changes showing differences
+
+    Example:
+        >>> redline = compare_documents("contract_v1.docx", "contract_v2.docx")
+        >>> redline.save("contract_redline.docx")
+
+        # With minimal edits for legal-style redlines:
+        >>> redline = compare_documents(
+        ...     "contract_v1.docx",
+        ...     "contract_v2.docx",
+        ...     author="Review",
+        ...     minimal_edits=True
+        ... )
+    """
+    # Load original document
+    original_doc = Document(original, author=author)
+
+    # Load modified document
+    modified_doc = Document(modified)
+
+    # Create a copy of original to apply changes to (via serialize/reload)
+    original_bytes = original_doc.save_to_bytes(validate=False)
+    redline = Document(original_bytes, author=author)
+
+    # Apply comparison
+    redline.compare_to(modified_doc, author=author, minimal_edits=minimal_edits)
+
+    return redline

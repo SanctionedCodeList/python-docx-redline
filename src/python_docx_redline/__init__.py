@@ -16,6 +16,7 @@ __version__ = "0.1.0"
 __author__ = "Parker Hancock"
 __all__ = [
     "Document",
+    "compare_documents",
     "AuthorIdentity",
     "from_python_docx",
     "to_python_docx",
@@ -53,8 +54,8 @@ from .author import AuthorIdentity
 from .compat import from_python_docx, to_python_docx
 
 # Import error classes
-# Import document class
-from .document import Document
+# Import document class and standalone functions
+from .document import Document, compare_documents
 from .errors import (
     AmbiguousTextError,
     ContinuityWarning,
