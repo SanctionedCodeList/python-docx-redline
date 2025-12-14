@@ -7,23 +7,37 @@ This document outlines planned features and enhancements for the python-docx-red
 The library currently supports:
 
 **Text Operations**
-- Insert, replace, delete with tracked changes
+- `insert_tracked()` - insert text with tracked changes
+- `replace_tracked()` - replace text with tracked changes
+- `delete_tracked()` - delete text with tracked changes
+- `move_tracked()` - relocate text with linked move markers
 - Smart text search (handles fragmented XML runs)
 - Regex support with capture groups
 - Scope filtering (sections/paragraphs)
 
 **Structural Operations**
-- Insert/delete paragraphs and sections
-- Move tracking (`move_tracked()`) with linked source/destination markers
+- `insert_paragraph()` - add new paragraphs with styles
+- `delete_section()` - remove sections by heading
+- Paragraph and Section wrapper classes
 
-**Document Viewing**
-- Read paragraphs, sections, extract text
-- Context-aware editing with fragment detection
+**Table Operations**
+- `tables` property - access all tables
+- `find_table()` - find table by content
+- `replace_in_table()` - replace cell content
+- `insert_table_row()` - insert rows with tracked changes
+- `delete_table_row()` - delete rows with tracked changes
 
 **Comments**
 - `add_comment()` - add comments with reply support
 - `get_comments()` - retrieve all comments
 - `delete_all_comments()` - remove all comments
+- `comment.resolve()` / `comment.unresolve()` - mark resolved status
+- `comment.is_resolved` - check resolution status
+
+**Footnotes & Endnotes**
+- `footnotes` / `endnotes` properties
+- `insert_footnote()` - add footnotes at text locations
+- `insert_endnote()` - add endnotes at text locations
 
 **Change Management**
 - `accept_change(id)` - accept specific tracked change
@@ -31,8 +45,14 @@ The library currently supports:
 - `accept_all_changes()` - accept all tracked changes
 - `has_tracked_changes()` - check if document has changes
 
-**Formatting**
-- MS365 identity integration (link to Office365 users)
+**Document Viewing**
+- `paragraphs` - access all paragraphs
+- `sections` - access document sections
+- `text` - extract full document text
+- Context-aware editing with fragment detection
+
+**Formatting & Identity**
+- MS365 identity integration (`AuthorIdentity`)
 - Minimal editing mode (legal-style clean diffs)
 - Markdown formatting (bold, italic, underline, strikethrough)
 - Format-only tracking (track formatting without text changes)
@@ -47,7 +67,7 @@ The library currently supports:
 
 ### Overview
 
-Add ability to enumerate all tracked changes in a document with their metadata. Currently you can accept/reject changes by ID, but there's no way to list them.
+Add ability to enumerate all tracked changes in a document with their metadata. Currently you can accept/reject changes by ID, but there's no way to programmatically list them.
 
 ### Proposed API
 
@@ -66,7 +86,7 @@ deletions = doc.get_tracked_changes(change_type="deletion")
 # Filter by author
 legal_changes = doc.get_tracked_changes(author="Legal Team")
 
-# Accept changes by criteria
+# Bulk accept/reject by criteria
 doc.accept_changes(author="Legal Team")
 doc.reject_changes(change_type="deletion")
 ```
@@ -75,7 +95,7 @@ doc.reject_changes(change_type="deletion")
 
 - Review changes before accepting/rejecting
 - Generate change reports
-- Selective acceptance by author or type
+- Selective bulk acceptance by author or type
 
 ---
 
@@ -138,56 +158,43 @@ docx-redline comment contract.docx \
 
 ---
 
-## Phase 11: Table Operations
+## Phase 11: Table Column Operations
 
 **Priority**: Medium
-**Complexity**: Medium-High
+**Complexity**: Medium
 **Status**: Planned
 
 ### Overview
 
-Enhanced table manipulation with tracked changes for rows, columns, and cells.
+Add column-level operations for tables. Row operations exist, but column operations are not yet implemented.
 
 ### Proposed API
 
 ```python
-# Insert a row with tracked changes
-doc.insert_table_row(
-    table_index=0,
-    after_row=2,
-    cells=["Item 4", "$500", "2024-01-15"],
-    author="Finance"
-)
-
-# Delete a row with tracked changes
-doc.delete_table_row(
-    table_index=0,
-    row=3,
-    author="Editor"
-)
-
-# Insert a column
+# Insert a column with tracked changes
 doc.insert_table_column(
     table_index=0,
     after_column=1,
     header="New Column",
-    cells=["A", "B", "C"]
+    cells=["A", "B", "C"],
+    track=True,
+    author="Finance"
 )
 
-# Replace cell content (already partially supported)
-doc.replace_in_table(
-    text="TBD",
-    replacement="$1,000",
+# Delete a column with tracked changes
+doc.delete_table_column(
     table_index=0,
-    author="Finance"
+    column=2,
+    track=True,
+    author="Editor"
 )
 ```
 
 ### Use Cases
 
-- Contract amendments with pricing table changes
-- Financial document updates
-- Automated table population
+- Adding new data columns to pricing tables
+- Removing obsolete columns from schedules
+- Restructuring tabular data
 
 ---
 
@@ -318,7 +325,6 @@ These features may be considered based on user feedback:
 - **Field Code Support**: Update and track changes to Word field codes
 - **Content Control Editing**: Manipulate structured content controls
 - **Bookmark Operations**: Add/edit/delete bookmarks with tracking
-- **Resolve Comments**: Mark comments as resolved (currently comments can be added/deleted but not resolved)
 
 ---
 
@@ -336,6 +342,6 @@ We welcome contributions! If you're interested in implementing any of these feat
 |---------|----------|
 | 0.2.0 | List Tracked Changes (Phase 9) |
 | 0.3.0 | CLI Tool (Phase 10) |
-| 0.4.0 | Table Operations (Phase 11) |
+| 0.4.0 | Table Column Operations (Phase 11) |
 | 0.5.0 | Document Comparison (Phase 12) |
 | 1.0.0 | Stable API, comprehensive documentation |
