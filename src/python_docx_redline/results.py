@@ -71,6 +71,55 @@ class RejectResult:
 
 
 @dataclass
+class ComparisonStats:
+    """Statistics from a document comparison operation.
+
+    Provides counts of different types of tracked changes found in a document,
+    typically after using compare_documents() or compare_to().
+
+    Attributes:
+        insertions: Number of text insertions (w:ins elements)
+        deletions: Number of text deletions (w:del elements)
+        moves: Number of move operations (w:moveFrom/w:moveTo pairs)
+        format_changes: Number of formatting changes (w:rPrChange/w:pPrChange)
+        total: Total number of all tracked changes
+
+    Example:
+        >>> redline = compare_documents("v1.docx", "v2.docx")
+        >>> stats = redline.comparison_stats
+        >>> print(f"Found {stats.insertions} insertions and {stats.deletions} deletions")
+        >>> print(f"Total changes: {stats.total}")
+    """
+
+    insertions: int
+    deletions: int
+    moves: int = 0
+    format_changes: int = 0
+
+    @property
+    def total(self) -> int:
+        """Total number of tracked changes."""
+        return self.insertions + self.deletions + self.moves + self.format_changes
+
+    def __str__(self) -> str:
+        """Get string representation of the statistics."""
+        parts = []
+        if self.insertions:
+            parts.append(f"{self.insertions} insertion{'s' if self.insertions != 1 else ''}")
+        if self.deletions:
+            parts.append(f"{self.deletions} deletion{'s' if self.deletions != 1 else ''}")
+        if self.moves:
+            parts.append(f"{self.moves} move{'s' if self.moves != 1 else ''}")
+        if self.format_changes:
+            parts.append(
+                f"{self.format_changes} format change{'s' if self.format_changes != 1 else ''}"
+            )
+        if not parts:
+            return "No changes"
+        return ", ".join(parts)
+
+
+@dataclass
 class FormatResult:
     """Result of a format operation.
 

@@ -35,7 +35,7 @@ from .minimal_diff import (
     apply_minimal_edits_to_paragraph,
     should_use_minimal_editing,
 )
-from .results import EditResult, FormatResult
+from .results import ComparisonStats, EditResult, FormatResult
 from .scope import ScopeEvaluator
 from .suggestions import SuggestionGenerator
 from .text_search import TextSearch
@@ -3402,6 +3402,45 @@ class Document:
             ...     print(f"{change.id}: {change.change_type.value}")
         """
         return self.get_tracked_changes()
+
+    @property
+    def comparison_stats(self) -> ComparisonStats:
+        """Get statistics about tracked changes in the document.
+
+        Provides counts of insertions, deletions, moves, and format changes.
+        Useful for summarizing the results of a document comparison.
+
+        Returns:
+            ComparisonStats object with counts of each change type.
+
+        Example:
+            >>> redline = compare_documents("v1.docx", "v2.docx")
+            >>> stats = redline.comparison_stats
+            >>> print(f"Insertions: {stats.insertions}")
+            >>> print(f"Deletions: {stats.deletions}")
+            >>> print(f"Total: {stats.total}")
+            >>> print(stats)  # "3 insertions, 2 deletions"
+        """
+        from .models.tracked_change import ChangeType
+
+        changes = self.tracked_changes
+        insertions = sum(1 for c in changes if c.change_type == ChangeType.INSERTION)
+        deletions = sum(1 for c in changes if c.change_type == ChangeType.DELETION)
+        moves = sum(
+            1 for c in changes if c.change_type in (ChangeType.MOVE_FROM, ChangeType.MOVE_TO)
+        )
+        format_changes = sum(
+            1
+            for c in changes
+            if c.change_type in (ChangeType.FORMAT_RUN, ChangeType.FORMAT_PARAGRAPH)
+        )
+
+        return ComparisonStats(
+            insertions=insertions,
+            deletions=deletions,
+            moves=moves,
+            format_changes=format_changes,
+        )
 
     def delete_all_comments(self) -> None:
         """Delete all comments from the document.

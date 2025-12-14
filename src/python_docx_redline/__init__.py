@@ -34,6 +34,7 @@ __all__ = [
     "AcceptResult",
     "RejectResult",
     "FormatResult",
+    "ComparisonStats",
     "Paragraph",
     "Section",
     "Comment",
@@ -73,7 +74,7 @@ from .models.section import Section
 from .models.tracked_change import ChangeType, TrackedChange
 
 # Import result types
-from .results import AcceptResult, EditResult, FormatResult, RejectResult
+from .results import AcceptResult, ComparisonStats, EditResult, FormatResult, RejectResult
 
 # Import scope evaluation
 from .scope import ScopeEvaluator

@@ -507,3 +507,134 @@ class TestCompareDocumentsFunction:
         # Verify we can reload it
         reloaded = Document(output_path)
         assert reloaded.has_tracked_changes()
+
+
+class TestComparisonStats:
+    """Tests for the comparison_stats property and ComparisonStats class."""
+
+    def test_stats_after_comparison(self):
+        """Test that comparison_stats returns correct counts after comparison."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1", "Line 2", "Line 3"])
+        modified_path = create_test_docx(["Line 1", "New Line", "Line 3"])
+
+        redline = compare_documents(original_path, modified_path)
+        stats = redline.comparison_stats
+
+        # Replacing "Line 2" with "New Line" = 1 deletion + 1 insertion
+        assert stats.deletions == 1
+        assert stats.insertions == 1
+        assert stats.total == 2
+        assert stats.moves == 0
+        assert stats.format_changes == 0
+
+    def test_stats_insertion_only(self):
+        """Test stats with only insertions."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1", "Line 3"])
+        modified_path = create_test_docx(["Line 1", "Line 2", "Line 3"])
+
+        redline = compare_documents(original_path, modified_path)
+        stats = redline.comparison_stats
+
+        assert stats.insertions == 1
+        assert stats.deletions == 0
+        assert stats.total == 1
+
+    def test_stats_deletion_only(self):
+        """Test stats with only deletions."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1", "Line 2", "Line 3"])
+        modified_path = create_test_docx(["Line 1", "Line 3"])
+
+        redline = compare_documents(original_path, modified_path)
+        stats = redline.comparison_stats
+
+        assert stats.insertions == 0
+        assert stats.deletions == 1
+        assert stats.total == 1
+
+    def test_stats_no_changes(self):
+        """Test stats when documents are identical."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1", "Line 2"])
+        modified_path = create_test_docx(["Line 1", "Line 2"])
+
+        redline = compare_documents(original_path, modified_path)
+        stats = redline.comparison_stats
+
+        assert stats.insertions == 0
+        assert stats.deletions == 0
+        assert stats.total == 0
+
+    def test_stats_multiple_changes(self):
+        """Test stats with multiple insertions and deletions."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["A", "B", "C", "D"])
+        modified_path = create_test_docx(["A", "X", "Y", "D"])
+
+        redline = compare_documents(original_path, modified_path)
+        stats = redline.comparison_stats
+
+        # B and C deleted, X and Y inserted
+        assert stats.deletions == 2
+        assert stats.insertions == 2
+        assert stats.total == 4
+
+    def test_stats_str_representation(self):
+        """Test the string representation of ComparisonStats."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1", "Line 2"])
+        modified_path = create_test_docx(["Line 1", "New", "Line 2"])
+
+        redline = compare_documents(original_path, modified_path)
+        stats = redline.comparison_stats
+
+        # Should have readable string output
+        stats_str = str(stats)
+        assert "insertion" in stats_str
+
+    def test_stats_str_no_changes(self):
+        """Test string representation with no changes."""
+        from python_docx_redline import compare_documents
+
+        original_path = create_test_docx(["Line 1"])
+        modified_path = create_test_docx(["Line 1"])
+
+        redline = compare_documents(original_path, modified_path)
+        stats = redline.comparison_stats
+
+        assert str(stats) == "No changes"
+
+    def test_stats_singular_plural(self):
+        """Test correct singular/plural in string output."""
+        from python_docx_redline.results import ComparisonStats
+
+        # Single insertion
+        stats1 = ComparisonStats(insertions=1, deletions=0)
+        assert "1 insertion" in str(stats1)
+        assert "insertions" not in str(stats1)
+
+        # Multiple insertions
+        stats2 = ComparisonStats(insertions=3, deletions=0)
+        assert "3 insertions" in str(stats2)
+
+    def test_stats_with_compare_to_method(self):
+        """Test that comparison_stats works with compare_to() method too."""
+        original_path = create_test_docx(["Line 1", "Old text"])
+        modified_path = create_test_docx(["Line 1", "New text"])
+
+        original = Document(original_path)
+        modified = Document(modified_path)
+
+        original.compare_to(modified)
+        stats = original.comparison_stats
+
+        # 1 deletion + 1 insertion for replacement
+        assert stats.total == 2
