@@ -39,6 +39,8 @@ __all__ = [
     "CommentRange",
     "Footnote",
     "Endnote",
+    "TrackedChange",
+    "ChangeType",
 ]
 
 # Import author identity
@@ -63,6 +65,7 @@ from .models.comment import Comment, CommentRange
 from .models.footnote import Endnote, Footnote
 from .models.paragraph import Paragraph
 from .models.section import Section
+from .models.tracked_change import ChangeType, TrackedChange
 
 # Import result types
 from .results import AcceptResult, EditResult, FormatResult, RejectResult

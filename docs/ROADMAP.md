@@ -44,6 +44,10 @@ The library currently supports:
 - `reject_change(id)` - reject specific tracked change
 - `accept_all_changes()` - accept all tracked changes
 - `has_tracked_changes()` - check if document has changes
+- `get_tracked_changes()` - list all tracked changes with metadata
+- `accept_changes()` / `reject_changes()` - bulk operations with filters
+- `TrackedChange` model with accept/reject methods
+- Filter by change_type or author
 
 **Document Viewing**
 - `paragraphs` - access all paragraphs
@@ -63,39 +67,73 @@ The library currently supports:
 
 **Priority**: High
 **Complexity**: Low
-**Status**: Planned
+**Status**: Implemented (v0.2.0)
 
 ### Overview
 
-Add ability to enumerate all tracked changes in a document with their metadata. Currently you can accept/reject changes by ID, but there's no way to programmatically list them.
+Enumerate all tracked changes in a document with their metadata, filter by type or author, and perform bulk accept/reject operations.
 
-### Proposed API
+### API
 
 ```python
+from python_docx_redline import Document, TrackedChange, ChangeType
+
 # List all tracked changes
 changes = doc.get_tracked_changes()
 for change in changes:
-    print(f"{change.id}: {change.type} by {change.author}")
+    print(f"{change.id}: {change.change_type.value} by {change.author}")
     print(f"  Text: '{change.text}'")
     print(f"  Date: {change.date}")
 
-# Filter by type
+# Filter by type (insertion, deletion, move_from, move_to, format_run, format_paragraph)
 insertions = doc.get_tracked_changes(change_type="insertion")
 deletions = doc.get_tracked_changes(change_type="deletion")
+format_changes = doc.get_tracked_changes(change_type="format_run")
 
 # Filter by author
 legal_changes = doc.get_tracked_changes(author="Legal Team")
 
+# Combine filters
+alice_insertions = doc.get_tracked_changes(change_type="insertion", author="Alice")
+
 # Bulk accept/reject by criteria
 doc.accept_changes(author="Legal Team")
 doc.reject_changes(change_type="deletion")
+doc.accept_changes(change_type="insertion", author="John Doe")
+
+# Accept/reject individual changes
+for change in doc.get_tracked_changes():
+    if change.is_insertion and "draft" in change.text.lower():
+        change.reject()
+
+# Convenience property
+for change in doc.tracked_changes:
+    print(change)
 ```
+
+### TrackedChange Model
+
+The `TrackedChange` dataclass provides:
+- `id`: Change ID (w:id attribute)
+- `change_type`: ChangeType enum (INSERTION, DELETION, MOVE_FROM, MOVE_TO, FORMAT_RUN, FORMAT_PARAGRAPH)
+- `author`: Author name
+- `date`: datetime of the change
+- `text`: Text content of the change
+- `element`: Reference to underlying XML element
+
+Helper properties:
+- `is_insertion`, `is_deletion`, `is_move`, `is_format_change`: Type checks
+
+Methods:
+- `accept()`: Accept this specific change
+- `reject()`: Reject this specific change
 
 ### Use Cases
 
 - Review changes before accepting/rejecting
 - Generate change reports
 - Selective bulk acceptance by author or type
+- Audit trail and change history analysis
 
 ---
 

@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from python_docx_redline.models.paragraph import Paragraph
     from python_docx_redline.models.section import Section
     from python_docx_redline.models.table import Table, TableRow
+    from python_docx_redline.models.tracked_change import TrackedChange
 
 import yaml
 from lxml import etree
@@ -3171,6 +3172,236 @@ class Document:
 
         return count
 
+    # List and query tracked changes
+
+    def get_tracked_changes(
+        self,
+        change_type: str | None = None,
+        author: str | None = None,
+    ) -> list["TrackedChange"]:
+        """Get all tracked changes in the document.
+
+        Returns a list of TrackedChange objects representing insertions, deletions,
+        moves, and formatting changes with their metadata.
+
+        Args:
+            change_type: Optional filter by change type. Valid values:
+                         "insertion", "deletion", "move_from", "move_to",
+                         "format_run", "format_paragraph", or None for all.
+            author: Optional filter by author name.
+
+        Returns:
+            List of TrackedChange objects matching the criteria.
+
+        Example:
+            >>> # Get all changes
+            >>> changes = doc.get_tracked_changes()
+            >>> for change in changes:
+            ...     print(f"{change.id}: {change.change_type.value} by {change.author}")
+            >>>
+            >>> # Get only insertions
+            >>> insertions = doc.get_tracked_changes(change_type="insertion")
+            >>>
+            >>> # Get changes by specific author
+            >>> johns_changes = doc.get_tracked_changes(author="John Doe")
+        """
+        from python_docx_redline.models.tracked_change import ChangeType, TrackedChange
+
+        changes: list[TrackedChange] = []
+
+        # Map string type names to ChangeType enum values
+        type_map = {
+            "insertion": ChangeType.INSERTION,
+            "deletion": ChangeType.DELETION,
+            "move_from": ChangeType.MOVE_FROM,
+            "move_to": ChangeType.MOVE_TO,
+            "format_run": ChangeType.FORMAT_RUN,
+            "format_paragraph": ChangeType.FORMAT_PARAGRAPH,
+        }
+
+        # Validate change_type if provided
+        filter_type: ChangeType | None = None
+        if change_type is not None:
+            if change_type not in type_map:
+                valid_types = ", ".join(sorted(type_map.keys()))
+                raise ValueError(f"Invalid change_type '{change_type}'. Valid types: {valid_types}")
+            filter_type = type_map[change_type]
+
+        # Collect insertions (w:ins)
+        if filter_type is None or filter_type == ChangeType.INSERTION:
+            for ins in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}ins"):
+                change = TrackedChange.from_element(ins, ChangeType.INSERTION, self)
+                if author is None or change.author == author:
+                    changes.append(change)
+
+        # Collect deletions (w:del)
+        if filter_type is None or filter_type == ChangeType.DELETION:
+            for del_elem in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del"):
+                change = TrackedChange.from_element(del_elem, ChangeType.DELETION, self)
+                if author is None or change.author == author:
+                    changes.append(change)
+
+        # Collect move sources (w:moveFrom)
+        if filter_type is None or filter_type == ChangeType.MOVE_FROM:
+            for move_from in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}moveFrom"):
+                change = TrackedChange.from_element(move_from, ChangeType.MOVE_FROM, self)
+                if author is None or change.author == author:
+                    changes.append(change)
+
+        # Collect move destinations (w:moveTo)
+        if filter_type is None or filter_type == ChangeType.MOVE_TO:
+            for move_to in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}moveTo"):
+                change = TrackedChange.from_element(move_to, ChangeType.MOVE_TO, self)
+                if author is None or change.author == author:
+                    changes.append(change)
+
+        # Collect run property changes (w:rPrChange)
+        if filter_type is None or filter_type == ChangeType.FORMAT_RUN:
+            for rpr_change in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange"):
+                change = TrackedChange.from_element(rpr_change, ChangeType.FORMAT_RUN, self)
+                if author is None or change.author == author:
+                    changes.append(change)
+
+        # Collect paragraph property changes (w:pPrChange)
+        if filter_type is None or filter_type == ChangeType.FORMAT_PARAGRAPH:
+            for ppr_change in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange"):
+                change = TrackedChange.from_element(ppr_change, ChangeType.FORMAT_PARAGRAPH, self)
+                if author is None or change.author == author:
+                    changes.append(change)
+
+        return changes
+
+    def accept_changes(
+        self,
+        change_type: str | None = None,
+        author: str | None = None,
+    ) -> int:
+        """Accept multiple tracked changes matching the given criteria.
+
+        This is a bulk operation that accepts all changes matching the filters.
+        If no filters are provided, accepts ALL tracked changes (equivalent to
+        accept_all_tracked_changes()).
+
+        Args:
+            change_type: Optional filter by change type. Valid values:
+                         "insertion", "deletion", "format_run", "format_paragraph",
+                         or None for all types.
+            author: Optional filter by author name.
+
+        Returns:
+            Number of changes accepted.
+
+        Example:
+            >>> # Accept all insertions
+            >>> count = doc.accept_changes(change_type="insertion")
+            >>> print(f"Accepted {count} insertions")
+            >>>
+            >>> # Accept all changes by a specific author
+            >>> count = doc.accept_changes(author="Legal Team")
+            >>> print(f"Accepted {count} changes from Legal Team")
+            >>>
+            >>> # Accept only insertions by a specific author
+            >>> count = doc.accept_changes(change_type="insertion", author="John Doe")
+        """
+        # Special case: no filters = accept all
+        if change_type is None and author is None:
+            self.accept_all_changes()
+            # Count how many we accepted (we need to re-scan since accept_all
+            # doesn't return a count - approximate by counting changes before)
+            return 0  # Can't determine count after the fact
+
+        count = 0
+
+        # If only author filter, use existing method for efficiency
+        if change_type is None and author is not None:
+            return self.accept_by_author(author)
+
+        # Otherwise, get filtered changes and accept each
+        changes = self.get_tracked_changes(change_type=change_type, author=author)
+
+        # Accept changes in reverse order to handle nested elements properly
+        for change in reversed(changes):
+            try:
+                self.accept_change(change.id)
+                count += 1
+            except ValueError:
+                # Change may have already been accepted (e.g., nested structure)
+                pass
+
+        return count
+
+    def reject_changes(
+        self,
+        change_type: str | None = None,
+        author: str | None = None,
+    ) -> int:
+        """Reject multiple tracked changes matching the given criteria.
+
+        This is a bulk operation that rejects all changes matching the filters.
+        If no filters are provided, rejects ALL tracked changes (equivalent to
+        reject_all_tracked_changes()).
+
+        Args:
+            change_type: Optional filter by change type. Valid values:
+                         "insertion", "deletion", "format_run", "format_paragraph",
+                         or None for all types.
+            author: Optional filter by author name.
+
+        Returns:
+            Number of changes rejected.
+
+        Example:
+            >>> # Reject all deletions
+            >>> count = doc.reject_changes(change_type="deletion")
+            >>> print(f"Rejected {count} deletions")
+            >>>
+            >>> # Reject all changes by a specific author
+            >>> count = doc.reject_changes(author="Unauthorized User")
+            >>> print(f"Rejected {count} changes from Unauthorized User")
+            >>>
+            >>> # Reject only deletions by a specific author
+            >>> count = doc.reject_changes(change_type="deletion", author="John Doe")
+        """
+        # Special case: no filters = reject all
+        if change_type is None and author is None:
+            self.reject_all_changes()
+            return 0  # Can't determine count after the fact
+
+        count = 0
+
+        # If only author filter, use existing method for efficiency
+        if change_type is None and author is not None:
+            return self.reject_by_author(author)
+
+        # Otherwise, get filtered changes and reject each
+        changes = self.get_tracked_changes(change_type=change_type, author=author)
+
+        # Reject changes in reverse order to handle nested elements properly
+        for change in reversed(changes):
+            try:
+                self.reject_change(change.id)
+                count += 1
+            except ValueError:
+                # Change may have already been rejected (e.g., nested structure)
+                pass
+
+        return count
+
+    @property
+    def tracked_changes(self) -> list["TrackedChange"]:
+        """Get all tracked changes as a read-only property.
+
+        Convenience property equivalent to get_tracked_changes() with no filters.
+
+        Returns:
+            List of all TrackedChange objects in the document.
+
+        Example:
+            >>> for change in doc.tracked_changes:
+            ...     print(f"{change.id}: {change.change_type.value}")
+        """
+        return self.get_tracked_changes()
+
     def delete_all_comments(self) -> None:
         """Delete all comments from the document.
 
@@ -4430,6 +4661,289 @@ class Document:
             table_elem.remove(row_to_delete.element)
 
         return row_to_delete
+
+    def insert_table_column(
+        self,
+        after_column: int | str,
+        cells: list[str],
+        *,
+        table_index: int = 0,
+        header: str | None = None,
+        track: bool = True,
+        author: str | AuthorIdentity | None = None,
+    ) -> None:
+        """Insert a new table column with optional tracked changes.
+
+        Columns in OOXML are implicit - they are derived from cells in rows.
+        This method inserts a new cell into each row at the specified position.
+
+        Args:
+            after_column: Column index (int) or text to find in a column (str).
+                          Use -1 to insert before the first column.
+            cells: List of text content for each cell in the new column.
+                   Length must match the number of rows (excluding header if provided).
+            table_index: Which table to modify (default: 0 = first table)
+            header: Optional header text for the first row. If provided, cells list
+                    should have one fewer element (for data rows only).
+            track: Whether to track changes (default: True)
+            author: Author for tracked changes (uses document author if None)
+
+        Raises:
+            IndexError: If table_index is out of range
+            ValueError: If after_column text is not found or is ambiguous
+            ValueError: If number of cells doesn't match expected row count
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> doc.insert_table_column(
+            ...     after_column=1,
+            ...     cells=["A", "B", "C"],
+            ...     header="New Column",
+            ...     track=True
+            ... )
+        """
+        tables = self.tables
+        if table_index < 0 or table_index >= len(tables):
+            raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
+
+        table = tables[table_index]
+
+        # Find the column to insert after
+        if isinstance(after_column, int):
+            if after_column < -1 or after_column >= table.col_count:
+                raise IndexError(
+                    f"Column index {after_column} out of range (-1 to {table.col_count - 1})"
+                )
+            insert_after_index = after_column
+        else:
+            # Find column containing text (check first row / header)
+            matching_cols: list[int] = []
+            for row in table.rows:
+                for cell in row.cells:
+                    if cell.contains(after_column):
+                        if cell.col_index not in matching_cols:
+                            matching_cols.append(cell.col_index)
+
+            if not matching_cols:
+                raise ValueError(f"No column found containing text: {after_column}")
+            if len(matching_cols) > 1:
+                raise ValueError(
+                    f"Text '{after_column}' found in {len(matching_cols)} columns - "
+                    "please use a more specific search or column index"
+                )
+
+            insert_after_index = matching_cols[0]
+
+        # Calculate expected cell count
+        expected_cells = table.row_count
+        if header is not None:
+            expected_cells -= 1  # Header row handled separately
+
+        if len(cells) != expected_cells:
+            raise ValueError(
+                f"Expected {expected_cells} cells (got {len(cells)}). "
+                f"Table has {table.row_count} rows"
+                + (", header is provided separately" if header else "")
+            )
+
+        # Prepare tracking info
+        if track:
+            from datetime import datetime, timezone
+
+            author_name = author if author is not None else self.author
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Insert a new gridCol in tblGrid
+        tbl_grid = table.element.find(f"{{{WORD_NAMESPACE}}}tblGrid")
+        if tbl_grid is not None:
+            grid_cols = tbl_grid.findall(f"{{{WORD_NAMESPACE}}}gridCol")
+            # Default width for new column
+            new_grid_col = etree.Element(f"{{{WORD_NAMESPACE}}}gridCol")
+            new_grid_col.set(f"{{{WORD_NAMESPACE}}}w", "2880")
+
+            if insert_after_index == -1:
+                # Insert at beginning
+                tbl_grid.insert(0, new_grid_col)
+            elif insert_after_index < len(grid_cols):
+                # Insert after specified column
+                tbl_grid.insert(insert_after_index + 1, new_grid_col)
+            else:
+                # Append at end
+                tbl_grid.append(new_grid_col)
+
+        # Insert cells into each row
+        cell_index = 0
+        for row_idx, row in enumerate(table.rows):
+            # Determine cell content
+            if header is not None and row_idx == 0:
+                cell_text = header
+            else:
+                cell_text = cells[cell_index]
+                cell_index += 1
+
+            # Create new cell element
+            new_tc = etree.Element(f"{{{WORD_NAMESPACE}}}tc")
+
+            # Add cell properties
+            tc_pr = etree.SubElement(new_tc, f"{{{WORD_NAMESPACE}}}tcPr")
+            tc_w = etree.SubElement(tc_pr, f"{{{WORD_NAMESPACE}}}tcW")
+            tc_w.set(f"{{{WORD_NAMESPACE}}}w", "2880")
+            tc_w.set(f"{{{WORD_NAMESPACE}}}type", "dxa")
+
+            # Add paragraph with content
+            para = etree.SubElement(new_tc, f"{{{WORD_NAMESPACE}}}p")
+
+            if cell_text:
+                if track:
+                    # Wrap content in insertion tracking
+                    change_id = self._xml_generator.next_change_id
+                    self._xml_generator.next_change_id += 1
+
+                    ins_elem = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}ins")
+                    ins_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+                    ins_elem.set(f"{{{WORD_NAMESPACE}}}author", author_name)
+                    ins_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+
+                    run = etree.SubElement(ins_elem, f"{{{WORD_NAMESPACE}}}r")
+                    t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+                    t.text = cell_text
+                else:
+                    run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+                    t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+                    t.text = cell_text
+
+            # Find insertion position in row
+            row_elem = row.element
+            tc_elements = row_elem.findall(f"{{{WORD_NAMESPACE}}}tc")
+
+            if insert_after_index == -1:
+                # Insert before first cell
+                if tc_elements:
+                    row_elem.insert(list(row_elem).index(tc_elements[0]), new_tc)
+                else:
+                    row_elem.append(new_tc)
+            elif insert_after_index < len(tc_elements):
+                # Insert after specified cell
+                target_tc = tc_elements[insert_after_index]
+                tc_position = list(row_elem).index(target_tc)
+                row_elem.insert(tc_position + 1, new_tc)
+            else:
+                # Append at end of row
+                row_elem.append(new_tc)
+
+    def delete_table_column(
+        self,
+        column: int | str,
+        *,
+        table_index: int = 0,
+        track: bool = True,
+        author: str | AuthorIdentity | None = None,
+    ) -> None:
+        """Delete a table column with optional tracked changes.
+
+        Columns in OOXML are implicit - they are derived from cells in rows.
+        This method removes or marks cells at the specified column position in each row.
+
+        Args:
+            column: Column index (int) or text to find in a column (str)
+            table_index: Which table to modify (default: 0 = first table)
+            track: Whether to track changes (default: True)
+            author: Author for tracked changes (uses document author if None)
+
+        Raises:
+            IndexError: If table_index or column index is out of range
+            ValueError: If column text is not found or is ambiguous
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> doc.delete_table_column(column=2, track=True)
+        """
+        tables = self.tables
+        if table_index < 0 or table_index >= len(tables):
+            raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
+
+        table = tables[table_index]
+
+        # Find the column to delete
+        if isinstance(column, int):
+            if column < 0 or column >= table.col_count:
+                raise IndexError(f"Column index {column} out of range (0-{table.col_count - 1})")
+            delete_index = column
+        else:
+            # Find column containing text
+            matching_cols: list[int] = []
+            for row in table.rows:
+                for cell in row.cells:
+                    if cell.contains(column):
+                        if cell.col_index not in matching_cols:
+                            matching_cols.append(cell.col_index)
+
+            if not matching_cols:
+                raise ValueError(f"No column found containing text: {column}")
+            if len(matching_cols) > 1:
+                raise ValueError(
+                    f"Text '{column}' found in {len(matching_cols)} columns - "
+                    "please use a more specific search or column index"
+                )
+
+            delete_index = matching_cols[0]
+
+        # Prepare tracking info
+        if track:
+            from datetime import datetime, timezone
+
+            author_name = author if author is not None else self.author
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Remove gridCol from tblGrid (if not tracking)
+        if not track:
+            tbl_grid = table.element.find(f"{{{WORD_NAMESPACE}}}tblGrid")
+            if tbl_grid is not None:
+                grid_cols = tbl_grid.findall(f"{{{WORD_NAMESPACE}}}gridCol")
+                if delete_index < len(grid_cols):
+                    tbl_grid.remove(grid_cols[delete_index])
+
+        # Process each row
+        for row in table.rows:
+            row_elem = row.element
+            tc_elements = row_elem.findall(f"{{{WORD_NAMESPACE}}}tc")
+
+            if delete_index >= len(tc_elements):
+                # Row doesn't have this column (varying row lengths)
+                continue
+
+            cell_to_delete = tc_elements[delete_index]
+
+            if track:
+                # Mark cell content as deleted
+                change_id = self._xml_generator.next_change_id
+                self._xml_generator.next_change_id += 1
+
+                # Convert all w:t to w:delText within the cell
+                for t_elem in cell_to_delete.findall(f".//{{{WORD_NAMESPACE}}}t"):
+                    t_elem.tag = f"{{{WORD_NAMESPACE}}}delText"
+
+                # Wrap all runs in deletion markers
+                for para in cell_to_delete.findall(f"{{{WORD_NAMESPACE}}}p"):
+                    for run in list(para.findall(f"{{{WORD_NAMESPACE}}}r")):
+                        # Create deletion wrapper
+                        del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
+                        del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+                        del_elem.set(f"{{{WORD_NAMESPACE}}}author", author_name)
+                        del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+
+                        # Move run into deletion
+                        run_index = list(para).index(run)
+                        para.remove(run)
+                        del_elem.append(run)
+                        para.insert(run_index, del_elem)
+
+                        # Increment change ID for next run
+                        change_id = self._xml_generator.next_change_id
+                        self._xml_generator.next_change_id += 1
+            else:
+                # Remove cell without tracking
+                row_elem.remove(cell_to_delete)
 
     def _fix_encoding_declarations(self, directory: Path) -> None:
         """Fix encoding declarations in all XML files to use UTF-8.
