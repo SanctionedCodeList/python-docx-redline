@@ -6,118 +6,48 @@ This document outlines planned features and enhancements for the python-docx-red
 
 The library currently supports:
 
-- **Text Operations**: Insert, replace, delete with tracked changes
-- **Smart Text Search**: Handles text fragmented across XML runs
-- **Regex Support**: Pattern matching with capture groups
-- **Scope Filtering**: Limit operations to sections/paragraphs
-- **Structural Operations**: Insert/delete paragraphs and sections
-- **Document Viewing**: Read paragraphs, sections, extract text
-- **MS365 Identity**: Link changes to real Office365 users
-- **Context-Aware Editing**: Preview context, detect fragments
-- **Minimal Editing Mode**: Legal-style clean diffs
-- **Markdown Formatting**: Bold, italic, underline, strikethrough
-- **Format-Only Tracking**: Track formatting changes without text changes
+**Text Operations**
+- Insert, replace, delete with tracked changes
+- Smart text search (handles fragmented XML runs)
+- Regex support with capture groups
+- Scope filtering (sections/paragraphs)
+
+**Structural Operations**
+- Insert/delete paragraphs and sections
+- Move tracking (`move_tracked()`) with linked source/destination markers
+
+**Document Viewing**
+- Read paragraphs, sections, extract text
+- Context-aware editing with fragment detection
+
+**Comments**
+- `add_comment()` - add comments with reply support
+- `get_comments()` - retrieve all comments
+- `delete_all_comments()` - remove all comments
+
+**Change Management**
+- `accept_change(id)` - accept specific tracked change
+- `reject_change(id)` - reject specific tracked change
+- `accept_all_changes()` - accept all tracked changes
+- `has_tracked_changes()` - check if document has changes
+
+**Formatting**
+- MS365 identity integration (link to Office365 users)
+- Minimal editing mode (legal-style clean diffs)
+- Markdown formatting (bold, italic, underline, strikethrough)
+- Format-only tracking (track formatting without text changes)
 
 ---
 
-## Phase 9: Move Tracking
+## Phase 9: List Tracked Changes
 
 **Priority**: High
-**Complexity**: Medium
-**Status**: Research Complete
-
-### Overview
-
-Implement OOXML move tracking (`w:moveFrom`/`w:moveTo`) to preserve semantic relationships when text is relocated within a document. Unlike delete+insert, move tracking shows reviewers exactly where content came from.
-
-### Proposed API
-
-```python
-# Move text from one location to another
-doc.move_tracked(
-    text="the indemnification clause",
-    to_after="Section 5.2",
-    author="Legal Team"
-)
-
-# Move with scope
-doc.move_tracked(
-    text="Definitions",
-    to_before="Article I",
-    scope=Scope(section="Appendix A")
-)
-```
-
-### Use Cases
-
-- Legal document review where "moved from Section X" context matters
-- Contract reorganization with full audit trail
-- Academic editing showing paragraph reordering
-
-### Technical Notes
-
-- Research completed in `docs/OOXML_MOVE_TRACKING_RESEARCH.md`
-- Requires paired `moveFromRangeStart`/`moveFromRangeEnd` and `moveToRangeStart`/`moveToRangeEnd`
-- Move names link source to destination containers
-
----
-
-## Phase 10: Comments API
-
-**Priority**: High
-**Complexity**: Low-Medium
+**Complexity**: Low
 **Status**: Planned
 
 ### Overview
 
-Expand comment support beyond `delete_all_comments()` to full CRUD operations for document comments.
-
-### Proposed API
-
-```python
-# Add a comment to specific text
-doc.add_comment(
-    text="ambiguous clause",
-    comment="Please clarify the timeline here",
-    author="Reviewer"
-)
-
-# Reply to existing comment
-doc.reply_to_comment(
-    comment_id=5,
-    reply="Updated per your feedback",
-    author="Author"
-)
-
-# Resolve a comment
-doc.resolve_comment(comment_id=5)
-
-# Get all comments
-comments = doc.get_comments()
-for c in comments:
-    print(f"{c.author}: {c.text} (on: {c.anchor_text})")
-
-# Delete specific comment
-doc.delete_comment(comment_id=5)
-```
-
-### Use Cases
-
-- Automated review workflows
-- Comment migration between document versions
-- Batch comment operations (resolve all, export to report)
-
----
-
-## Phase 11: Accept/Reject Individual Changes
-
-**Priority**: High
-**Complexity**: Medium
-**Status**: Planned
-
-### Overview
-
-Extend `accept_all_changes()` to support selective acceptance or rejection of individual tracked changes.
+Add ability to enumerate all tracked changes in a document with their metadata. Currently you can accept/reject changes by ID, but there's no way to list them.
 
 ### Proposed API
 
@@ -125,33 +55,31 @@ Extend `accept_all_changes()` to support selective acceptance or rejection of in
 # List all tracked changes
 changes = doc.get_tracked_changes()
 for change in changes:
-    print(f"{change.id}: {change.type} by {change.author} - '{change.text}'")
+    print(f"{change.id}: {change.type} by {change.author}")
+    print(f"  Text: '{change.text}'")
+    print(f"  Date: {change.date}")
 
-# Accept specific change
-doc.accept_change(change_id=3)
+# Filter by type
+insertions = doc.get_tracked_changes(change_type="insertion")
+deletions = doc.get_tracked_changes(change_type="deletion")
 
-# Reject specific change
-doc.reject_change(change_id=5)
+# Filter by author
+legal_changes = doc.get_tracked_changes(author="Legal Team")
 
-# Accept changes by author
+# Accept changes by criteria
 doc.accept_changes(author="Legal Team")
-
-# Reject changes by type
 doc.reject_changes(change_type="deletion")
-
-# Accept changes in scope
-doc.accept_changes(scope=Scope(section="Article II"))
 ```
 
 ### Use Cases
 
-- Selective merge of edits from multiple reviewers
-- Automated acceptance of formatting-only changes
-- Reject changes from specific authors
+- Review changes before accepting/rejecting
+- Generate change reports
+- Selective acceptance by author or type
 
 ---
 
-## Phase 12: CLI Tool
+## Phase 10: CLI Tool
 
 **Priority**: Medium
 **Complexity**: Low
@@ -182,17 +110,24 @@ docx-redline delete contract.docx \
     --text "obsolete paragraph" \
     --scope "section:Appendix"
 
+# Move text
+docx-redline move contract.docx \
+    --text "Section A" \
+    --after "Table of Contents"
+
 # Accept all changes
 docx-redline accept-all input.docx --output clean.docx
-
-# Compare documents
-docx-redline compare original.docx modified.docx --output redline.docx
 
 # List tracked changes
 docx-redline changes contract.docx --format json
 
 # Apply edits from YAML
 docx-redline apply contract.docx edits.yaml --output result.docx
+
+# Add comment
+docx-redline comment contract.docx \
+    --on "Section 2.1" \
+    --text "Please review"
 ```
 
 ### Use Cases
@@ -203,7 +138,7 @@ docx-redline apply contract.docx edits.yaml --output result.docx
 
 ---
 
-## Phase 13: Table Operations
+## Phase 11: Table Operations
 
 **Priority**: Medium
 **Complexity**: Medium-High
@@ -239,7 +174,7 @@ doc.insert_table_column(
     cells=["A", "B", "C"]
 )
 
-# Replace cell content
+# Replace cell content (already partially supported)
 doc.replace_in_table(
     text="TBD",
     replacement="$1,000",
@@ -256,7 +191,7 @@ doc.replace_in_table(
 
 ---
 
-## Phase 14: Document Comparison
+## Phase 12: Document Comparison
 
 **Priority**: Medium
 **Complexity**: Medium
@@ -294,7 +229,7 @@ print(f"Moves: {len(diff.moves)}")
 
 ---
 
-## Phase 15: Header/Footer Editing
+## Phase 13: Header/Footer Editing
 
 **Priority**: Low-Medium
 **Complexity**: Medium
@@ -335,7 +270,7 @@ for header in doc.headers:
 
 ---
 
-## Phase 16: Export/Visualization
+## Phase 14: Export/Visualization
 
 **Priority**: Low
 **Complexity**: Low-Medium
@@ -383,6 +318,7 @@ These features may be considered based on user feedback:
 - **Field Code Support**: Update and track changes to Word field codes
 - **Content Control Editing**: Manipulate structured content controls
 - **Bookmark Operations**: Add/edit/delete bookmarks with tracking
+- **Resolve Comments**: Mark comments as resolved (currently comments can be added/deleted but not resolved)
 
 ---
 
@@ -398,8 +334,8 @@ We welcome contributions! If you're interested in implementing any of these feat
 
 | Version | Features |
 |---------|----------|
-| 0.2.0 | Move Tracking (Phase 9) |
-| 0.3.0 | Comments API (Phase 10) |
-| 0.4.0 | Accept/Reject Changes (Phase 11) |
-| 0.5.0 | CLI Tool (Phase 12) |
+| 0.2.0 | List Tracked Changes (Phase 9) |
+| 0.3.0 | CLI Tool (Phase 10) |
+| 0.4.0 | Table Operations (Phase 11) |
+| 0.5.0 | Document Comparison (Phase 12) |
 | 1.0.0 | Stable API, comprehensive documentation |
