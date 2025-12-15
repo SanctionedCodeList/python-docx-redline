@@ -198,6 +198,71 @@ class Document:
         except Exception as e:
             raise ValidationError(f"Failed to parse document XML: {e}") from e
 
+        # Ensure required namespaces are declared for MS365 identity
+        if self._author_identity is not None:
+            self._ensure_ms365_namespaces()
+
+    def _ensure_ms365_namespaces(self) -> None:
+        """Ensure MS365 identity namespaces are declared on document root.
+
+        When using AuthorIdentity with provider_id or guid, the document root
+        must have the w15 and w16du namespaces declared, AND these namespaces
+        must be listed in mc:Ignorable for the attributes to be valid according
+        to the OOXML spec.
+
+        The mc:Ignorable attribute tells conformant processors to ignore
+        unknown namespace extensions rather than rejecting the document.
+        """
+        from .constants import MC_NAMESPACE, W15_NAMESPACE, W16DU_NAMESPACE
+
+        root = self.xml_root
+        nsmap = dict(root.nsmap)
+
+        # Check if namespaces need to be added
+        needs_update = False
+        if "w15" not in nsmap:
+            nsmap["w15"] = W15_NAMESPACE
+            needs_update = True
+
+        if "w16du" not in nsmap:
+            nsmap["w16du"] = W16DU_NAMESPACE
+            needs_update = True
+
+        if "mc" not in nsmap:
+            nsmap["mc"] = MC_NAMESPACE
+            needs_update = True
+
+        # If namespaces need to be added, we have to recreate the root element
+        # because lxml doesn't allow modifying nsmap after creation
+        if needs_update:
+            new_root = etree.Element(root.tag, nsmap=nsmap)
+            # Copy attributes
+            for key, value in root.attrib.items():
+                new_root.set(key, value)
+            # Move all children
+            for child in root:
+                new_root.append(child)
+            # Replace in tree
+            self.xml_tree._setroot(new_root)
+            self.xml_root = new_root
+            root = new_root
+
+        # Ensure mc:Ignorable includes w15 and w16du
+        mc_ignorable_attr = f"{{{MC_NAMESPACE}}}Ignorable"
+        current_ignorable = root.get(mc_ignorable_attr, "")
+        ignorable_parts = current_ignorable.split() if current_ignorable else []
+
+        updated = False
+        if "w15" not in ignorable_parts:
+            ignorable_parts.append("w15")
+            updated = True
+        if "w16du" not in ignorable_parts:
+            ignorable_parts.append("w16du")
+            updated = True
+
+        if updated:
+            root.set(mc_ignorable_attr, " ".join(ignorable_parts))
+
     # Backward compatibility properties for package access
     @property
     def _temp_dir(self) -> Path | None:
@@ -2201,7 +2266,12 @@ class Document:
 
         return True
 
-    def save(self, output_path: str | Path | None = None, validate: bool = True) -> None:
+    def save(
+        self,
+        output_path: str | Path | None = None,
+        validate: bool = True,
+        strict_validation: bool = False,
+    ) -> None:
         """Save the document to a file.
 
         Validates the document structure before saving to ensure OOXML compliance
@@ -2210,9 +2280,13 @@ class Document:
         Args:
             output_path: Path to save the document. If None, saves to original path.
                         For in-memory documents (loaded from bytes), output_path is required.
-            validate: Whether to run full OOXML validation before saving (default: True).
+            validate: Whether to run Python-based OOXML validation (default: True).
                      Validation is strongly recommended to catch errors before production.
                      Set to False for in-memory documents without an original file.
+            strict_validation: Whether to also run full OOXML spec validation using
+                     the external OOXML-Validator tool (default: False). Only runs if
+                     the validator is installed. Set to True for maximum confidence
+                     in OOXML compliance. See: https://github.com/mikeebowen/OOXML-Validator
 
         Raises:
             ValidationError: If document validation fails. Error includes detailed
@@ -2257,6 +2331,27 @@ class Document:
 
                 # Save the package to the output path
                 self._package.save(output_path)
+
+                # Run strict OOXML validation if requested
+                if strict_validation:
+                    from .ooxml_validator import (
+                        OOXMLValidationError,
+                        is_ooxml_validator_available,
+                        validate_with_ooxml_validator,
+                    )
+
+                    if is_ooxml_validator_available():
+                        errors = validate_with_ooxml_validator(output_path)
+                        if errors:
+                            raise OOXMLValidationError(
+                                f"Strict OOXML validation failed with {len(errors)} error(s)",
+                                errors,
+                            )
+                    else:
+                        logger.warning(
+                            "strict_validation requested but OOXML-Validator not available. "
+                            "Install from https://github.com/mikeebowen/OOXML-Validator"
+                        )
             else:
                 # Save XML directly (raw XML file, not a package)
                 self.xml_tree.write(
@@ -2270,9 +2365,16 @@ class Document:
             # Re-raise ValidationError with all its attributes intact
             raise
         except Exception as e:
+            # Check if it's an OOXMLValidationError (from strict validation)
+            if type(e).__name__ == "OOXMLValidationError":
+                raise
             raise ValidationError(f"Failed to save document: {e}") from e
 
-    def save_to_bytes(self, validate: bool = True) -> bytes:
+    def save_to_bytes(
+        self,
+        validate: bool = True,
+        strict_validation: bool = False,
+    ) -> bytes:
         """Save the document to bytes (in-memory).
 
         This is useful for:
@@ -2281,9 +2383,12 @@ class Document:
         - Sending documents over network
 
         Args:
-            validate: Whether to run OOXML validation (default: True).
+            validate: Whether to run Python-based OOXML validation (default: True).
                      Set to False for in-memory documents without an original file,
                      as validation compares against the original.
+            strict_validation: Whether to also run full OOXML spec validation using
+                     the external OOXML-Validator tool (default: False). Only runs if
+                     the validator is installed. Note: requires writing to a temp file.
 
         Returns:
             bytes: The complete .docx file as bytes
@@ -2322,11 +2427,46 @@ class Document:
                     )
 
             # Save to bytes using the package
-            return self._package.save_to_bytes()
+            doc_bytes = self._package.save_to_bytes()
+
+            # Run strict OOXML validation if requested (requires temp file)
+            if strict_validation:
+                import tempfile
+
+                from .ooxml_validator import (
+                    OOXMLValidationError,
+                    is_ooxml_validator_available,
+                    validate_with_ooxml_validator,
+                )
+
+                if is_ooxml_validator_available():
+                    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f:
+                        temp_path = Path(f.name)
+                        f.write(doc_bytes)
+
+                    try:
+                        errors = validate_with_ooxml_validator(temp_path)
+                        if errors:
+                            raise OOXMLValidationError(
+                                f"Strict OOXML validation failed with {len(errors)} error(s)",
+                                errors,
+                            )
+                    finally:
+                        temp_path.unlink(missing_ok=True)
+                else:
+                    logger.warning(
+                        "strict_validation requested but OOXML-Validator not available. "
+                        "Install from https://github.com/mikeebowen/OOXML-Validator"
+                    )
+
+            return doc_bytes
 
         except ValidationError:
             raise
         except Exception as e:
+            # Check if it's an OOXMLValidationError (from strict validation)
+            if type(e).__name__ == "OOXMLValidationError":
+                raise
             raise ValidationError(f"Failed to save document to bytes: {e}") from e
 
     def apply_edits(

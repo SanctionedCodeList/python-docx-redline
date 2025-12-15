@@ -340,6 +340,47 @@ class ParagraphPropertyBuilder:
         - indent_hanging: float (in inches)
     """
 
+    # OOXML schema requires pPr child elements in this specific order
+    # See ISO/IEC 29500-1:2016 section 17.3.1.26 (pPr)
+    PPR_ELEMENT_ORDER = [
+        "pStyle",
+        "keepNext",
+        "keepLines",
+        "pageBreakBefore",
+        "framePr",
+        "widowControl",
+        "numPr",
+        "suppressLineNumbers",
+        "pBdr",
+        "shd",
+        "tabs",
+        "suppressAutoHyphens",
+        "kinsoku",
+        "wordWrap",
+        "overflowPunct",
+        "topLinePunct",
+        "autoSpaceDE",
+        "autoSpaceDN",
+        "bidi",
+        "adjustRightInd",
+        "snapToGrid",
+        "spacing",  # Must come before jc
+        "ind",
+        "contextualSpacing",
+        "mirrorIndents",
+        "suppressOverlap",
+        "jc",  # Alignment
+        "textDirection",
+        "textAlignment",
+        "textboxTightWrap",
+        "outlineLvl",
+        "divId",
+        "cnfStyle",
+        "rPr",
+        "sectPr",
+        "pPrChange",  # Tracked change must be last
+    ]
+
     # Alignment value mapping
     ALIGNMENT_VALUES = {
         "left": "left",
@@ -348,6 +389,38 @@ class ParagraphPropertyBuilder:
         "justify": "both",
         "both": "both",
     }
+
+    @classmethod
+    def _get_insert_position(cls, ppr: etree._Element, element_name: str) -> int:
+        """Get the correct position to insert an element in pPr.
+
+        OOXML requires pPr child elements in a specific order.
+        This method finds the correct index to insert a new element.
+
+        Args:
+            ppr: The parent pPr element
+            element_name: Local name of element to insert (without namespace)
+
+        Returns:
+            Index position where the element should be inserted
+        """
+        try:
+            target_order = cls.PPR_ELEMENT_ORDER.index(element_name)
+        except ValueError:
+            # Unknown element, append at end (but before pPrChange)
+            return len(ppr)
+
+        for i, child in enumerate(ppr):
+            child_name = etree.QName(child.tag).localname
+            try:
+                child_order = cls.PPR_ELEMENT_ORDER.index(child_name)
+                if child_order > target_order:
+                    return i
+            except ValueError:
+                # Unknown child, keep looking
+                continue
+
+        return len(ppr)
 
     @classmethod
     def build(cls, nsmap: dict[str, str] | None = None, **kwargs: Any) -> etree._Element:
@@ -427,7 +500,9 @@ class ParagraphPropertyBuilder:
             return
 
         if jc is None:
-            jc = etree.SubElement(ppr, _w("jc"))
+            jc = etree.Element(_w("jc"))
+            pos = cls._get_insert_position(ppr, "jc")
+            ppr.insert(pos, jc)
 
         # At this point value is a string (bool False was handled above)
         str_value = str(value) if not isinstance(value, str) else value
@@ -453,7 +528,9 @@ class ParagraphPropertyBuilder:
             return
 
         if spacing is None:
-            spacing = etree.SubElement(ppr, _w("spacing"))
+            spacing = etree.Element(_w("spacing"))
+            pos = cls._get_insert_position(ppr, "spacing")
+            ppr.insert(pos, spacing)
 
         if prop_name == "spacing_before":
             spacing.set(_w("before"), str(points_to_twips(value)))
@@ -484,7 +561,9 @@ class ParagraphPropertyBuilder:
             return
 
         if ind is None:
-            ind = etree.SubElement(ppr, _w("ind"))
+            ind = etree.Element(_w("ind"))
+            pos = cls._get_insert_position(ppr, "ind")
+            ppr.insert(pos, ind)
 
         twips = inches_to_twips(value)
 

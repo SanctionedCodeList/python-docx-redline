@@ -568,7 +568,8 @@ class CommentOperations:
         comments_path = doc._temp_dir / "word" / "comments.xml"
         root, tree = self._load_or_create_comments_xml(comments_path)
 
-        para_id = f"{random.randint(0, 0xFFFFFFFF):08X}"
+        # OOXML spec requires paraId to be less than 0x80000000
+        para_id = f"{random.randint(0, 0x7FFFFFFF):08X}"
         comment_elem = self._create_comment_element(
             root, comment_id, text, author, initials, timestamp, para_id
         )

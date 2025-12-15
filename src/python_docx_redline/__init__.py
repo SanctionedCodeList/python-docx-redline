@@ -59,6 +59,10 @@ __all__ = [
     "export_changes_markdown",
     "export_changes_html",
     "generate_change_report",
+    # OOXML validation
+    "is_ooxml_validator_available",
+    "validate_with_ooxml_validator",
+    "OOXMLValidationError",
 ]
 
 # Import author identity
@@ -98,6 +102,13 @@ from .models.header_footer import Footer, Header, HeaderFooterType
 from .models.paragraph import Paragraph
 from .models.section import Section
 from .models.tracked_change import ChangeType, TrackedChange
+
+# Import OOXML validator
+from .ooxml_validator import (
+    OOXMLValidationError,
+    is_ooxml_validator_available,
+    validate_with_ooxml_validator,
+)
 
 # Import package class
 from .package import OOXMLPackage
