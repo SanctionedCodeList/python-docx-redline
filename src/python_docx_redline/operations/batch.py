@@ -378,9 +378,7 @@ class BatchOperations:
             message=f"Formatted '{text}' with {format_params}",
         )
 
-    def _handle_format_paragraph_tracked(
-        self, edit_type: str, edit: dict[str, Any]
-    ) -> EditResult:
+    def _handle_format_paragraph_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
         """Handle format_paragraph_tracked edit type."""
         containing = edit.get("containing")
         starting_with = edit.get("starting_with")

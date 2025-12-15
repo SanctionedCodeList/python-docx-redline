@@ -1,8 +1,6 @@
 """Tests for the BaseSchemaValidator class."""
 
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from lxml import etree
@@ -143,7 +141,7 @@ class TestValidateEncodingDeclarations:
         unpacked_dir = tmp_path / "unpacked"
         unpacked_dir.mkdir()
         xml_file = unpacked_dir / "test.xml"
-        xml_file.write_text('<root/>')
+        xml_file.write_text("<root/>")
         original_file = tmp_path / "original.docx"
         original_file.touch()
 
@@ -178,7 +176,7 @@ class TestValidateXml:
         unpacked_dir = tmp_path / "unpacked"
         unpacked_dir.mkdir()
         xml_file = unpacked_dir / "test.xml"
-        xml_file.write_text('<root><unclosed>')
+        xml_file.write_text("<root><unclosed>")
         original_file = tmp_path / "original.docx"
         original_file.touch()
 
@@ -192,7 +190,7 @@ class TestValidateXml:
         unpacked_dir = tmp_path / "unpacked"
         unpacked_dir.mkdir()
         xml_file = unpacked_dir / "test.xml"
-        xml_file.write_text('<root/>')
+        xml_file.write_text("<root/>")
         original_file = tmp_path / "original.docx"
         original_file.touch()
 
@@ -246,7 +244,7 @@ class TestValidateNamespaces:
         unpacked_dir = tmp_path / "unpacked"
         unpacked_dir.mkdir()
         xml_file = unpacked_dir / "test.xml"
-        xml_file.write_text('<root><unclosed>')
+        xml_file.write_text("<root><unclosed>")
         original_file = tmp_path / "original.docx"
         original_file.touch()
 
@@ -350,7 +348,7 @@ class TestValidateUniqueIds:
         unpacked_dir = tmp_path / "unpacked"
         unpacked_dir.mkdir()
         xml_file = unpacked_dir / "test.xml"
-        xml_file.write_text('<root><unclosed>')
+        xml_file.write_text("<root><unclosed>")
         original_file = tmp_path / "original.docx"
         original_file.touch()
 
@@ -368,7 +366,7 @@ class TestValidateFileReferences:
         """Test validation passes when there are no .rels files."""
         unpacked_dir = tmp_path / "unpacked"
         unpacked_dir.mkdir()
-        (unpacked_dir / "test.xml").write_text('<root/>')
+        (unpacked_dir / "test.xml").write_text("<root/>")
         original_file = tmp_path / "original.docx"
         original_file.touch()
 
@@ -394,7 +392,7 @@ class TestValidateFileReferences:
         # Create the target file
         word_dir = unpacked_dir / "word"
         word_dir.mkdir()
-        (word_dir / "document.xml").write_text('<root/>')
+        (word_dir / "document.xml").write_text("<root/>")
 
         original_file = tmp_path / "original.docx"
         original_file.touch()
@@ -440,7 +438,7 @@ class TestValidateFileReferences:
         # Create a file that should be referenced but isn't
         word_dir = unpacked_dir / "word"
         word_dir.mkdir()
-        (word_dir / "document.xml").write_text('<root/>')
+        (word_dir / "document.xml").write_text("<root/>")
 
         original_file = tmp_path / "original.docx"
         original_file.touch()
@@ -569,7 +567,7 @@ class TestValidateAllRelationshipIds:
         unpacked_dir = tmp_path / "unpacked"
         unpacked_dir.mkdir()
         xml_file = unpacked_dir / "test.xml"
-        xml_file.write_text('<root/>')
+        xml_file.write_text("<root/>")
         original_file = tmp_path / "original.docx"
         original_file.touch()
 
@@ -843,8 +841,7 @@ class TestXsdValidation:
         </root>"""
         xml_doc = etree.ElementTree(etree.fromstring(xml_str))
 
-        result, warnings = validator._remove_template_tags_from_text_nodes(xml_doc)
-        result_root = result.getroot()
+        _result, warnings = validator._remove_template_tags_from_text_nodes(xml_doc)
 
         # Template tags should be removed from text content
         # Note: template tags in text content (not w:t elements) are processed
@@ -870,7 +867,7 @@ class TestValidateAgainstXsd:
         unpacked_dir = tmp_path / "unpacked"
         unpacked_dir.mkdir()
         xml_file = unpacked_dir / "test.xml"
-        xml_file.write_text('<root/>')
+        xml_file.write_text("<root/>")
         original_file = tmp_path / "original.docx"
         original_file.touch()
 
@@ -887,7 +884,7 @@ class TestValidateAgainstXsd:
         # Create a file that has no matching schema
         xml_file = unpacked_dir / "custom" / "random.xml"
         xml_file.parent.mkdir(parents=True)
-        xml_file.write_text('<root/>')
+        xml_file.write_text("<root/>")
         original_file = tmp_path / "original.docx"
         original_file.touch()
 
@@ -1056,7 +1053,7 @@ class TestFileReferenceValidationEdgeCases:
         # Create the target file with different case
         word_dir = unpacked_dir / "word"
         word_dir.mkdir()
-        (word_dir / "document.xml").write_text('<root/>')
+        (word_dir / "document.xml").write_text("<root/>")
 
         original_file = tmp_path / "original.docx"
         original_file.touch()
@@ -1082,7 +1079,7 @@ class TestFileReferenceValidationEdgeCases:
 
         word_dir = unpacked_dir / "word"
         word_dir.mkdir()
-        (word_dir / "document.xml").write_text('<root/>')
+        (word_dir / "document.xml").write_text("<root/>")
 
         original_file = tmp_path / "original.docx"
         original_file.touch()

@@ -5,11 +5,8 @@ This module provides the main Document class which handles loading .docx files,
 inserting tracked changes, and saving the modified documents.
 """
 
-import difflib
 import io
 import logging
-import re
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
@@ -22,29 +19,23 @@ if TYPE_CHECKING:
     from python_docx_redline.models.table import Table, TableRow
     from python_docx_redline.models.tracked_change import TrackedChange
 
-import yaml
 from lxml import etree
 
 from .author import AuthorIdentity
 from .constants import WORD_NAMESPACE
-from .content_types import ContentTypeManager, ContentTypes
 from .errors import AmbiguousTextError, TextNotFoundError
-from .minimal_diff import (
-    apply_minimal_edits_to_paragraph,
-    should_use_minimal_editing,
-)
 from .operations.batch import BatchOperations
 from .operations.change_management import ChangeManagement
 from .operations.comments import CommentOperations
+from .operations.comparison import ComparisonOperations
 from .operations.formatting import FormatOperations
 from .operations.header_footer import HeaderFooterOperations
 from .operations.notes import NoteOperations
+from .operations.section import SectionOperations
 from .operations.tables import TableOperations
 from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
-from .relationships import RelationshipManager, RelationshipTypes
 from .results import ComparisonStats, EditResult, FormatResult
-from .scope import ScopeEvaluator
 from .suggestions import SuggestionGenerator
 from .text_search import TextSearch, TextSpan
 from .tracked_xml import TrackedXMLGenerator
@@ -274,6 +265,20 @@ class Document:
         if not hasattr(self, "_batch_ops_instance"):
             self._batch_ops_instance = BatchOperations(self)
         return self._batch_ops_instance
+
+    @property
+    def _section_ops(self) -> SectionOperations:
+        """Get the SectionOperations instance (lazy initialization)."""
+        if not hasattr(self, "_section_ops_instance"):
+            self._section_ops_instance = SectionOperations(self)
+        return self._section_ops_instance
+
+    @property
+    def _comparison_ops(self) -> ComparisonOperations:
+        """Get the ComparisonOperations instance (lazy initialization)."""
+        if not hasattr(self, "_comparison_ops_instance"):
+            self._comparison_ops_instance = ComparisonOperations(self)
+        return self._comparison_ops_instance
 
     # View capabilities (Phase 3)
 
@@ -699,86 +704,13 @@ class Document:
             >>> # Normalize to £X.XX without thousands separator
             >>> count = doc.normalize_currency("£", thousands_separator=False)
         """
-        # Build regex pattern for currency amounts
-        # Matches: $100, $100.00, $1,000, $1,000.50, etc.
-        pattern = rf"{re.escape(currency_symbol)}\d{{1,3}}(?:,?\d{{3}})*(?:\.\d+)?"
-
-        # Get all paragraphs
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Find all currency matches
-        matches = self._text_search.find_text(
-            pattern,
-            paragraphs,
-            regex=True,
-            normalize_quotes_for_matching=False,
+        return self._section_ops.normalize_currency(
+            currency_symbol=currency_symbol,
+            decimal_places=decimal_places,
+            thousands_separator=thousands_separator,
+            author=author,
+            scope=scope,
         )
-
-        # Helper to format amount
-        def format_amount(amount_str: str) -> str:
-            amount = float(amount_str.replace(",", ""))
-            formatted = f"{amount:.{decimal_places}f}"
-            if thousands_separator and "." in formatted:
-                integer_part, decimal_part = formatted.split(".")
-                integer_with_commas = f"{int(integer_part):,}"
-                return f"{integer_with_commas}.{decimal_part}"
-            elif thousands_separator:
-                formatted_int = f"{int(float(formatted)):,}"
-                if decimal_places > 0:
-                    return formatted_int + "." + "0" * decimal_places
-                return formatted_int
-            return formatted
-
-        #  Process one match at a time to avoid XML reference issues
-        replacement_count = 0
-        max_iterations = 100  # Prevent infinite loop
-
-        for _ in range(max_iterations):
-            # Get fresh paragraphs and matches each iteration
-            all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-            paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-            matches = self._text_search.find_text(
-                pattern,
-                paragraphs,
-                regex=True,
-                normalize_quotes_for_matching=False,
-            )
-
-            if not matches:
-                break  # No more matches
-
-            # Process only the first match
-            match = matches[0]
-            matched_text = match.text
-            amount_str = matched_text[len(currency_symbol) :]
-
-            try:
-                replacement_text = f"{currency_symbol}{format_amount(amount_str)}"
-            except ValueError:
-                break  # Can't parse, stop
-
-            # Skip if already correct
-            if matched_text == replacement_text:
-                break
-
-            # Use existing replace logic which handles single match
-            try:
-                # Create exact pattern for this specific match to avoid ambiguity
-                exact_pattern = re.escape(matched_text)
-                self.replace_tracked(
-                    find=exact_pattern,
-                    replace=replacement_text,
-                    author=author,
-                    scope=scope,
-                    regex=True,
-                    enable_quote_normalization=False,
-                )
-                replacement_count += 1
-            except (TextNotFoundError, AmbiguousTextError):
-                break  # Can't replace, stop
-
-        return replacement_count
 
     def normalize_dates(
         self,
@@ -813,106 +745,11 @@ class Document:
             >>> # Convert all dates to ISO format
             >>> count = doc.normalize_dates("%Y-%m-%d")
         """
-        # Resolve author
-        author_name = author if author is not None else self.author
-
-        # Common date patterns with their corresponding datetime format strings
-        months_long = (
-            "January|February|March|April|May|June|July|August|September|October|November|December"
+        return self._section_ops.normalize_dates(
+            to_format=to_format,
+            author=author,
+            scope=scope,
         )
-        months_short = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
-
-        date_patterns = [
-            # MM/DD/YYYY or M/D/YYYY
-            (r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", "%m/%d/%Y"),
-            # YYYY-MM-DD
-            (r"\b(\d{4})-(\d{2})-(\d{2})\b", "%Y-%m-%d"),
-            # Month DD, YYYY (e.g., December 08, 2025)
-            (
-                rf"\b({months_long}) (\d{{1,2}}), (\d{{4}})\b",
-                "%B %d, %Y",
-            ),
-            # Mon DD, YYYY (e.g., Dec 08, 2025)
-            (
-                rf"\b({months_short}) (\d{{1,2}}), (\d{{4}})\b",
-                "%b %d, %Y",
-            ),
-            # DD Month YYYY (e.g., 08 December 2025)
-            (
-                rf"\b(\d{{1,2}}) ({months_long}) (\d{{4}})\b",
-                "%d %B %Y",
-            ),
-        ]
-
-        # Get all paragraphs
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        all_matches = []
-        for pattern, date_format in date_patterns:
-            matches = self._text_search.find_text(
-                pattern,
-                paragraphs,
-                regex=True,
-                normalize_quotes_for_matching=False,
-            )
-            # Store matches with their format
-            for match in matches:
-                all_matches.append((match, date_format))
-
-        if not all_matches:
-            return 0
-
-        # Sort by position (reverse) to process from end to beginning
-        # This prevents position invalidation issues
-        all_matches.sort(
-            key=lambda x: (
-                list(all_paragraphs).index(x[0].paragraph),
-                x[0].start_run_index,
-                x[0].start_offset,
-            ),
-            reverse=True,
-        )
-
-        # Process each match
-        replacement_count = 0
-        for match, date_format in all_matches:
-            matched_text = match.text
-
-            # Parse the date using the detected format
-            try:
-                parsed_date = datetime.strptime(matched_text, date_format)
-            except ValueError:
-                continue  # Skip if parsing fails
-
-            # Format to target format
-            replacement_text = parsed_date.strftime(to_format)
-
-            # Skip if already in correct format
-            if matched_text == replacement_text:
-                continue
-
-            # Generate tracked change XML
-            deletion_xml = self._xml_generator.create_deletion(matched_text, author_name)
-            insertion_xml = self._xml_generator.create_insertion(replacement_text, author_name)
-
-            # Parse XMLs with namespace context
-            wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {deletion_xml}
-    {insertion_xml}
-</root>"""
-            root = etree.fromstring(wrapped_xml.encode("utf-8"))
-            deletion_element = root[0]
-            insertion_element = root[1]
-
-            # Replace the matched text with deletion + insertion
-            self._replace_match_with_elements(match, [deletion_element, insertion_element])
-            replacement_count += 1
-
-        return replacement_count
 
     def update_section_references(
         self,
@@ -946,71 +783,13 @@ class Document:
             >>> # Update article references
             >>> count = doc.update_section_references("5", "6", section_word="Article")
         """
-        # Escape special regex characters in the numbers
-        old_escaped = re.escape(old_number)
-        new_number_text = new_number
-
-        # Build pattern: "Section 2.1" with optional trailing punctuation
-        pattern = rf"\b{re.escape(section_word)}\s+{old_escaped}\b"
-
-        # Use replace_tracked with regex
-        try:
-            self.replace_tracked(
-                find=pattern,
-                replace=f"{section_word} {new_number_text}",
-                author=author,
-                scope=scope,
-                regex=True,
-                enable_quote_normalization=False,
-            )
-            return 1
-        except TextNotFoundError:
-            return 0
-        except AmbiguousTextError:
-            # Multiple occurrences - need to replace all of them
-            # Fall back to manual batch replacement
-            author_name = author if author is not None else self.author
-
-            all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-            paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-            matches = self._text_search.find_text(
-                pattern,
-                paragraphs,
-                regex=True,
-                normalize_quotes_for_matching=False,
-            )
-
-            if not matches:
-                return 0
-
-            # Process in reverse order
-            replacement_count = 0
-            for match in reversed(matches):
-                matched_text = match.text
-                replacement_text = f"{section_word} {new_number_text}"
-
-                # Generate tracked change XML
-                deletion_xml = self._xml_generator.create_deletion(matched_text, author_name)
-                insertion_xml = self._xml_generator.create_insertion(replacement_text, author_name)
-
-                # Parse XMLs with namespace context
-                wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {deletion_xml}
-    {insertion_xml}
-</root>"""
-                root = etree.fromstring(wrapped_xml.encode("utf-8"))
-                deletion_element = root[0]
-                insertion_element = root[1]
-
-                # Replace the matched text with deletion + insertion
-                self._replace_match_with_elements(match, [deletion_element, insertion_element])
-                replacement_count += 1
-
-            return replacement_count
+        return self._section_ops.update_section_references(
+            old_number=old_number,
+            new_number=new_number,
+            section_word=section_word,
+            author=author,
+            scope=scope,
+        )
 
     def apply_style(
         self,
@@ -1280,96 +1059,15 @@ class Document:
             TextNotFoundError: If anchor text is not found
             AmbiguousTextError: If multiple occurrences of anchor text are found
         """
-        from python_docx_redline.models.paragraph import Paragraph
-
-        # Validate arguments
-        if after is None and before is None:
-            raise ValueError("Must specify either 'after' or 'before'")
-        if after is not None and before is not None:
-            raise ValueError("Cannot specify both 'after' and 'before'")
-
-        anchor_text = after if after is not None else before
-        insert_after = after is not None
-
-        # After validation, anchor_text is guaranteed to be a string
-        assert anchor_text is not None
-
-        # Get all paragraphs
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-
-        # Apply scope filter if specified
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Find the anchor paragraph
-        matches = self._text_search.find_text(anchor_text, paragraphs)
-
-        if not matches:
-            suggestions = SuggestionGenerator.generate_suggestions(anchor_text, paragraphs)
-            raise TextNotFoundError(anchor_text, suggestions=suggestions)
-
-        if len(matches) > 1:
-            raise AmbiguousTextError(anchor_text, matches)
-
-        match = matches[0]
-        anchor_paragraph = match.paragraph
-
-        # Create new paragraph element
-        new_p = etree.Element(f"{{{WORD_NAMESPACE}}}p")
-
-        # Add style if specified
-        if style:
-            p_pr = etree.SubElement(new_p, f"{{{WORD_NAMESPACE}}}pPr")
-            p_style = etree.SubElement(p_pr, f"{{{WORD_NAMESPACE}}}pStyle")
-            p_style.set(f"{{{WORD_NAMESPACE}}}val", style)
-
-        # If tracked, wrap the runs in w:ins
-        if track:
-            from datetime import datetime, timezone
-
-            author_name = author if author is not None else self.author
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            change_id = self._xml_generator.next_change_id
-            self._xml_generator.next_change_id += 1
-
-            # Create w:ins element to wrap the run
-            ins = etree.SubElement(new_p, f"{{{WORD_NAMESPACE}}}ins")
-            ins.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
-            ins.set(f"{{{WORD_NAMESPACE}}}author", author_name)
-            ins.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
-            ins.set(
-                "{http://schemas.microsoft.com/office/word/2023/wordml/word16du}dateUtc",
-                timestamp,
-            )
-
-            # Add text content inside the w:ins element
-            run = etree.SubElement(ins, f"{{{WORD_NAMESPACE}}}r")
-            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-            t.text = text
-        else:
-            # Add text content directly to paragraph
-            run = etree.SubElement(new_p, f"{{{WORD_NAMESPACE}}}r")
-            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-            t.text = text
-
-        element_to_insert = new_p
-
-        # Insert the paragraph in the document
-        parent = anchor_paragraph.getparent()
-        if parent is None:
-            raise ValueError("Anchor paragraph has no parent")
-
-        anchor_index = list(parent).index(anchor_paragraph)
-
-        if insert_after:
-            # Insert after anchor
-            parent.insert(anchor_index + 1, element_to_insert)
-        else:
-            # Insert before anchor
-            parent.insert(anchor_index, element_to_insert)
-
-        # Return Paragraph wrapper
-        # new_p is always the actual paragraph element (whether tracked or not)
-        return Paragraph(new_p)
+        return self._section_ops.insert_paragraph(
+            text=text,
+            after=after,
+            before=before,
+            style=style,
+            track=track,
+            author=author,
+            scope=scope,
+        )
 
     def insert_paragraphs(
         self,
@@ -1403,14 +1101,8 @@ class Document:
             TextNotFoundError: If anchor text is not found
             AmbiguousTextError: If multiple occurrences of anchor text are found
         """
-        from python_docx_redline.models.paragraph import Paragraph as ParagraphClass
-
-        if not texts:
-            return []
-
-        # Insert the first paragraph to find the anchor position
-        first_para = self.insert_paragraph(
-            texts[0],
+        return self._section_ops.insert_paragraphs(
+            texts=texts,
             after=after,
             before=before,
             style=style,
@@ -1418,61 +1110,6 @@ class Document:
             author=author,
             scope=scope,
         )
-
-        created_paragraphs = [first_para]
-
-        # Get the parent of the first paragraph
-        parent = first_para.element.getparent()
-        if parent is None:
-            raise ValueError("First paragraph has no parent")
-        insertion_index = list(parent).index(first_para.element)
-
-        # Insert remaining paragraphs after the first one
-        for i, text in enumerate(texts[1:], start=1):
-            # Create new paragraph element
-            new_p = etree.Element(f"{{{WORD_NAMESPACE}}}p")
-
-            # Add style if specified
-            if style:
-                p_pr = etree.SubElement(new_p, f"{{{WORD_NAMESPACE}}}pPr")
-                p_style = etree.SubElement(p_pr, f"{{{WORD_NAMESPACE}}}pStyle")
-                p_style.set(f"{{{WORD_NAMESPACE}}}val", style)
-
-            # If tracked, wrap the runs in w:ins
-            if track:
-                from datetime import datetime, timezone
-
-                author_name = author if author is not None else self.author
-                timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                change_id = self._xml_generator.next_change_id
-                self._xml_generator.next_change_id += 1
-
-                # Create w:ins element to wrap the run
-                ins = etree.SubElement(new_p, f"{{{WORD_NAMESPACE}}}ins")
-                ins.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
-                ins.set(f"{{{WORD_NAMESPACE}}}author", author_name)
-                ins.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
-                ins.set(
-                    "{http://schemas.microsoft.com/office/word/2023/wordml/word16du}dateUtc",
-                    timestamp,
-                )
-
-                # Add text content inside the w:ins element
-                run = etree.SubElement(ins, f"{{{WORD_NAMESPACE}}}r")
-                t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-                t.text = text
-            else:
-                # Add text content directly to paragraph
-                run = etree.SubElement(new_p, f"{{{WORD_NAMESPACE}}}r")
-                t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-                t.text = text
-
-            # Insert after the previous paragraph
-            parent.insert(insertion_index + i, new_p)
-
-            created_paragraphs.append(ParagraphClass(new_p))
-
-        return created_paragraphs
 
     def delete_section(
         self,
@@ -1503,134 +1140,13 @@ class Document:
             >>> doc.delete_section("Methods", track=True)
             >>> doc.delete_section("Outdated Section", track=False)
         """
-        from python_docx_redline.models.section import Section
-
-        all_sections = Section.from_document(self.xml_root)
-        all_sections = self._filter_sections_by_scope(all_sections, scope)
-        section = self._find_single_section_match(all_sections, heading)
-
-        if track:
-            self._delete_section_tracked(section, author)
-        else:
-            self._delete_section_untracked(section)
-
-        return section
-
-    def _filter_sections_by_scope(
-        self, sections: list["Section"], scope: str | dict | Any | None
-    ) -> list["Section"]:
-        """Filter sections by scope, keeping those with paragraphs in scope."""
-        if scope is None:
-            return sections
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-        paragraphs_in_scope = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-        scope_para_set = set(paragraphs_in_scope)
-        return [s for s in sections if any(p.element in scope_para_set for p in s.paragraphs)]
-
-    def _find_single_section_match(self, sections: list["Section"], heading: str) -> "Section":
-        """Find exactly one section matching the heading, raising errors otherwise."""
-        matches = [
-            s
-            for s in sections
-            if s.heading is not None and s.contains(heading, case_sensitive=False)
-        ]
-
-        if not matches:
-            heading_paragraphs = [s.heading.element for s in sections if s.heading is not None]
-            suggestions = SuggestionGenerator.generate_suggestions(heading, heading_paragraphs)
-            raise TextNotFoundError(heading, suggestions=suggestions)
-
-        if len(matches) > 1:
-            self._raise_ambiguous_section_error(matches, heading)
-
-        return matches[0]
-
-    def _raise_ambiguous_section_error(self, matches: list["Section"], heading: str) -> None:
-        """Raise AmbiguousTextError with TextSpan representations of matching sections."""
-        from python_docx_redline.text_search import TextSpan
-
-        match_spans = []
-        for section in matches:
-            if section.heading:
-                runs = list(section.heading.element.iter(f"{{{WORD_NAMESPACE}}}r"))
-                if runs:
-                    heading_text = section.heading_text or ""
-                    span = TextSpan(
-                        runs=runs,
-                        start_run_index=0,
-                        end_run_index=len(runs) - 1,
-                        start_offset=0,
-                        end_offset=len(heading_text.strip()),
-                        paragraph=section.heading.element,
-                    )
-                    match_spans.append(span)
-
-        raise AmbiguousTextError(heading, match_spans)
-
-    def _delete_section_tracked(self, section: "Section", author: str | None) -> None:
-        """Delete section paragraphs with tracked changes."""
-        from datetime import datetime, timezone
-
-        author_name = author if author is not None else self.author
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        for para in section.paragraphs:
-            runs = list(para.element.iter(f"{{{WORD_NAMESPACE}}}r"))
-            if not runs:
-                continue
-            del_elem = self._create_deletion_element(author_name, timestamp)
-            self._wrap_runs_in_deletion(para.element, runs, del_elem)
-
-    def _create_deletion_element(self, author: str, timestamp: str) -> Any:
-        """Create a w:del element for tracked deletion."""
-        change_id = self._xml_generator.next_change_id
-        self._xml_generator.next_change_id += 1
-
-        del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
-        del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
-        del_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
-        del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
-        del_elem.set(
-            "{http://schemas.microsoft.com/office/word/2023/wordml/word16du}dateUtc",
-            timestamp,
+        return self._section_ops.delete_section(
+            heading=heading,
+            track=track,
+            update_toc=update_toc,
+            author=author,
+            scope=scope,
         )
-        return del_elem
-
-    def _wrap_runs_in_deletion(self, para_element: Any, runs: list[Any], del_elem: Any) -> None:
-        """Wrap runs in a deletion element, converting w:t to w:delText."""
-        for run in runs:
-            run_parent = run.getparent()
-            if run_parent is not None:
-                run_parent.remove(run)
-            self._convert_text_to_deltext(run)
-            del_elem.append(run)
-
-        p_pr = para_element.find(f"{{{WORD_NAMESPACE}}}pPr")
-        if p_pr is not None:
-            p_pr_index = list(para_element).index(p_pr)
-            para_element.insert(p_pr_index + 1, del_elem)
-        else:
-            para_element.insert(0, del_elem)
-
-    def _convert_text_to_deltext(self, run: Any) -> None:
-        """Convert w:t elements in a run to w:delText."""
-        for t_elem in run.iter(f"{{{WORD_NAMESPACE}}}t"):
-            deltext = etree.Element(f"{{{WORD_NAMESPACE}}}delText")
-            deltext.text = t_elem.text
-            xml_space = t_elem.get("{http://www.w3.org/XML/1998/namespace}space")
-            if xml_space:
-                deltext.set("{http://www.w3.org/XML/1998/namespace}space", xml_space)
-            t_parent = t_elem.getparent()
-            t_index = list(t_parent).index(t_elem)
-            t_parent.remove(t_elem)
-            t_parent.insert(t_index, deltext)
-
-    def _delete_section_untracked(self, section: "Section") -> None:
-        """Delete section paragraphs without tracking changes."""
-        for para in section.paragraphs:
-            parent = para.element.getparent()
-            if parent is not None:
-                parent.remove(para.element)
 
     def _insert_after_match(self, match: TextSpan, insertion_element: etree._Element) -> None:
         """Insert XML element(s) after a matched text span.
@@ -3245,290 +2761,7 @@ class Document:
               for readability, and paragraphs with existing tracked changes
               fall back to coarse replacement
         """
-        # Get paragraph texts from both documents
-        original_texts = [p.text for p in self.paragraphs]
-        modified_texts = [p.text for p in modified.paragraphs]
-
-        # Use SequenceMatcher to find differences at paragraph level
-        matcher = difflib.SequenceMatcher(None, original_texts, modified_texts)
-        opcodes = matcher.get_opcodes()
-
-        # We need to process changes carefully to avoid index shifting issues
-        # Build a list of operations to apply
-        operations: list[dict[str, Any]] = []
-
-        for tag, i1, i2, j1, j2 in opcodes:
-            if tag == "equal":
-                # No change needed
-                continue
-            elif tag == "delete":
-                # Paragraphs removed in modified version
-                for idx in range(i1, i2):
-                    operations.append(
-                        {
-                            "type": "delete",
-                            "original_index": idx,
-                            "text": original_texts[idx],
-                        }
-                    )
-            elif tag == "insert":
-                # Paragraphs added in modified version
-                # Insert after the previous paragraph (i1-1) or at beginning
-                for j_idx in range(j1, j2):
-                    operations.append(
-                        {
-                            "type": "insert",
-                            "insert_after_index": i1 - 1,  # -1 means insert at beginning
-                            "text": modified_texts[j_idx],
-                            "modified_index": j_idx,
-                        }
-                    )
-            elif tag == "replace":
-                # Paragraphs changed
-                # Check if this is a 1:1 replacement and minimal_edits is enabled
-                is_one_to_one = (i2 - i1) == 1 and (j2 - j1) == 1
-
-                if minimal_edits and is_one_to_one:
-                    # Attempt minimal intra-paragraph edit for 1:1 replacement
-                    operations.append(
-                        {
-                            "type": "minimal_replace",
-                            "original_index": i1,
-                            "original_text": original_texts[i1],
-                            "new_text": modified_texts[j1],
-                        }
-                    )
-                else:
-                    # Fall back to coarse delete + insert
-                    # First mark deletions
-                    for idx in range(i1, i2):
-                        operations.append(
-                            {
-                                "type": "delete",
-                                "original_index": idx,
-                                "text": original_texts[idx],
-                            }
-                        )
-                    # Then mark insertions
-                    for j_idx in range(j1, j2):
-                        operations.append(
-                            {
-                                "type": "insert",
-                                "insert_after_index": i1 - 1,
-                                "text": modified_texts[j_idx],
-                                "modified_index": j_idx,
-                            }
-                        )
-
-        # Apply operations to the document
-        change_count = self._apply_comparison_changes(operations, author, minimal_edits)
-
-        return change_count
-
-    def _apply_comparison_changes(
-        self,
-        operations: list[dict[str, Any]],
-        author: str | None,
-        minimal_edits: bool = False,
-    ) -> int:
-        """Apply comparison operations to generate tracked changes.
-
-        Args:
-            operations: List of delete/insert/minimal_replace operations from compare_to()
-            author: Author for tracked changes
-            minimal_edits: Whether minimal edits mode is enabled
-
-        Returns:
-            Number of changes applied
-        """
-        change_count = 0
-
-        # Get all paragraph elements
-        body = self.xml_root.find(f"{{{WORD_NAMESPACE}}}body")
-        if body is None:
-            return 0
-
-        paragraphs = list(body.findall(f"{{{WORD_NAMESPACE}}}p"))
-
-        # Track which paragraphs have been marked as deleted
-        deleted_indices: set[int] = set()
-
-        # Track which paragraphs have been handled by minimal_replace
-        minimal_replace_indices: set[int] = set()
-
-        # Process minimal replacements first
-        for op in operations:
-            if op["type"] == "minimal_replace":
-                idx = op["original_index"]
-                if idx < len(paragraphs) and idx not in minimal_replace_indices:
-                    para_elem = paragraphs[idx]
-                    orig_text = op["original_text"]
-                    new_text = op["new_text"]
-
-                    # Check if minimal editing is viable for this paragraph
-                    use_minimal, diff_result, reason = should_use_minimal_editing(
-                        para_elem, new_text, orig_text
-                    )
-
-                    if use_minimal and diff_result.hunks:
-                        # Apply minimal edits
-                        apply_minimal_edits_to_paragraph(
-                            para_elem,
-                            diff_result.hunks,
-                            self._xml_generator,
-                            author,
-                        )
-                        minimal_replace_indices.add(idx)
-                        # Count changes consistently with coarse mode:
-                        # Each hunk with delete_text counts as 1 deletion
-                        # Each hunk with insert_text counts as 1 insertion
-                        for hunk in diff_result.hunks:
-                            if hunk.delete_text:
-                                change_count += 1
-                            if hunk.insert_text:
-                                change_count += 1
-                    elif not use_minimal:
-                        # Fall back to coarse replacement
-                        if reason:
-                            logger.debug(
-                                "Minimal editing disabled for paragraph %d: %s",
-                                idx,
-                                reason,
-                            )
-                        self._mark_paragraph_deleted(para_elem, author)
-                        deleted_indices.add(idx)
-                        change_count += 1
-
-                        # Insert new paragraph after the deleted one
-                        self._insert_comparison_paragraph(body, paragraphs, idx, new_text, author)
-                        change_count += 1
-                    # else: diff_result.hunks is empty (whitespace-only), no changes needed
-
-        # Process deletions (mark content as deleted)
-        for op in operations:
-            if op["type"] == "delete":
-                idx = op["original_index"]
-                if (
-                    idx < len(paragraphs)
-                    and idx not in deleted_indices
-                    and idx not in minimal_replace_indices
-                ):
-                    self._mark_paragraph_deleted(paragraphs[idx], author)
-                    deleted_indices.add(idx)
-                    change_count += 1
-
-        # Process insertions
-        # We need to track offset for insertions
-        insertions_by_position: dict[int, list[str]] = {}
-        for op in operations:
-            if op["type"] == "insert":
-                pos = op["insert_after_index"]
-                if pos not in insertions_by_position:
-                    insertions_by_position[pos] = []
-                insertions_by_position[pos].append(op["text"])
-
-        # Apply insertions in reverse order of position to avoid index shifting
-        for pos in sorted(insertions_by_position.keys(), reverse=True):
-            texts = insertions_by_position[pos]
-            for text in reversed(texts):
-                self._insert_comparison_paragraph(body, paragraphs, pos, text, author)
-                change_count += 1
-
-        return change_count
-
-    def _mark_paragraph_deleted(
-        self,
-        paragraph: Any,
-        author: str | None,
-    ) -> None:
-        """Mark all text in a paragraph as deleted with tracked changes.
-
-        Args:
-            paragraph: The paragraph XML element
-            author: Author for the deletion
-        """
-        # Get all runs in the paragraph
-        runs = paragraph.findall(f".//{{{WORD_NAMESPACE}}}r")
-
-        for run in runs:
-            # Get all text elements in this run
-            text_elements = run.findall(f"{{{WORD_NAMESPACE}}}t")
-
-            for t_elem in text_elements:
-                text = t_elem.text or ""
-                if not text:
-                    continue
-
-                # Create deletion XML
-                del_xml = self._xml_generator.create_deletion(text, author)
-
-                # Parse the deletion XML
-                del_elem = etree.fromstring(
-                    f'<root xmlns:w="{WORD_NAMESPACE}" '
-                    f'xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du" '
-                    f'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml">'
-                    f"{del_xml}</root>"
-                )
-
-                # Get the w:del element
-                del_node = del_elem.find(f"{{{WORD_NAMESPACE}}}del")
-                if del_node is not None:
-                    # Insert the deletion before the original text element
-                    parent = t_elem.getparent()
-                    if parent is not None:
-                        idx = list(parent).index(t_elem)
-                        parent.insert(idx, del_node)
-                        # Remove the original text element
-                        parent.remove(t_elem)
-
-    def _insert_comparison_paragraph(
-        self,
-        body: Any,
-        paragraphs: list[Any],
-        after_index: int,
-        text: str,
-        author: str | None,
-    ) -> None:
-        """Insert a new paragraph with tracked insertion.
-
-        Args:
-            body: The document body element
-            paragraphs: List of existing paragraph elements
-            after_index: Index of paragraph to insert after (-1 for beginning)
-            text: Text content of the new paragraph
-            author: Author for the insertion
-        """
-        # Create insertion XML
-        ins_xml = self._xml_generator.create_insertion(text, author)
-
-        # Create a new paragraph with the insertion
-        new_para = etree.Element(f"{{{WORD_NAMESPACE}}}p")
-
-        # Parse the insertion XML
-        ins_elem = etree.fromstring(
-            f'<root xmlns:w="{WORD_NAMESPACE}" '
-            f'xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du" '
-            f'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml">'
-            f"{ins_xml}</root>"
-        )
-
-        # Get the w:ins element
-        ins_node = ins_elem.find(f"{{{WORD_NAMESPACE}}}ins")
-        if ins_node is not None:
-            new_para.append(ins_node)
-
-        # Insert the new paragraph at the appropriate position
-        if after_index < 0:
-            # Insert at the beginning
-            body.insert(0, new_para)
-        elif after_index < len(paragraphs):
-            # Insert after the specified paragraph
-            ref_para = paragraphs[after_index]
-            idx = list(body).index(ref_para)
-            body.insert(idx + 1, new_para)
-        else:
-            # Insert at the end
-            body.append(new_para)
+        return self._comparison_ops.compare_to(modified, author=author, minimal_edits=minimal_edits)
 
     # ========================================================================
     # FOOTNOTE / ENDNOTE METHODS
