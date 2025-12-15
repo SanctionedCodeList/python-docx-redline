@@ -52,6 +52,65 @@ class TrackedChangeOperations:
         """
         self._document = document
 
+    def _find_unique_match(
+        self,
+        text: str,
+        scope: str | dict | Any | None,
+        regex: bool,
+        enable_quote_normalization: bool,
+    ) -> TextSpan:
+        """Find a unique text match in the document.
+
+        Args:
+            text: The text or regex pattern to find
+            scope: Limit search scope
+            regex: Whether to treat text as regex
+            enable_quote_normalization: Whether to normalize quotes
+
+        Returns:
+            The single TextSpan match
+
+        Raises:
+            TextNotFoundError: If text is not found
+            AmbiguousTextError: If multiple matches found
+        """
+        all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        matches = self._document._text_search.find_text(
+            text,
+            paragraphs,
+            regex=regex,
+            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+        )
+
+        if not matches:
+            suggestions = SuggestionGenerator.generate_suggestions(text, paragraphs)
+            raise TextNotFoundError(text, suggestions=suggestions)
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(text, matches)
+
+        return matches[0]
+
+    def _parse_xml_elements(self, xml_content: str) -> list:
+        """Parse XML content into lxml elements with proper namespaces.
+
+        Args:
+            xml_content: The XML string(s) to parse (can be multiple fragments)
+
+        Returns:
+            List of parsed lxml Elements
+        """
+        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns:w="{WORD_NAMESPACE}"
+      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
+      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+    {xml_content}
+</root>"""
+        root = etree.fromstring(wrapped_xml.encode("utf-8"))
+        return list(root)
+
     def insert(
         self,
         text: str,
@@ -94,43 +153,13 @@ class TrackedChangeOperations:
         anchor: str = after if after is not None else before  # type: ignore[assignment]
         insert_after = after is not None
 
-        # Get all paragraphs in the document
-        all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        # Find the anchor text
+        match = self._find_unique_match(anchor, scope, regex, enable_quote_normalization)
 
-        # Apply scope filter if specified
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Search with optional quote normalization
-        matches = self._document._text_search.find_text(
-            anchor,
-            paragraphs,
-            regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
-        )
-
-        if not matches:
-            # Generate smart suggestions
-            suggestions = SuggestionGenerator.generate_suggestions(anchor, paragraphs)
-            raise TextNotFoundError(anchor, suggestions=suggestions)
-
-        if len(matches) > 1:
-            raise AmbiguousTextError(anchor, matches)
-
-        # We have exactly one match
-        match = matches[0]
-
-        # Generate the insertion XML
+        # Generate and parse the insertion XML
         insertion_xml = self._document._xml_generator.create_insertion(text, author)
-
-        # Parse the insertion XML with namespace context
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {insertion_xml}
-</root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        insertion_element = root[0]  # Get the first child (the actual insertion)
+        elements = self._parse_xml_elements(insertion_xml)
+        insertion_element = elements[0]
 
         # Insert at the appropriate position
         if insert_after:
@@ -164,43 +193,13 @@ class TrackedChangeOperations:
             AmbiguousTextError: If multiple occurrences of text are found
             re.error: If regex=True and the pattern is invalid
         """
-        # Get all paragraphs in the document
-        all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        # Find the text to delete
+        match = self._find_unique_match(text, scope, regex, enable_quote_normalization)
 
-        # Apply scope filter if specified
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Search with optional quote normalization
-        matches = self._document._text_search.find_text(
-            text,
-            paragraphs,
-            regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
-        )
-
-        if not matches:
-            # Generate smart suggestions
-            suggestions = SuggestionGenerator.generate_suggestions(text, paragraphs)
-            raise TextNotFoundError(text, suggestions=suggestions)
-
-        if len(matches) > 1:
-            raise AmbiguousTextError(text, matches)
-
-        # We have exactly one match
-        match = matches[0]
-
-        # Generate the deletion XML
+        # Generate and parse the deletion XML
         deletion_xml = self._document._xml_generator.create_deletion(text, author)
-
-        # Parse the deletion XML with namespace context
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {deletion_xml}
-</root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        deletion_element = root[0]  # Get the first child (the actual deletion)
+        elements = self._parse_xml_elements(deletion_xml)
+        deletion_element = elements[0]
 
         # Replace the matched text with deletion
         self._replace_match_with_element(match, deletion_element)
@@ -248,101 +247,75 @@ class TrackedChangeOperations:
         Warnings:
             ContinuityWarning: If check_continuity=True and potential sentence fragment detected
         """
-        # Get all paragraphs in the document
-        all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-
-        # Apply scope filter if specified
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Search with optional quote normalization
-        matches = self._document._text_search.find_text(
-            find,
-            paragraphs,
-            regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
-        )
-
-        if not matches:
-            # Generate smart suggestions
-            suggestions = SuggestionGenerator.generate_suggestions(find, paragraphs)
-            raise TextNotFoundError(find, suggestions=suggestions)
-
-        if len(matches) > 1:
-            raise AmbiguousTextError(find, matches)
-
-        # We have exactly one match
-        match = matches[0]
-
-        # Get the actual matched text for deletion
+        # Find the text to replace
+        match = self._find_unique_match(find, scope, regex, enable_quote_normalization)
         matched_text = match.text
 
         # Show context preview if requested
         if show_context:
-            before, matched, after = self._document._get_detailed_context(match, context_chars)
-            logger.debug(
-                "Context preview:\n"
-                "BEFORE (%d chars): %r\n"
-                "MATCH (%d chars): %r\n"
-                "AFTER (%d chars): %r\n"
-                "REPLACEMENT (%d chars): %r",
-                len(before),
-                before,
-                len(matched),
-                matched,
-                len(after),
-                after,
-                len(replace),
-                replace,
-            )
+            self._log_context_preview(match, replace, context_chars)
 
         # Handle capture group expansion for regex replacements
-        if regex and match.match_obj:
-            # Use expand() to handle capture group references like \1, \2, etc.
-            replacement_text = match.match_obj.expand(replace)
-        else:
-            replacement_text = replace
+        replacement_text = self._expand_replacement(match, replace, regex)
 
         # Check continuity if requested
         if check_continuity:
-            _, _, after_text = self._document._get_detailed_context(match, context_chars)
-            continuity_warnings = self._document._check_continuity(replacement_text, after_text)
+            self._check_and_warn_continuity(match, replacement_text, context_chars)
 
-            if continuity_warnings:
-                import warnings
-
-                from ..errors import ContinuityWarning
-
-                for warning_msg in continuity_warnings:
-                    suggestions = [
-                        "Include more context in your replacement text",
-                        "Adjust the 'find' text to include the connecting phrase",
-                        "Review the following text to ensure grammatical correctness",
-                    ]
-                    warnings.warn(
-                        ContinuityWarning(warning_msg, after_text, suggestions),
-                        stacklevel=2,
-                    )
-
-        # Generate deletion XML for the old text (use actual matched text)
+        # Generate and parse deletion + insertion XMLs
         deletion_xml = self._document._xml_generator.create_deletion(matched_text, author)
-
-        # Generate insertion XML for the new text (with expanded capture groups if regex)
         insertion_xml = self._document._xml_generator.create_insertion(replacement_text, author)
-
-        # Parse both XMLs with namespace context
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {deletion_xml}
-    {insertion_xml}
-</root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        deletion_element = root[0]  # First child (deletion)
-        insertion_element = root[1]  # Second child (insertion)
+        elements = self._parse_xml_elements(f"{deletion_xml}\n    {insertion_xml}")
 
         # Replace the matched text with deletion + insertion
-        self._replace_match_with_elements(match, [deletion_element, insertion_element])
+        self._replace_match_with_elements(match, elements)
+
+    def _log_context_preview(self, match: TextSpan, replacement: str, context_chars: int) -> None:
+        """Log context preview for debugging."""
+        before, matched, after = self._document._get_detailed_context(match, context_chars)
+        logger.debug(
+            "Context preview:\n"
+            "BEFORE (%d chars): %r\n"
+            "MATCH (%d chars): %r\n"
+            "AFTER (%d chars): %r\n"
+            "REPLACEMENT (%d chars): %r",
+            len(before),
+            before,
+            len(matched),
+            matched,
+            len(after),
+            after,
+            len(replacement),
+            replacement,
+        )
+
+    def _expand_replacement(self, match: TextSpan, replace: str, regex: bool) -> str:
+        """Expand capture group references in replacement text if regex mode."""
+        if regex and match.match_obj:
+            return match.match_obj.expand(replace)
+        return replace
+
+    def _check_and_warn_continuity(
+        self, match: TextSpan, replacement_text: str, context_chars: int
+    ) -> None:
+        """Check for continuity issues and emit warnings."""
+        import warnings
+
+        from ..errors import ContinuityWarning
+
+        _, _, after_text = self._document._get_detailed_context(match, context_chars)
+        continuity_warnings = self._document._check_continuity(replacement_text, after_text)
+
+        for warning_msg in continuity_warnings:
+            suggestions = [
+                "Include more context in your replacement text",
+                "Adjust the 'find' text to include the connecting phrase",
+                "Review the following text to ensure grammatical correctness",
+            ]
+            warnings.warn(
+                ContinuityWarning(warning_msg, after_text, suggestions),
+                stacklevel=3,
+            )
 
     def move(
         self,
@@ -393,89 +366,55 @@ class TrackedChangeOperations:
         dest_anchor: str = after if after is not None else before  # type: ignore[assignment]
         insert_after = after is not None
 
-        # Get all paragraphs
-        all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-
-        # 1. Find the source text to move
-        source_paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, source_scope)
-        source_matches = self._document._text_search.find_text(
-            text,
-            source_paragraphs,
-            regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+        # Find source text and destination anchor
+        source_match = self._find_unique_match(
+            text, source_scope, regex, enable_quote_normalization
+        )
+        dest_match = self._find_unique_match(
+            dest_anchor, dest_scope, regex, enable_quote_normalization
         )
 
-        if not source_matches:
-            suggestions = SuggestionGenerator.generate_suggestions(text, source_paragraphs)
-            raise TextNotFoundError(text, suggestions=suggestions)
-
-        if len(source_matches) > 1:
-            raise AmbiguousTextError(text, source_matches)
-
-        source_match = source_matches[0]
         source_text = source_match.text
 
-        # 2. Find the destination anchor
-        dest_paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, dest_scope)
-        dest_matches = self._document._text_search.find_text(
-            dest_anchor,
-            dest_paragraphs,
-            regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
-        )
-
-        if not dest_matches:
-            suggestions = SuggestionGenerator.generate_suggestions(dest_anchor, dest_paragraphs)
-            raise TextNotFoundError(dest_anchor, suggestions=suggestions)
-
-        if len(dest_matches) > 1:
-            raise AmbiguousTextError(dest_anchor, dest_matches)
-
-        dest_match = dest_matches[0]
-
-        # 3. Generate a unique move name to link source and destination
+        # Generate XML elements for move operation
         move_name = self._generate_move_name()
-
-        # 4. Generate moveFrom XML (for source location)
-        move_from_xml, _, _ = self._document._xml_generator.create_move_from(
+        move_to_elements, move_from_elements = self._create_move_elements(
             source_text, move_name, author
         )
 
-        # 5. Generate moveTo XML (for destination location)
-        move_to_xml, _, _ = self._document._xml_generator.create_move_to(
-            source_text, move_name, author
-        )
-
-        # 6. Parse both XMLs with namespace context
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {move_to_xml}
-</root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        # Get all three elements (moveToRangeStart, moveTo, moveToRangeEnd)
-        move_to_elements = list(root)
-
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {move_from_xml}
-</root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        # Get all three elements (moveFromRangeStart, moveFrom, moveFromRangeEnd)
-        move_from_elements = list(root)
-
-        # 7. First, insert the moveTo at the destination
-        # (do this first so we don't mess up source position)
+        # Insert moveTo at destination first (so we don't mess up source position)
         if insert_after:
             self._insert_after_match(dest_match, move_to_elements)
         else:
             self._insert_before_match(dest_match, move_to_elements)
 
-        # 8. Replace the source text with moveFrom markers
+        # Replace source text with moveFrom markers
         self._replace_match_with_elements(source_match, move_from_elements)
+
+    def _create_move_elements(
+        self, source_text: str, move_name: str, author: str | None
+    ) -> tuple[list, list]:
+        """Create move-to and move-from XML elements.
+
+        Args:
+            source_text: The text being moved
+            move_name: Unique identifier linking source and destination
+            author: Author for the tracked change
+
+        Returns:
+            Tuple of (move_to_elements, move_from_elements)
+        """
+        move_from_xml, _, _ = self._document._xml_generator.create_move_from(
+            source_text, move_name, author
+        )
+        move_to_xml, _, _ = self._document._xml_generator.create_move_to(
+            source_text, move_name, author
+        )
+
+        move_to_elements = self._parse_xml_elements(move_to_xml)
+        move_from_elements = self._parse_xml_elements(move_from_xml)
+
+        return move_to_elements, move_from_elements
 
     def _generate_move_name(self) -> str:
         """Generate a unique move name for linking source and destination.
@@ -647,6 +586,75 @@ class TrackedChangeOperations:
             for i, elem in enumerate(replacement_elements):
                 paragraph.insert(start_run_index + i, elem)
 
+    def _create_text_run(self, text: str, source_run: Any) -> Any:
+        """Create a new text run with optional properties from source run.
+
+        Args:
+            text: The text content for the new run
+            source_run: The run to copy properties from (if any)
+
+        Returns:
+            A new w:r element with the text content
+        """
+        new_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+        run_props = source_run.find(f"{{{WORD_NAMESPACE}}}rPr")
+        if run_props is not None:
+            new_run.append(etree.fromstring(etree.tostring(run_props)))
+        text_elem = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}t")
+        if text and (text[0].isspace() or text[-1].isspace()):
+            text_elem.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        text_elem.text = text
+        return new_run
+
+    def _get_run_text_info(self, run: Any) -> tuple[str, int]:
+        """Extract text content and position info from a run.
+
+        Args:
+            run: The run element to extract from
+
+        Returns:
+            Tuple of (run_text, number_of_text_elements)
+        """
+        text_elements = list(run.iter(f"{{{WORD_NAMESPACE}}}t"))
+        if not text_elements:
+            return "", 0
+        return text_elements[0].text or "", len(text_elements)
+
+    def _build_split_elements(
+        self, run: Any, before_text: str, after_text: str, replacement_elements: list[Any]
+    ) -> list[Any]:
+        """Build the list of elements for a run split operation.
+
+        Args:
+            run: The original run being split
+            before_text: Text before the replacement (may be empty)
+            after_text: Text after the replacement (may be empty)
+            replacement_elements: Elements to insert in the middle
+
+        Returns:
+            List of elements to insert
+        """
+        new_elements = []
+        if before_text:
+            new_elements.append(self._create_text_run(before_text, run))
+        new_elements.extend(replacement_elements)
+        if after_text:
+            new_elements.append(self._create_text_run(after_text, run))
+        return new_elements
+
+    def _replace_run_with_elements(self, paragraph: Any, run: Any, new_elements: list[Any]) -> None:
+        """Replace a run with a list of new elements.
+
+        Args:
+            paragraph: The paragraph containing the run
+            run: The run to replace
+            new_elements: Elements to insert in place of the run
+        """
+        run_index = list(paragraph).index(run)
+        paragraph.remove(run)
+        for i, elem in enumerate(new_elements):
+            paragraph.insert(run_index + i, elem)
+
     def _split_and_replace_in_run(
         self,
         paragraph: Any,
@@ -664,60 +672,16 @@ class TrackedChangeOperations:
             end_offset: Character offset where match ends (exclusive)
             replacement_element: Element to insert in place of matched text
         """
-        # Get the full text of the run
-        text_elements = list(run.iter(f"{{{WORD_NAMESPACE}}}t"))
-        if not text_elements:
+        run_text, num_elements = self._get_run_text_info(run)
+        if num_elements == 0:
             return
 
-        # For simplicity, we'll work with the first text element
-        # (Word typically has one w:t per run)
-        text_elem = text_elements[0]
-        run_text = text_elem.text or ""
-
-        # Split into before, match, after
         before_text = run_text[:start_offset]
         after_text = run_text[end_offset:]
-
-        run_index = list(paragraph).index(run)
-
-        # Build new elements
-        new_elements = []
-
-        # Add before text if it exists
-        if before_text:
-            before_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
-            # Copy run properties if they exist
-            run_props = run.find(f"{{{WORD_NAMESPACE}}}rPr")
-            if run_props is not None:
-                before_run.append(etree.fromstring(etree.tostring(run_props)))
-            before_t = etree.SubElement(before_run, f"{{{WORD_NAMESPACE}}}t")
-            if before_text and (before_text[0].isspace() or before_text[-1].isspace()):
-                before_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-            before_t.text = before_text
-            new_elements.append(before_run)
-
-        # Add replacement element
-        new_elements.append(replacement_element)
-
-        # Add after text if it exists
-        if after_text:
-            after_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
-            # Copy run properties if they exist
-            run_props = run.find(f"{{{WORD_NAMESPACE}}}rPr")
-            if run_props is not None:
-                after_run.append(etree.fromstring(etree.tostring(run_props)))
-            after_t = etree.SubElement(after_run, f"{{{WORD_NAMESPACE}}}t")
-            if after_text and (after_text[0].isspace() or after_text[-1].isspace()):
-                after_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-            after_t.text = after_text
-            new_elements.append(after_run)
-
-        # Remove original run
-        paragraph.remove(run)
-
-        # Insert new elements
-        for i, elem in enumerate(new_elements):
-            paragraph.insert(run_index + i, elem)
+        new_elements = self._build_split_elements(
+            run, before_text, after_text, [replacement_element]
+        )
+        self._replace_run_with_elements(paragraph, run, new_elements)
 
     def _split_and_replace_in_run_multiple(
         self,
@@ -736,53 +700,13 @@ class TrackedChangeOperations:
             end_offset: Character offset where match ends (exclusive)
             replacement_elements: Elements to insert in place of matched text
         """
-        # Get the full text of the run
-        text_elements = list(run.iter(f"{{{WORD_NAMESPACE}}}t"))
-        if not text_elements:
+        run_text, num_elements = self._get_run_text_info(run)
+        if num_elements == 0:
             return
 
-        text_elem = text_elements[0]
-        run_text = text_elem.text or ""
-
-        # Split into before, match, after
         before_text = run_text[:start_offset]
         after_text = run_text[end_offset:]
-
-        run_index = list(paragraph).index(run)
-
-        # Build new elements
-        new_elements = []
-
-        # Add before text if it exists
-        if before_text:
-            before_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
-            run_props = run.find(f"{{{WORD_NAMESPACE}}}rPr")
-            if run_props is not None:
-                before_run.append(etree.fromstring(etree.tostring(run_props)))
-            before_t = etree.SubElement(before_run, f"{{{WORD_NAMESPACE}}}t")
-            if before_text and (before_text[0].isspace() or before_text[-1].isspace()):
-                before_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-            before_t.text = before_text
-            new_elements.append(before_run)
-
-        # Add all replacement elements
-        new_elements.extend(replacement_elements)
-
-        # Add after text if it exists
-        if after_text:
-            after_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
-            run_props = run.find(f"{{{WORD_NAMESPACE}}}rPr")
-            if run_props is not None:
-                after_run.append(etree.fromstring(etree.tostring(run_props)))
-            after_t = etree.SubElement(after_run, f"{{{WORD_NAMESPACE}}}t")
-            if after_text and (after_text[0].isspace() or after_text[-1].isspace()):
-                after_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-            after_t.text = after_text
-            new_elements.append(after_run)
-
-        # Remove original run
-        paragraph.remove(run)
-
-        # Insert new elements
-        for i, elem in enumerate(new_elements):
-            paragraph.insert(run_index + i, elem)
+        new_elements = self._build_split_elements(
+            run, before_text, after_text, replacement_elements
+        )
+        self._replace_run_with_elements(paragraph, run, new_elements)

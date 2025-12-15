@@ -297,11 +297,12 @@ class Comment:
         # Find all comments that have this comment as parent
         reply_list = []
         for comment in self._document.comments:
-            if comment.para_id == para_id:
-                continue  # Skip self
+            comment_para_id = comment.para_id
+            if comment_para_id is None or comment_para_id == para_id:
+                continue  # Skip comments without para_id and self
 
             # Check if this comment's parent is our paraId
-            comment_ex = self._document._get_comment_ex(comment.para_id)
+            comment_ex = self._document._get_comment_ex(comment_para_id)
             if comment_ex is not None:
                 parent_para_id = comment_ex.get(f"{{{W15_NAMESPACE}}}paraIdParent")
                 if parent_para_id == para_id:

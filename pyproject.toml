@@ -85,15 +85,7 @@ exclude = [
 ]
 # Disable error codes that have many issues in legacy code
 disable_error_code = [
-    "arg-type",
-    "var-annotated",
-    "operator",
     "import-untyped",
-    "return-value",
-    "union-attr",
-    "dict-item",
-    "assignment",
-    "attr-defined",
 ]
 
 # Strict checking for new/well-typed modules

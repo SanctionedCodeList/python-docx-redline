@@ -429,7 +429,9 @@ class ParagraphPropertyBuilder:
         if jc is None:
             jc = etree.SubElement(ppr, _w("jc"))
 
-        xml_val = cls.ALIGNMENT_VALUES.get(value, value)
+        # At this point value is a string (bool False was handled above)
+        str_value = str(value) if not isinstance(value, str) else value
+        xml_val = cls.ALIGNMENT_VALUES.get(str_value, str_value)
         jc.set(_w("val"), xml_val)
 
     @classmethod

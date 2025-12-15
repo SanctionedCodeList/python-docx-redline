@@ -357,3 +357,129 @@ class TestRegressionFixesXML:
         # Should have <w:br/> somewhere
         br_elements = ins.findall(".//w:br", namespaces=NSMAP)
         assert len(br_elements) >= 1
+
+
+class TestGetMaxChangeId:
+    """Test _get_max_change_id static method."""
+
+    def test_get_max_change_id_empty_document(self):
+        """Test that empty document returns 0."""
+
+        class MockDoc:
+            xml_root = etree.fromstring(
+                f"""<w:document xmlns:w="{WORD_NS}">
+                <w:body><w:p><w:r><w:t>Hello</w:t></w:r></w:p></w:body>
+                </w:document>"""
+            )
+
+        result = TrackedXMLGenerator._get_max_change_id(MockDoc())
+        assert result == 0
+
+    def test_get_max_change_id_with_insertions(self):
+        """Test finding max ID in document with w:ins elements."""
+
+        class MockDoc:
+            xml_root = etree.fromstring(
+                f"""<w:document xmlns:w="{WORD_NS}">
+                <w:body>
+                    <w:p>
+                        <w:ins w:id="5" w:author="Test" w:date="2024-01-01T00:00:00Z">
+                            <w:r><w:t>Inserted</w:t></w:r>
+                        </w:ins>
+                        <w:ins w:id="10" w:author="Test" w:date="2024-01-01T00:00:00Z">
+                            <w:r><w:t>Inserted2</w:t></w:r>
+                        </w:ins>
+                    </w:p>
+                </w:body>
+                </w:document>"""
+            )
+
+        result = TrackedXMLGenerator._get_max_change_id(MockDoc())
+        assert result == 10
+
+    def test_get_max_change_id_with_deletions(self):
+        """Test finding max ID in document with w:del elements."""
+
+        class MockDoc:
+            xml_root = etree.fromstring(
+                f"""<w:document xmlns:w="{WORD_NS}">
+                <w:body>
+                    <w:p>
+                        <w:del w:id="3" w:author="Test" w:date="2024-01-01T00:00:00Z">
+                            <w:r><w:delText>Deleted</w:delText></w:r>
+                        </w:del>
+                        <w:del w:id="7" w:author="Test" w:date="2024-01-01T00:00:00Z">
+                            <w:r><w:delText>Deleted2</w:delText></w:r>
+                        </w:del>
+                    </w:p>
+                </w:body>
+                </w:document>"""
+            )
+
+        result = TrackedXMLGenerator._get_max_change_id(MockDoc())
+        assert result == 7
+
+    def test_get_max_change_id_mixed_elements(self):
+        """Test finding max ID across mixed tracked change elements."""
+
+        class MockDoc:
+            xml_root = etree.fromstring(
+                f"""<w:document xmlns:w="{WORD_NS}">
+                <w:body>
+                    <w:p>
+                        <w:ins w:id="5" w:author="Test" w:date="2024-01-01T00:00:00Z">
+                            <w:r><w:t>Inserted</w:t></w:r>
+                        </w:ins>
+                        <w:del w:id="12" w:author="Test" w:date="2024-01-01T00:00:00Z">
+                            <w:r><w:delText>Deleted</w:delText></w:r>
+                        </w:del>
+                        <w:pPrChange w:id="8" w:author="Test" w:date="2024-01-01T00:00:00Z"/>
+                    </w:p>
+                </w:body>
+                </w:document>"""
+            )
+
+        result = TrackedXMLGenerator._get_max_change_id(MockDoc())
+        assert result == 12
+
+    def test_get_max_change_id_none_xml_root(self):
+        """Test that None xml_root returns 0."""
+
+        class MockDoc:
+            xml_root = None
+
+        result = TrackedXMLGenerator._get_max_change_id(MockDoc())
+        assert result == 0
+
+    def test_get_max_change_id_no_xml_root_attribute(self):
+        """Test that missing xml_root attribute returns 0."""
+
+        class MockDoc:
+            pass
+
+        result = TrackedXMLGenerator._get_max_change_id(MockDoc())
+        assert result == 0
+
+    def test_generator_starts_from_max_id(self):
+        """Test that TrackedXMLGenerator starts from max_id + 1."""
+
+        class MockDoc:
+            xml_root = etree.fromstring(
+                f"""<w:document xmlns:w="{WORD_NS}">
+                <w:body>
+                    <w:p>
+                        <w:ins w:id="42" w:author="Test" w:date="2024-01-01T00:00:00Z">
+                            <w:r><w:t>Inserted</w:t></w:r>
+                        </w:ins>
+                    </w:p>
+                </w:body>
+                </w:document>"""
+            )
+
+        gen = TrackedXMLGenerator(doc=MockDoc(), author="TestAuthor")
+        xml = gen.create_insertion("New text")
+        ins = parse_insertion_xml(xml)
+
+        # The new insertion should have ID 43 (max of 42 + 1)
+        new_id = int(ins.get(f"{{{WORD_NS}}}id"))
+        assert new_id == 43

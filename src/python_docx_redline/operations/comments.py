@@ -23,6 +23,7 @@ from ..suggestions import SuggestionGenerator
 if TYPE_CHECKING:
     from ..document import Document
     from ..models.comment import Comment
+    from ..text_search import TextSpan
 
 logger = logging.getLogger(__name__)
 
@@ -152,90 +153,101 @@ class CommentOperations:
                         reply_to references a non-existent comment
             re.error: If regex=True and the pattern is invalid
         """
-        from ..models.comment import Comment, CommentRange
-        from ..models.paragraph import Paragraph
-
-        # Validate arguments
         if reply_to is None and on is None:
             raise ValueError("Either 'on' or 'reply_to' must be provided")
 
-        # Determine author
-        effective_author = author or self._document.author
+        effective_author, effective_initials = self._prepare_author_info(author, initials)
+        comment_id = self._get_next_comment_id()
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # Generate initials if not provided
+        if reply_to is not None:
+            return self._add_reply_comment(
+                text, reply_to, comment_id, effective_author, effective_initials, timestamp
+            )
+        else:
+            # on cannot be None here due to the check above
+            assert on is not None  # For type checker
+            return self._add_top_level_comment(
+                text, on, scope, regex, comment_id, effective_author, effective_initials, timestamp
+            )
+
+    def _prepare_author_info(self, author: str | None, initials: str | None) -> tuple[str, str]:
+        """Prepare author and initials for a comment."""
+        effective_author = author or self._document.author
         if initials is None:
             initials = "".join(word[0].upper() for word in effective_author.split() if word)
             if not initials:
                 initials = effective_author[:2].upper() if effective_author else "AU"
+        return effective_author, initials
 
-        # Get next available comment ID
-        comment_id = self._get_next_comment_id()
+    def _add_reply_comment(
+        self,
+        text: str,
+        reply_to: Any,
+        comment_id: int,
+        author: str,
+        initials: str,
+        timestamp: str,
+    ) -> Comment:
+        """Add a reply to an existing comment."""
+        from ..models.comment import Comment
 
-        # Get current timestamp
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        parent_comment = self._resolve_comment_reference(reply_to)
+        parent_para_id = parent_comment.para_id
 
-        # Handle reply vs new comment
-        if reply_to is not None:
-            # This is a reply to an existing comment
-            parent_comment = self._resolve_comment_reference(reply_to)
-            parent_para_id = parent_comment.para_id
+        if parent_para_id is None:
+            raise ValueError("Cannot reply to comment without paraId")
 
-            if parent_para_id is None:
-                raise ValueError("Cannot reply to comment without paraId")
+        comment_elem = self._add_comment_to_comments_xml(
+            comment_id, text, author, initials, timestamp
+        )
 
-            # Add comment to comments.xml (no document markers for replies)
-            comment_elem = self._add_comment_to_comments_xml(
-                comment_id, text, effective_author, initials, timestamp
-            )
+        new_para_id = comment_elem.find(f".//{{{WORD_NAMESPACE}}}p").get(
+            f"{{{W14_NAMESPACE}}}paraId"
+        )
+        self._link_comment_reply(new_para_id, parent_para_id)
 
-            # Get the paraId of the new comment
-            new_para_id = comment_elem.find(f".//{{{WORD_NAMESPACE}}}p").get(
-                f"{{{W14_NAMESPACE}}}paraId"
-            )
+        return Comment(comment_elem, None, document=self._document)
 
-            # Create parent-child relationship in commentsExtended.xml
-            self._link_comment_reply(new_para_id, parent_para_id)
+    def _add_top_level_comment(
+        self,
+        text: str,
+        on: str,
+        scope: str | dict | Any | None,
+        regex: bool,
+        comment_id: int,
+        author: str,
+        initials: str,
+        timestamp: str,
+    ) -> Comment:
+        """Add a new top-level comment on text in the document."""
+        from ..models.comment import Comment, CommentRange
+        from ..models.paragraph import Paragraph
 
-            # Replies don't have a range
-            return Comment(comment_elem, None, document=self._document)
+        all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
-        else:
-            # This is a new top-level comment
-            # Get all paragraphs in the document
-            all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        matches = self._document._text_search.find_text(on, paragraphs, regex=regex)
+        if not matches:
+            suggestions = SuggestionGenerator.generate_suggestions(on, paragraphs)
+            raise TextNotFoundError(on, suggestions=suggestions)
+        if len(matches) > 1:
+            raise AmbiguousTextError(on, matches)
 
-            # Apply scope filter if specified
-            paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+        match = matches[0]
+        self._insert_comment_markers(match, comment_id)
 
-            # Search for the target text
-            matches = self._document._text_search.find_text(on, paragraphs, regex=regex)
+        comment_elem = self._add_comment_to_comments_xml(
+            comment_id, text, author, initials, timestamp
+        )
 
-            if not matches:
-                suggestions = SuggestionGenerator.generate_suggestions(on, paragraphs)
-                raise TextNotFoundError(on, suggestions=suggestions)
-
-            if len(matches) > 1:
-                raise AmbiguousTextError(on, matches)
-
-            match = matches[0]
-
-            # Insert comment markers in document body
-            self._insert_comment_markers(match, comment_id)
-
-            # Add comment to comments.xml (create file if needed)
-            comment_elem = self._add_comment_to_comments_xml(
-                comment_id, text, effective_author, initials, timestamp
-            )
-
-            # Build the CommentRange for the return value
-            start_para = Paragraph(match.paragraph)
-            comment_range = CommentRange(
-                start_paragraph=start_para,
-                end_paragraph=start_para,
-                marked_text=match.text,
-            )
-
-            return Comment(comment_elem, comment_range, document=self._document)
+        start_para = Paragraph(match.paragraph)
+        comment_range = CommentRange(
+            start_paragraph=start_para,
+            end_paragraph=start_para,
+            marked_text=match.text,
+        )
+        return Comment(comment_elem, comment_range, document=self._document)
 
     def delete(self, comment: Comment | str | int) -> None:
         """Delete a specific comment.
@@ -258,9 +270,13 @@ class CommentOperations:
         - Comment relationships from document.xml.rels
         - Comment content types from [Content_Types].xml
         """
+        self._remove_all_comment_markers_from_xml()
+        self._remove_comment_package_files()
+
+    def _remove_all_comment_markers_from_xml(self) -> None:
+        """Remove all comment markers from the document XML."""
         doc = self._document
 
-        # Remove comment range markers
         for elem in list(doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentRangeStart")):
             parent = elem.getparent()
             if parent is not None:
@@ -271,7 +287,6 @@ class CommentOperations:
             if parent is not None:
                 parent.remove(elem)
 
-        # Remove comment references
         for elem in list(doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentReference")):
             parent = elem.getparent()
             if parent is not None:
@@ -282,42 +297,54 @@ class CommentOperations:
                 else:
                     parent.remove(elem)
 
-        # Clean up comments-related files in the ZIP package
-        if doc._is_zip and doc._temp_dir:
-            comment_files = [
-                "word/comments.xml",
-                "word/commentsExtended.xml",
-                "word/commentsIds.xml",
-                "word/commentsExtensible.xml",
-            ]
-            for file_path in comment_files:
-                full_path = doc._temp_dir / file_path
-                if full_path.exists():
-                    full_path.unlink()
+    def _remove_comment_package_files(self) -> None:
+        """Remove comment-related files from the ZIP package."""
+        doc = self._document
+        if not (doc._is_zip and doc._temp_dir):
+            return
 
-            # Remove comment relationships from document.xml.rels
-            if doc._package:
-                rel_mgr = RelationshipManager(doc._package, "word/document.xml")
-                comment_rel_types = [
-                    RelationshipTypes.COMMENTS,
-                    RelationshipTypes.COMMENTS_EXTENDED,
-                    RelationshipTypes.COMMENTS_IDS,
-                    RelationshipTypes.COMMENTS_EXTENSIBLE,
-                ]
-                rel_mgr.remove_relationships(comment_rel_types)
-                rel_mgr.save()
+        comment_files = [
+            "word/comments.xml",
+            "word/commentsExtended.xml",
+            "word/commentsIds.xml",
+            "word/commentsExtensible.xml",
+        ]
+        for file_path in comment_files:
+            full_path = doc._temp_dir / file_path
+            if full_path.exists():
+                full_path.unlink()
 
-            # Remove comment content types from [Content_Types].xml
-            if doc._package:
-                ct_mgr = ContentTypeManager(doc._package)
-                comment_part_names = [
-                    "/word/comments.xml",
-                    "/word/commentsExtended.xml",
-                    "/word/commentsIds.xml",
-                    "/word/commentsExtensible.xml",
-                ]
-                ct_mgr.remove_overrides(comment_part_names)
-                ct_mgr.save()
+        if doc._package:
+            self._remove_comment_relationships()
+            self._remove_comment_content_types()
+
+    def _remove_comment_relationships(self) -> None:
+        """Remove comment relationships from document.xml.rels."""
+        if self._document._package is None:
+            return
+        rel_mgr = RelationshipManager(self._document._package, "word/document.xml")
+        comment_rel_types = [
+            RelationshipTypes.COMMENTS,
+            RelationshipTypes.COMMENTS_EXTENDED,
+            RelationshipTypes.COMMENTS_IDS,
+            RelationshipTypes.COMMENTS_EXTENSIBLE,
+        ]
+        rel_mgr.remove_relationships(comment_rel_types)
+        rel_mgr.save()
+
+    def _remove_comment_content_types(self) -> None:
+        """Remove comment content types from [Content_Types].xml."""
+        if self._document._package is None:
+            return
+        ct_mgr = ContentTypeManager(self._document._package)
+        comment_part_names = [
+            "/word/comments.xml",
+            "/word/commentsExtended.xml",
+            "/word/commentsIds.xml",
+            "/word/commentsExtensible.xml",
+        ]
+        ct_mgr.remove_overrides(comment_part_names)
+        ct_mgr.save()
 
     def resolve(self, comment: Comment | str | int) -> None:
         """Mark a comment as resolved.
@@ -481,7 +508,7 @@ class CommentOperations:
 
         return max_id + 1
 
-    def _insert_comment_markers(self, match: Any, comment_id: int) -> None:
+    def _insert_comment_markers(self, match: TextSpan, comment_id: int) -> None:
         """Insert comment range markers around matched text.
 
         Inserts commentRangeStart before the match, commentRangeEnd after,
@@ -535,38 +562,52 @@ class CommentOperations:
         import random
 
         doc = self._document
+        if doc._temp_dir is None:
+            raise ValueError("Cannot add comments to non-ZIP documents")
 
         comments_path = doc._temp_dir / "word" / "comments.xml"
+        root, tree = self._load_or_create_comments_xml(comments_path)
 
+        para_id = f"{random.randint(0, 0xFFFFFFFF):08X}"
+        comment_elem = self._create_comment_element(
+            root, comment_id, text, author, initials, timestamp, para_id
+        )
+
+        tree.write(str(comments_path), encoding="utf-8", xml_declaration=True, pretty_print=True)
+        return comment_elem
+
+    def _load_or_create_comments_xml(self, comments_path) -> tuple:
+        """Load existing comments.xml or create a new one."""
         if comments_path.exists():
             tree = etree.parse(str(comments_path))
-            root = tree.getroot()
-        else:
-            # Create new comments.xml
-            root = etree.Element(
-                f"{{{WORD_NAMESPACE}}}comments",
-                nsmap={
-                    "w": WORD_NAMESPACE,
-                    "w14": W14_NAMESPACE,
-                },
-            )
-            tree = etree.ElementTree(root)
+            return tree.getroot(), tree
 
-            # Ensure relationship and content type exist
-            self._ensure_comments_relationship()
-            self._ensure_comments_content_type()
+        root = etree.Element(
+            f"{{{WORD_NAMESPACE}}}comments",
+            nsmap={"w": WORD_NAMESPACE, "w14": W14_NAMESPACE},
+        )
+        tree = etree.ElementTree(root)
+        self._ensure_comments_relationship()
+        self._ensure_comments_content_type()
+        return root, tree
 
-        # Generate paraId
-        para_id = f"{random.randint(0, 0xFFFFFFFF):08X}"
-
-        # Create comment element
+    def _create_comment_element(
+        self,
+        root,
+        comment_id: int,
+        text: str,
+        author: str,
+        initials: str,
+        timestamp: str,
+        para_id: str,
+    ) -> etree._Element:
+        """Create a comment element with its paragraph structure."""
         comment_elem = etree.SubElement(root, f"{{{WORD_NAMESPACE}}}comment")
         comment_elem.set(f"{{{WORD_NAMESPACE}}}id", str(comment_id))
         comment_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
         comment_elem.set(f"{{{WORD_NAMESPACE}}}initials", initials)
         comment_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
 
-        # Add paragraph with text
         para = etree.SubElement(comment_elem, f"{{{WORD_NAMESPACE}}}p")
         para.set(f"{{{W14_NAMESPACE}}}paraId", para_id)
 
@@ -574,20 +615,14 @@ class CommentOperations:
         text_elem = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
         text_elem.text = text
 
-        # Write the file
-        tree.write(
-            str(comments_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
-
         return comment_elem
 
     def _link_comment_reply(self, child_para_id: str, parent_para_id: str) -> None:
         """Create parent-child relationship in commentsExtended.xml."""
         doc = self._document
 
+        if doc._temp_dir is None:
+            raise ValueError("Cannot link comments in non-ZIP documents")
         comments_ex_path = doc._temp_dir / "word" / "commentsExtended.xml"
 
         if comments_ex_path.exists():

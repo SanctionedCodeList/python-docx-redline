@@ -13,7 +13,7 @@ import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from lxml import etree
 
@@ -246,9 +246,9 @@ def export_changes_json(
     return json.dumps(result, indent=indent, ensure_ascii=False)
 
 
-def _change_to_dict(change: ExportedChange) -> dict:
+def _change_to_dict(change: ExportedChange) -> dict[str, Any]:
     """Convert an ExportedChange to a dictionary for JSON serialization."""
-    result = {
+    result: dict[str, Any] = {
         "id": change.id,
         "change_type": change.change_type,
         "author": change.author,

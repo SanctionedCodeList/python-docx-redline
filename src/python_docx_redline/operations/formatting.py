@@ -139,64 +139,63 @@ class FormatOperations:
             >>> # Make section references italic
             >>> count = doc.format_text(r"Section \\d+\\.\\d+", italic=True, regex=True)
         """
-        # Get all paragraphs
         all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
-        # Find all matches
         matches = self._document._text_search.find_text(
-            find,
-            paragraphs,
-            regex=regex,
-            normalize_quotes_for_matching=not regex,
+            find, paragraphs, regex=regex, normalize_quotes_for_matching=not regex
         )
-
         if not matches:
             return 0
 
-        # Apply formatting to each match
         count = 0
         for match in matches:
-            # Get the runs involved in this match
             for run_idx in range(match.start_run_index, match.end_run_index + 1):
                 run = match.runs[run_idx]
-
-                # Get or create run properties
-                r_pr = run.find(f"{{{WORD_NAMESPACE}}}rPr")
-                if r_pr is None:
-                    r_pr = etree.Element(f"{{{WORD_NAMESPACE}}}rPr")
-                    run.insert(0, r_pr)
-
-                # Apply bold
-                if bold is not None:
-                    b_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}b")
-                    if bold:
-                        if b_elem is None:
-                            etree.SubElement(r_pr, f"{{{WORD_NAMESPACE}}}b")
-                    else:
-                        if b_elem is not None:
-                            r_pr.remove(b_elem)
-
-                # Apply italic
-                if italic is not None:
-                    i_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}i")
-                    if italic:
-                        if i_elem is None:
-                            etree.SubElement(r_pr, f"{{{WORD_NAMESPACE}}}i")
-                    else:
-                        if i_elem is not None:
-                            r_pr.remove(i_elem)
-
-                # Apply color
-                if color is not None:
-                    color_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}color")
-                    if color_elem is None:
-                        color_elem = etree.SubElement(r_pr, f"{{{WORD_NAMESPACE}}}color")
-                    color_elem.set(f"{{{WORD_NAMESPACE}}}val", color)
-
+                r_pr = self._get_or_create_run_properties(run)
+                self._apply_simple_formatting(r_pr, bold, italic, color)
             count += 1
-
         return count
+
+    def _get_or_create_run_properties(self, run: Any) -> Any:
+        """Get or create run properties element for a run."""
+        r_pr = run.find(f"{{{WORD_NAMESPACE}}}rPr")
+        if r_pr is None:
+            r_pr = etree.Element(f"{{{WORD_NAMESPACE}}}rPr")
+            run.insert(0, r_pr)
+        return r_pr
+
+    def _apply_simple_formatting(
+        self,
+        r_pr: Any,
+        bold: bool | None,
+        italic: bool | None,
+        color: str | None,
+    ) -> None:
+        """Apply simple formatting (bold, italic, color) to run properties."""
+        self._set_toggle_property(r_pr, "b", bold)
+        self._set_toggle_property(r_pr, "i", italic)
+        if color is not None:
+            self._set_color_property(r_pr, color)
+
+    def _set_toggle_property(self, r_pr: Any, prop_name: str, value: bool | None) -> None:
+        """Set a toggle property (bold, italic) on run properties."""
+        if value is None:
+            return
+        elem = r_pr.find(f"{{{WORD_NAMESPACE}}}{prop_name}")
+        if value:
+            if elem is None:
+                etree.SubElement(r_pr, f"{{{WORD_NAMESPACE}}}{prop_name}")
+        else:
+            if elem is not None:
+                r_pr.remove(elem)
+
+    def _set_color_property(self, r_pr: Any, color: str) -> None:
+        """Set color property on run properties."""
+        color_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}color")
+        if color_elem is None:
+            color_elem = etree.SubElement(r_pr, f"{{{WORD_NAMESPACE}}}color")
+        color_elem.set(f"{{{WORD_NAMESPACE}}}val", color)
 
     def format_tracked(
         self,
@@ -634,7 +633,7 @@ class FormatOperations:
                 )
                 return target_para, para_index
             else:
-                raise ValueError(f"Paragraph index {index} out of range (0-{len(paragraphs)-1})")
+                raise ValueError(f"Paragraph index {index} out of range (0-{len(paragraphs) - 1})")
 
         # Search for paragraph by text content
         for i, para in enumerate(paragraphs):
@@ -734,42 +733,31 @@ class FormatOperations:
             >>> # Copy formatting from headers to make matching text look the same
             >>> count = doc.copy_format("Chapter 1", "Chapter 2")
         """
-        # Get all paragraphs
         all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
-        # Find source text
         source_matches = self._document._text_search.find_text(
-            from_text,
-            paragraphs,
-            regex=False,
-            normalize_quotes_for_matching=True,
+            from_text, paragraphs, regex=False, normalize_quotes_for_matching=True
         )
-
         if not source_matches:
             raise TextNotFoundError(from_text)
 
-        # Get formatting from first match's first run
-        source_match = source_matches[0]
-        source_run = source_match.runs[source_match.start_run_index]
-        source_r_pr = source_run.find(f"{{{WORD_NAMESPACE}}}rPr")
-
+        source_r_pr = self._get_source_run_properties(source_matches[0])
         if source_r_pr is None:
-            # No formatting to copy
             return 0
 
-        # Extract formatting properties
-        bold = source_r_pr.find(f"{{{WORD_NAMESPACE}}}b") is not None
-        italic = source_r_pr.find(f"{{{WORD_NAMESPACE}}}i") is not None
-        color_elem = source_r_pr.find(f"{{{WORD_NAMESPACE}}}color")
-        color = color_elem.get(f"{{{WORD_NAMESPACE}}}val") if color_elem is not None else None
+        bold, italic, color = self._extract_simple_formatting(source_r_pr)
+        return self.format_text(to_text, bold=bold, italic=italic, color=color, scope=scope)
 
-        # Apply to target text
-        return self.format_text(
-            find=to_text,
-            bold=bold,
-            italic=italic,
-            color=color,
-            scope=scope,
-            regex=False,
-        )
+    def _get_source_run_properties(self, match: Any) -> Any | None:
+        """Get run properties from the first run of a match."""
+        source_run = match.runs[match.start_run_index]
+        return source_run.find(f"{{{WORD_NAMESPACE}}}rPr")
+
+    def _extract_simple_formatting(self, r_pr: Any) -> tuple[bool, bool, str | None]:
+        """Extract simple formatting (bold, italic, color) from run properties."""
+        bold = r_pr.find(f"{{{WORD_NAMESPACE}}}b") is not None
+        italic = r_pr.find(f"{{{WORD_NAMESPACE}}}i") is not None
+        color_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}color")
+        color = color_elem.get(f"{{{WORD_NAMESPACE}}}val") if color_elem is not None else None
+        return bold, italic, color

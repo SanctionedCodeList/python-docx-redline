@@ -11,10 +11,10 @@ from typing import TYPE_CHECKING
 
 from lxml import etree
 
+from ..author import AuthorIdentity
 from ..constants import WORD_NAMESPACE
 
 if TYPE_CHECKING:
-    from ..author import AuthorIdentity
     from ..document import Document
     from ..models.table import Table, TableRow
     from ..text_search import TextSpan
@@ -159,9 +159,11 @@ class TableOperations:
             new_text: The replacement text
             author_name: Author for the tracked change
         """
+        # Extract author string if AuthorIdentity object
+        author_str = author_name.author if isinstance(author_name, AuthorIdentity) else author_name
         # Create tracked replacement
-        deletion_xml = self._document._xml_generator.create_deletion(match.text, author_name)
-        insertion_xml = self._document._xml_generator.create_insertion(new_text, author_name)
+        deletion_xml = self._document._xml_generator.create_deletion(match.text, author_str)
+        insertion_xml = self._document._xml_generator.create_insertion(new_text, author_str)
 
         # Parse XMLs with namespace context
         wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>

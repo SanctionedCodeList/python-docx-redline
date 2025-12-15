@@ -20,6 +20,7 @@ from ..scope import ScopeEvaluator
 if TYPE_CHECKING:
     from ..document import Document
     from ..models.footnote import Endnote, Footnote
+    from ..text_search import TextSpan
 
 
 class NoteOperations:
@@ -145,7 +146,8 @@ class NoteOperations:
         matches = self._document._text_search.find_text(at, paragraphs)
 
         if not matches:
-            raise TextNotFoundError(at, scope)
+            scope_str = str(scope) if scope is not None and not isinstance(scope, str) else scope
+            raise TextNotFoundError(at, scope_str)
 
         if len(matches) > 1:
             raise AmbiguousTextError(at, matches)
@@ -200,7 +202,8 @@ class NoteOperations:
         matches = self._document._text_search.find_text(at, paragraphs)
 
         if not matches:
-            raise TextNotFoundError(at, scope)
+            scope_str = str(scope) if scope is not None and not isinstance(scope, str) else scope
+            raise TextNotFoundError(at, scope_str)
 
         if len(matches) > 1:
             raise AmbiguousTextError(at, matches)
@@ -225,6 +228,8 @@ class NoteOperations:
             Integer ID for new footnote
         """
         temp_dir = self._document._temp_dir
+        if temp_dir is None:
+            return 1
         footnotes_path = temp_dir / "word" / "footnotes.xml"
 
         if not footnotes_path.exists():
@@ -254,6 +259,8 @@ class NoteOperations:
             Integer ID for new endnote
         """
         temp_dir = self._document._temp_dir
+        if temp_dir is None:
+            return 1
         endnotes_path = temp_dir / "word" / "endnotes.xml"
 
         if not endnotes_path.exists():
@@ -285,6 +292,8 @@ class NoteOperations:
             author: Author name (for tracking if needed)
         """
         temp_dir = self._document._temp_dir
+        if temp_dir is None:
+            return
         footnotes_path = temp_dir / "word" / "footnotes.xml"
 
         # Load or create footnotes.xml
@@ -347,6 +356,8 @@ class NoteOperations:
             author: Author name (for tracking if needed)
         """
         temp_dir = self._document._temp_dir
+        if temp_dir is None:
+            return
         endnotes_path = temp_dir / "word" / "endnotes.xml"
 
         # Load or create endnotes.xml
@@ -398,7 +409,7 @@ class NoteOperations:
             pretty_print=True,
         )
 
-    def _insert_footnote_reference(self, match: Any, footnote_id: int) -> None:
+    def _insert_footnote_reference(self, match: TextSpan, footnote_id: int) -> None:
         """Insert a footnote reference at the matched text location.
 
         Args:
@@ -422,7 +433,7 @@ class NoteOperations:
         index = list(parent).index(end_run)
         parent.insert(index + 1, new_run)
 
-    def _insert_endnote_reference(self, match: Any, endnote_id: int) -> None:
+    def _insert_endnote_reference(self, match: TextSpan, endnote_id: int) -> None:
         """Insert an endnote reference at the matched text location.
 
         Args:

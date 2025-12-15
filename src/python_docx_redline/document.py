@@ -1617,130 +1617,132 @@ class Document:
         """
         from python_docx_redline.models.section import Section
 
-        # Parse document into sections
         all_sections = Section.from_document(self.xml_root)
+        all_sections = self._filter_sections_by_scope(all_sections, scope)
+        section = self._find_single_section_match(all_sections, heading)
 
-        # Apply scope filtering if specified
-        if scope is not None:
-            # Filter sections by checking if any paragraph in section is in scope
-            all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-            paragraphs_in_scope = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-            scope_para_set = set(paragraphs_in_scope)
+        if track:
+            self._delete_section_tracked(section, author)
+        else:
+            self._delete_section_untracked(section)
 
-            # Keep sections that have at least one paragraph in scope
-            all_sections = [
-                s for s in all_sections if any(p.element in scope_para_set for p in s.paragraphs)
-            ]
+        return section
 
-        # Find matching sections (case insensitive by default for heading matching)
+    def _filter_sections_by_scope(
+        self, sections: list["Section"], scope: str | dict | Any | None
+    ) -> list["Section"]:
+        """Filter sections by scope, keeping those with paragraphs in scope."""
+        if scope is None:
+            return sections
+        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs_in_scope = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+        scope_para_set = set(paragraphs_in_scope)
+        return [s for s in sections if any(p.element in scope_para_set for p in s.paragraphs)]
+
+    def _find_single_section_match(self, sections: list["Section"], heading: str) -> "Section":
+        """Find exactly one section matching the heading, raising errors otherwise."""
         matches = [
             s
-            for s in all_sections
+            for s in sections
             if s.heading is not None and s.contains(heading, case_sensitive=False)
         ]
 
         if not matches:
-            # Generate suggestions from section headings
-            heading_paragraphs = [s.heading.element for s in all_sections if s.heading is not None]
+            heading_paragraphs = [s.heading.element for s in sections if s.heading is not None]
             suggestions = SuggestionGenerator.generate_suggestions(heading, heading_paragraphs)
             raise TextNotFoundError(heading, suggestions=suggestions)
 
         if len(matches) > 1:
-            # Create match representations for error reporting
-            # Use the first paragraph of each matching section as the "match location"
-            from python_docx_redline.text_search import TextSpan
+            self._raise_ambiguous_section_error(matches, heading)
 
-            match_spans = []
-            for section in matches:
-                if section.heading:
-                    # Create a TextSpan representing this section's heading
-                    # Find the run elements in the heading paragraph
-                    runs = list(section.heading.element.iter(f"{{{WORD_NAMESPACE}}}r"))
-                    if runs:
-                        heading_text = section.heading_text or ""
-                        span = TextSpan(
-                            runs=runs,
-                            start_run_index=0,
-                            end_run_index=len(runs) - 1,
-                            start_offset=0,
-                            end_offset=len(heading_text.strip()),
-                            paragraph=section.heading.element,
-                        )
-                        match_spans.append(span)
+        return matches[0]
 
-            raise AmbiguousTextError(heading, match_spans)
+    def _raise_ambiguous_section_error(self, matches: list["Section"], heading: str) -> None:
+        """Raise AmbiguousTextError with TextSpan representations of matching sections."""
+        from python_docx_redline.text_search import TextSpan
 
-        section = matches[0]
+        match_spans = []
+        for section in matches:
+            if section.heading:
+                runs = list(section.heading.element.iter(f"{{{WORD_NAMESPACE}}}r"))
+                if runs:
+                    heading_text = section.heading_text or ""
+                    span = TextSpan(
+                        runs=runs,
+                        start_run_index=0,
+                        end_run_index=len(runs) - 1,
+                        start_offset=0,
+                        end_offset=len(heading_text.strip()),
+                        paragraph=section.heading.element,
+                    )
+                    match_spans.append(span)
 
-        # Delete all paragraphs in the section
-        if track:
-            from datetime import datetime, timezone
+        raise AmbiguousTextError(heading, match_spans)
 
-            author_name = author if author is not None else self.author
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    def _delete_section_tracked(self, section: "Section", author: str | None) -> None:
+        """Delete section paragraphs with tracked changes."""
+        from datetime import datetime, timezone
 
-            # Wrap runs inside each paragraph with w:del
-            for para in section.paragraphs:
-                # Get all runs in the paragraph
-                runs = list(para.element.iter(f"{{{WORD_NAMESPACE}}}r"))
-                if not runs:
-                    continue
+        author_name = author if author is not None else self.author
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-                # Create w:del element
-                change_id = self._xml_generator.next_change_id
-                self._xml_generator.next_change_id += 1
+        for para in section.paragraphs:
+            runs = list(para.element.iter(f"{{{WORD_NAMESPACE}}}r"))
+            if not runs:
+                continue
+            del_elem = self._create_deletion_element(author_name, timestamp)
+            self._wrap_runs_in_deletion(para.element, runs, del_elem)
 
-                del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
-                del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
-                del_elem.set(f"{{{WORD_NAMESPACE}}}author", author_name)
-                del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
-                del_elem.set(
-                    "{http://schemas.microsoft.com/office/word/2023/wordml/word16du}dateUtc",
-                    timestamp,
-                )
+    def _create_deletion_element(self, author: str, timestamp: str) -> Any:
+        """Create a w:del element for tracked deletion."""
+        change_id = self._xml_generator.next_change_id
+        self._xml_generator.next_change_id += 1
 
-                # Remove runs from paragraph and add them to w:del
-                # Also change w:t to w:delText
-                for run in runs:
-                    run_parent = run.getparent()
-                    if run_parent is not None:
-                        run_parent.remove(run)
+        del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
+        del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+        del_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
+        del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+        del_elem.set(
+            "{http://schemas.microsoft.com/office/word/2023/wordml/word16du}dateUtc",
+            timestamp,
+        )
+        return del_elem
 
-                    # Change all w:t elements to w:delText
-                    for t_elem in run.iter(f"{{{WORD_NAMESPACE}}}t"):
-                        deltext = etree.Element(f"{{{WORD_NAMESPACE}}}delText")
-                        deltext.text = t_elem.text
-                        # Copy xml:space attribute if present
-                        xml_space = t_elem.get("{http://www.w3.org/XML/1998/namespace}space")
-                        if xml_space:
-                            deltext.set("{http://www.w3.org/XML/1998/namespace}space", xml_space)
-                        # Replace w:t with w:delText in the run
-                        t_parent = t_elem.getparent()
-                        t_index = list(t_parent).index(t_elem)
-                        t_parent.remove(t_elem)
-                        t_parent.insert(t_index, deltext)
+    def _wrap_runs_in_deletion(self, para_element: Any, runs: list[Any], del_elem: Any) -> None:
+        """Wrap runs in a deletion element, converting w:t to w:delText."""
+        for run in runs:
+            run_parent = run.getparent()
+            if run_parent is not None:
+                run_parent.remove(run)
+            self._convert_text_to_deltext(run)
+            del_elem.append(run)
 
-                    del_elem.append(run)
-
-                # Insert w:del as first child of paragraph (after pPr if present)
-                p_pr = para.element.find(f"{{{WORD_NAMESPACE}}}pPr")
-                if p_pr is not None:
-                    p_pr_index = list(para.element).index(p_pr)
-                    para.element.insert(p_pr_index + 1, del_elem)
-                else:
-                    para.element.insert(0, del_elem)
+        p_pr = para_element.find(f"{{{WORD_NAMESPACE}}}pPr")
+        if p_pr is not None:
+            p_pr_index = list(para_element).index(p_pr)
+            para_element.insert(p_pr_index + 1, del_elem)
         else:
-            # Untracked deletion: simply remove paragraphs
-            for para in section.paragraphs:
-                parent = para.element.getparent()
-                if parent is not None:
-                    parent.remove(para.element)
+            para_element.insert(0, del_elem)
 
-        # Note: update_toc parameter is a no-op. TOC update feature was evaluated
-        # and deemed too complex for the value it provides - users should update
-        # TOC manually in Word after opening the document.
+    def _convert_text_to_deltext(self, run: Any) -> None:
+        """Convert w:t elements in a run to w:delText."""
+        for t_elem in run.iter(f"{{{WORD_NAMESPACE}}}t"):
+            deltext = etree.Element(f"{{{WORD_NAMESPACE}}}delText")
+            deltext.text = t_elem.text
+            xml_space = t_elem.get("{http://www.w3.org/XML/1998/namespace}space")
+            if xml_space:
+                deltext.set("{http://www.w3.org/XML/1998/namespace}space", xml_space)
+            t_parent = t_elem.getparent()
+            t_index = list(t_parent).index(t_elem)
+            t_parent.remove(t_elem)
+            t_parent.insert(t_index, deltext)
 
-        return section
+    def _delete_section_untracked(self, section: "Section") -> None:
+        """Delete section paragraphs without tracking changes."""
+        for para in section.paragraphs:
+            parent = para.element.getparent()
+            if parent is not None:
+                parent.remove(para.element)
 
     def _insert_after_match(self, match: TextSpan, insertion_element: etree._Element) -> None:
         """Insert XML element(s) after a matched text span.
@@ -5146,6 +5148,7 @@ class Document:
             raise ValueError(f"No header of type '{header_type}' found in document")
 
         anchor = after if after is not None else before
+        assert anchor is not None  # Guaranteed by check above
         insert_after = after is not None
 
         self._insert_in_header_footer(
@@ -5198,6 +5201,7 @@ class Document:
             raise ValueError(f"No footer of type '{footer_type}' found in document")
 
         anchor = after if after is not None else before
+        assert anchor is not None  # Guaranteed by check above
         insert_after = after is not None
 
         self._insert_in_header_footer(
