@@ -29,13 +29,14 @@ from .author import AuthorIdentity
 from .constants import WORD_NAMESPACE
 from .content_types import ContentTypeManager, ContentTypes
 from .errors import AmbiguousTextError, TextNotFoundError
-from .format_builder import ParagraphPropertyBuilder, RunPropertyBuilder
 from .minimal_diff import (
     apply_minimal_edits_to_paragraph,
     should_use_minimal_editing,
 )
 from .operations.change_management import ChangeManagement
 from .operations.comments import CommentOperations
+from .operations.formatting import FormatOperations
+from .operations.tables import TableOperations
 from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
 from .relationships import RelationshipManager, RelationshipTypes
@@ -236,6 +237,20 @@ class Document:
             self._change_mgmt_instance = ChangeManagement(self)
         return self._change_mgmt_instance
 
+    @property
+    def _format_ops(self) -> FormatOperations:
+        """Get the FormatOperations instance (lazy initialization)."""
+        if not hasattr(self, "_format_ops_instance"):
+            self._format_ops_instance = FormatOperations(self)
+        return self._format_ops_instance
+
+    @property
+    def _table_ops(self) -> TableOperations:
+        """Get the TableOperations instance (lazy initialization)."""
+        if not hasattr(self, "_table_ops_instance"):
+            self._table_ops_instance = TableOperations(self)
+        return self._table_ops_instance
+
     # View capabilities (Phase 3)
 
     @property
@@ -292,9 +307,7 @@ class Document:
             >>> for i, table in enumerate(doc.tables):
             ...     print(f"Table {i}: {table.row_count} rows × {table.col_count} cols")
         """
-        from python_docx_redline.models.table import Table
-
-        return [Table(tbl) for tbl in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}tbl")]
+        return self._table_ops.all
 
     def find_table(self, containing: str, case_sensitive: bool = True) -> "Table | None":
         """Find the first table containing specific text.
@@ -312,10 +325,7 @@ class Document:
             >>> if pricing_table:
             ...     print(f"Found table with {pricing_table.row_count} rows")
         """
-        for table in self.tables:
-            if table.contains(containing, case_sensitive):
-                return table
-        return None
+        return self._table_ops.find(containing, case_sensitive)
 
     @property
     def comments(self) -> list["Comment"]:
@@ -1134,35 +1144,7 @@ class Document:
             >>> # Apply quote style to paragraphs with specific text
             >>> count = doc.apply_style("As stated in", "Quote")
         """
-        from python_docx_redline.models.paragraph import Paragraph as ParagraphClass
-
-        # Get all paragraphs
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Find paragraphs containing the text
-        matches = self._text_search.find_text(
-            find,
-            paragraphs,
-            regex=regex,
-            normalize_quotes_for_matching=not regex,
-        )
-
-        if not matches:
-            return 0
-
-        # Get unique paragraphs (a paragraph might have multiple matches)
-        unique_paragraphs = {match.paragraph for match in matches}
-
-        # Apply style to each paragraph
-        count = 0
-        for para_element in unique_paragraphs:
-            para = ParagraphClass(para_element)
-            if para.style != style:
-                para.style = style
-                count += 1
-
-        return count
+        return self._format_ops.apply_style(find, style, scope=scope, regex=regex)
 
     def format_text(
         self,
@@ -1196,64 +1178,9 @@ class Document:
             >>> # Make section references italic
             >>> count = doc.format_text(r"Section \\d+\\.\\d+", italic=True, regex=True)
         """
-        # Get all paragraphs
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Find all matches
-        matches = self._text_search.find_text(
-            find,
-            paragraphs,
-            regex=regex,
-            normalize_quotes_for_matching=not regex,
+        return self._format_ops.format_text(
+            find, bold=bold, italic=italic, color=color, scope=scope, regex=regex
         )
-
-        if not matches:
-            return 0
-
-        # Apply formatting to each match
-        count = 0
-        for match in matches:
-            # Get the runs involved in this match
-            for run_idx in range(match.start_run_index, match.end_run_index + 1):
-                run = match.runs[run_idx]
-
-                # Get or create run properties
-                r_pr = run.find(f"{{{WORD_NAMESPACE}}}rPr")
-                if r_pr is None:
-                    r_pr = etree.Element(f"{{{WORD_NAMESPACE}}}rPr")
-                    run.insert(0, r_pr)
-
-                # Apply bold
-                if bold is not None:
-                    b_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}b")
-                    if bold:
-                        if b_elem is None:
-                            etree.SubElement(r_pr, f"{{{WORD_NAMESPACE}}}b")
-                    else:
-                        if b_elem is not None:
-                            r_pr.remove(b_elem)
-
-                # Apply italic
-                if italic is not None:
-                    i_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}i")
-                    if italic:
-                        if i_elem is None:
-                            etree.SubElement(r_pr, f"{{{WORD_NAMESPACE}}}i")
-                    else:
-                        if i_elem is not None:
-                            r_pr.remove(i_elem)
-
-                # Apply color
-                if color is not None:
-                    color_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}color")
-                    if color_elem is None:
-                        color_elem = etree.SubElement(r_pr, f"{{{WORD_NAMESPACE}}}color")
-                    color_elem.set(f"{{{WORD_NAMESPACE}}}val", color)
-
-            count += 1
-
-        return count
 
     def format_tracked(
         self,
@@ -1315,197 +1242,24 @@ class Document:
             >>> doc.format_tracked("Section 2.1", italic=True, scope="section:Introduction")
             >>> doc.format_tracked("Note:", underline=True, font_size=14)
         """
-        # Build format updates dict (only non-None values)
-        format_updates: dict[str, Any] = {}
-        if bold is not None:
-            format_updates["bold"] = bold
-        if italic is not None:
-            format_updates["italic"] = italic
-        if underline is not None:
-            format_updates["underline"] = underline
-        if strikethrough is not None:
-            format_updates["strikethrough"] = strikethrough
-        if font_name is not None:
-            format_updates["font_name"] = font_name
-        if font_size is not None:
-            format_updates["font_size"] = font_size
-        if color is not None:
-            format_updates["color"] = color
-        if highlight is not None:
-            format_updates["highlight"] = highlight
-        if superscript is not None:
-            format_updates["superscript"] = superscript
-        if subscript is not None:
-            format_updates["subscript"] = subscript
-        if small_caps is not None:
-            format_updates["small_caps"] = small_caps
-        if all_caps is not None:
-            format_updates["all_caps"] = all_caps
-
-        if not format_updates:
-            raise ValueError("At least one formatting property must be specified")
-
-        # Get all paragraphs in the document
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-
-        # Apply scope filter if specified
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Search for the text
-        matches = self._text_search.find_text(
+        return self._format_ops.format_tracked(
             text,
-            paragraphs,
-            regex=False,
-            normalize_quotes_for_matching=enable_quote_normalization,
-        )
-
-        if not matches:
-            suggestions = SuggestionGenerator.generate_suggestions(text, paragraphs)
-            raise TextNotFoundError(text, suggestions=suggestions)
-
-        # Handle occurrence selection
-        if occurrence == "first" or occurrence == 1:
-            target_matches = [matches[0]]
-        elif occurrence == "last":
-            target_matches = [matches[-1]]
-        elif occurrence == "all":
-            target_matches = matches
-        elif isinstance(occurrence, int) and 1 <= occurrence <= len(matches):
-            target_matches = [matches[occurrence - 1]]
-        elif isinstance(occurrence, int):
-            raise ValueError(f"Occurrence {occurrence} out of range (1-{len(matches)})")
-        elif len(matches) > 1:
-            raise AmbiguousTextError(text, matches)
-        else:
-            target_matches = matches
-
-        # Track results
-        runs_affected = 0
-        last_change_id = 0
-        all_previous_formatting: list[dict[str, object]] = []
-        para_index = -1
-
-        # Import run splitting helper
-        from .format_builder import get_run_text, split_run_at_offset
-
-        # Apply formatting to each target match
-        for match in target_matches:
-            # Use match.paragraph directly (more reliable than getparent which may
-            # return wrappers like w:hyperlink, w:ins, etc.)
-            para = match.paragraph
-            para_index = all_paragraphs.index(para) if para in all_paragraphs else -1
-
-            # Build list of runs to format, handling mid-run splits
-            runs_to_format = []
-
-            for run_idx in range(match.start_run_index, match.end_run_index + 1):
-                run = match.runs[run_idx]
-                run_text = get_run_text(run)
-
-                is_start = run_idx == match.start_run_index
-                is_end = run_idx == match.end_run_index
-                is_single = is_start and is_end
-
-                if is_single and (match.start_offset > 0 or match.end_offset < len(run_text)):
-                    # Match is within a single run - need to split at both ends
-                    if match.start_offset > 0:
-                        before_run, remainder = split_run_at_offset(run, match.start_offset)
-                        # Insert before_run before original run
-                        parent = run.getparent()
-                        idx = list(parent).index(run)
-                        parent.insert(idx, before_run)
-                        # Now split remainder at adjusted offset
-                        adjusted_end = match.end_offset - match.start_offset
-                        if adjusted_end < len(run_text) - match.start_offset:
-                            middle_run, after_run = split_run_at_offset(remainder, adjusted_end)
-                            # Replace original with middle and after
-                            parent.remove(run)
-                            parent.insert(idx + 1, middle_run)
-                            parent.insert(idx + 2, after_run)
-                            runs_to_format.append(middle_run)
-                        else:
-                            parent.remove(run)
-                            parent.insert(idx + 1, remainder)
-                            runs_to_format.append(remainder)
-                    else:
-                        # Only split at end
-                        middle_run, after_run = split_run_at_offset(run, match.end_offset)
-                        parent = run.getparent()
-                        idx = list(parent).index(run)
-                        parent.remove(run)
-                        parent.insert(idx, middle_run)
-                        parent.insert(idx + 1, after_run)
-                        runs_to_format.append(middle_run)
-
-                elif is_start and match.start_offset > 0:
-                    # Split start run - only format the part from start_offset onwards
-                    before_run, after_run = split_run_at_offset(run, match.start_offset)
-                    parent = run.getparent()
-                    idx = list(parent).index(run)
-                    parent.remove(run)
-                    parent.insert(idx, before_run)
-                    parent.insert(idx + 1, after_run)
-                    runs_to_format.append(after_run)
-
-                elif is_end and match.end_offset < len(run_text):
-                    # Split end run - only format the part up to end_offset
-                    before_run, after_run = split_run_at_offset(run, match.end_offset)
-                    parent = run.getparent()
-                    idx = list(parent).index(run)
-                    parent.remove(run)
-                    parent.insert(idx, before_run)
-                    parent.insert(idx + 1, after_run)
-                    runs_to_format.append(before_run)
-
-                else:
-                    # Whole run is within match - format entirely
-                    runs_to_format.append(run)
-
-            # Now apply formatting to only the runs that need it
-            for run in runs_to_format:
-                # Get or create run properties
-                existing_rpr = run.find(f"{{{WORD_NAMESPACE}}}rPr")
-
-                # Deep copy to capture previous state
-                from copy import deepcopy
-
-                previous_rpr = deepcopy(existing_rpr) if existing_rpr is not None else None
-
-                # Extract previous formatting for result (per-run)
-                prev_formatting = RunPropertyBuilder.extract(previous_rpr)
-                all_previous_formatting.append(prev_formatting)
-
-                # Create new rPr with merged formatting
-                new_rpr = RunPropertyBuilder.merge(existing_rpr, format_updates)
-
-                # Check if there are actual changes
-                if not RunPropertyBuilder.has_changes(previous_rpr, new_rpr):
-                    continue  # No-op for this run
-
-                # Create the tracked change element (returns tuple now)
-                rpr_change, last_change_id = self._xml_generator.create_run_property_change(
-                    previous_rpr, author
-                )
-
-                # Append the change tracking element to the new rPr
-                new_rpr.append(rpr_change)
-
-                # Replace or insert the rPr in the run
-                if existing_rpr is not None:
-                    run.remove(existing_rpr)
-                run.insert(0, new_rpr)
-
-                runs_affected += 1
-
-        return FormatResult(
-            success=True,  # Operation completed without error
-            changed=runs_affected > 0,  # Whether any changes were made
-            text_matched=text,
-            paragraph_index=para_index if len(target_matches) == 1 else -1,
-            changes_applied=format_updates,
-            previous_formatting=all_previous_formatting,
-            change_id=last_change_id,
-            runs_affected=runs_affected,
+            bold=bold,
+            italic=italic,
+            underline=underline,
+            strikethrough=strikethrough,
+            font_name=font_name,
+            font_size=font_size,
+            color=color,
+            highlight=highlight,
+            superscript=superscript,
+            subscript=subscript,
+            small_caps=small_caps,
+            all_caps=all_caps,
+            scope=scope,
+            occurrence=occurrence,
+            author=author,
+            enable_quote_normalization=enable_quote_normalization,
         )
 
     def format_paragraph_tracked(
@@ -1559,121 +1313,21 @@ class Document:
             >>> doc.format_paragraph_tracked(containing="WHEREAS", alignment="center")
             >>> doc.format_paragraph_tracked(index=0, spacing_after=12)
         """
-        # Validate at least one targeting parameter
-        if containing is None and starting_with is None and ending_with is None and index is None:
-            raise ValueError(
-                "At least one targeting parameter required: "
-                "containing, starting_with, ending_with, or index"
-            )
-
-        # Build format updates dict
-        format_updates: dict[str, Any] = {}
-        if alignment is not None:
-            format_updates["alignment"] = alignment
-        if spacing_before is not None:
-            format_updates["spacing_before"] = spacing_before
-        if spacing_after is not None:
-            format_updates["spacing_after"] = spacing_after
-        if line_spacing is not None:
-            format_updates["line_spacing"] = line_spacing
-        if indent_left is not None:
-            format_updates["indent_left"] = indent_left
-        if indent_right is not None:
-            format_updates["indent_right"] = indent_right
-        if indent_first_line is not None:
-            format_updates["indent_first_line"] = indent_first_line
-        if indent_hanging is not None:
-            format_updates["indent_hanging"] = indent_hanging
-
-        if not format_updates:
-            raise ValueError("At least one formatting property must be specified")
-
-        # Get all paragraphs
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Find target paragraph
-        target_para = None
-        para_index = -1
-
-        if index is not None:
-            if 0 <= index < len(paragraphs):
-                target_para = paragraphs[index]
-                para_index = (
-                    all_paragraphs.index(target_para) if target_para in all_paragraphs else index
-                )
-            else:
-                raise ValueError(f"Paragraph index {index} out of range (0-{len(paragraphs)-1})")
-        else:
-            # Search for paragraph by text content
-            for i, para in enumerate(paragraphs):
-                para_text = self._get_paragraph_text(para)
-
-                if containing is not None and containing not in para_text:
-                    continue
-                if starting_with is not None and not para_text.startswith(starting_with):
-                    continue
-                if ending_with is not None and not para_text.endswith(ending_with):
-                    continue
-
-                target_para = para
-                para_index = all_paragraphs.index(para) if para in all_paragraphs else i
-                break
-
-        if target_para is None:
-            search_text = containing or starting_with or ending_with or ""
-            raise TextNotFoundError(
-                search_text,
-                suggestions=["Check paragraph content", "Try a different search term"],
-            )
-
-        # Get or create paragraph properties
-        from copy import deepcopy
-
-        existing_ppr = target_para.find(f"{{{WORD_NAMESPACE}}}pPr")
-        previous_ppr = deepcopy(existing_ppr) if existing_ppr is not None else None
-
-        # Extract previous formatting for result (as single-item list for consistency)
-        prev_formatting = ParagraphPropertyBuilder.extract(previous_ppr)
-
-        # Create new pPr with merged formatting
-        new_ppr = ParagraphPropertyBuilder.merge(existing_ppr, format_updates)
-
-        # Check if there are actual changes
-        if not ParagraphPropertyBuilder.has_changes(previous_ppr, new_ppr):
-            return FormatResult(
-                success=True,  # Operation completed without error
-                changed=False,  # No changes needed
-                text_matched=self._get_paragraph_text(target_para)[:50],
-                paragraph_index=para_index,
-                changes_applied={},
-                previous_formatting=[prev_formatting],
-                change_id=0,
-                runs_affected=0,
-            )
-
-        # Create the tracked change element (returns tuple now)
-        ppr_change, change_id = self._xml_generator.create_paragraph_property_change(
-            previous_ppr, author
-        )
-
-        # Append the change tracking element to the new pPr
-        new_ppr.append(ppr_change)
-
-        # Replace or insert the pPr in the paragraph
-        if existing_ppr is not None:
-            target_para.remove(existing_ppr)
-        target_para.insert(0, new_ppr)
-
-        return FormatResult(
-            success=True,
-            changed=True,
-            text_matched=self._get_paragraph_text(target_para)[:50],
-            paragraph_index=para_index,
-            changes_applied=format_updates,
-            previous_formatting=[prev_formatting],
-            change_id=change_id,
-            runs_affected=1,
+        return self._format_ops.format_paragraph_tracked(
+            containing=containing,
+            starting_with=starting_with,
+            ending_with=ending_with,
+            index=index,
+            alignment=alignment,
+            spacing_before=spacing_before,
+            spacing_after=spacing_after,
+            line_spacing=line_spacing,
+            indent_left=indent_left,
+            indent_right=indent_right,
+            indent_first_line=indent_first_line,
+            indent_hanging=indent_hanging,
+            scope=scope,
+            author=author,
         )
 
     def copy_format(
@@ -1699,45 +1353,7 @@ class Document:
             >>> # Copy formatting from headers to make matching text look the same
             >>> count = doc.copy_format("Chapter 1", "Chapter 2")
         """
-        # Get all paragraphs
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Find source text
-        source_matches = self._text_search.find_text(
-            from_text,
-            paragraphs,
-            regex=False,
-            normalize_quotes_for_matching=True,
-        )
-
-        if not source_matches:
-            raise TextNotFoundError(from_text)
-
-        # Get formatting from first match's first run
-        source_match = source_matches[0]
-        source_run = source_match.runs[source_match.start_run_index]
-        source_r_pr = source_run.find(f"{{{WORD_NAMESPACE}}}rPr")
-
-        if source_r_pr is None:
-            # No formatting to copy
-            return 0
-
-        # Extract formatting properties
-        bold = source_r_pr.find(f"{{{WORD_NAMESPACE}}}b") is not None
-        italic = source_r_pr.find(f"{{{WORD_NAMESPACE}}}i") is not None
-        color_elem = source_r_pr.find(f"{{{WORD_NAMESPACE}}}color")
-        color = color_elem.get(f"{{{WORD_NAMESPACE}}}val") if color_elem is not None else None
-
-        # Apply to target text
-        return self.format_text(
-            find=to_text,
-            bold=bold,
-            italic=italic,
-            color=color,
-            scope=scope,
-            regex=False,
-        )
+        return self._format_ops.copy_format(from_text, to_text, scope=scope)
 
     def insert_paragraph(
         self,
@@ -3606,63 +3222,15 @@ class Document:
             >>> count = doc.replace_in_table("OLD", "NEW", track=True)
             >>> print(f"Replaced {count} occurrences")
         """
-        author_name = author if author is not None else self.author
-        count = 0
-
-        tables = self.tables
-        if table_index is not None:
-            if table_index < 0 or table_index >= len(tables):
-                raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
-            tables = [tables[table_index]]
-
-        # Search and replace in each table
-        for table in tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    # Use TextSearch to find matches in cell paragraphs
-                    for para in cell.paragraphs:
-                        matches = self._text_search.find_text(
-                            old_text,
-                            [para.element],
-                            regex=regex,
-                            case_sensitive=case_sensitive,
-                        )
-
-                        for match in matches:
-                            if track:
-                                # Create tracked replacement
-                                deletion_xml = self._xml_generator.create_deletion(
-                                    match.text, author_name
-                                )
-                                insertion_xml = self._xml_generator.create_insertion(
-                                    new_text, author_name
-                                )
-
-                                # Parse XMLs with namespace context
-                                wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {deletion_xml}
-    {insertion_xml}
-</root>"""
-                                root = etree.fromstring(wrapped_xml.encode("utf-8"))
-                                deletion_element = root[0]
-                                insertion_element = root[1]
-
-                                self._replace_match_with_elements(
-                                    match, [deletion_element, insertion_element]
-                                )
-                            else:
-                                # Untracked replacement
-                                new_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
-                                new_t = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}t")
-                                new_t.text = new_text
-                                self._replace_match_with_element(match, new_run)
-
-                            count += 1
-
-        return count
+        return self._table_ops.replace_text(
+            old_text,
+            new_text,
+            table_index=table_index,
+            track=track,
+            author=author,
+            regex=regex,
+            case_sensitive=case_sensitive,
+        )
 
     def insert_table_row(
         self,
@@ -3698,94 +3266,9 @@ class Document:
             ...     track=True
             ... )
         """
-        from python_docx_redline.models.table import TableRow
-
-        tables = self.tables
-        if table_index < 0 or table_index >= len(tables):
-            raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
-
-        table = tables[table_index]
-
-        # Find the row to insert after
-        if isinstance(after_row, int):
-            if after_row < 0 or after_row >= table.row_count:
-                raise IndexError(f"Row index {after_row} out of range (0-{table.row_count - 1})")
-            insert_after_index = after_row
-        else:
-            # Find row containing text
-            matching_rows = [
-                (i, row) for i, row in enumerate(table.rows) if row.contains(after_row)
-            ]
-
-            if not matching_rows:
-                raise ValueError(f"No row found containing text: {after_row}")
-            if len(matching_rows) > 1:
-                raise ValueError(
-                    f"Text '{after_row}' found in {len(matching_rows)} rows - "
-                    "please use a more specific search or row index"
-                )
-
-            insert_after_index = matching_rows[0][0]
-
-        # Validate cell count
-        if len(cells) != table.col_count:
-            raise ValueError(f"Expected {table.col_count} cells, got {len(cells)}")
-
-        # Create new row element
-        new_row = etree.Element(f"{{{WORD_NAMESPACE}}}tr")
-
-        # Create cells
-        for cell_text in cells:
-            tc = etree.SubElement(new_row, f"{{{WORD_NAMESPACE}}}tc")
-            tc_pr = etree.SubElement(tc, f"{{{WORD_NAMESPACE}}}tcPr")
-            tc_w = etree.SubElement(tc_pr, f"{{{WORD_NAMESPACE}}}tcW")
-            tc_w.set(f"{{{WORD_NAMESPACE}}}w", "2880")
-            tc_w.set(f"{{{WORD_NAMESPACE}}}type", "dxa")
-
-            para = etree.SubElement(tc, f"{{{WORD_NAMESPACE}}}p")
-
-            if cell_text:
-                run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
-                t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-                t.text = cell_text
-
-        if track:
-            # Add insertion properties to row
-            from datetime import datetime, timezone
-
-            author_name = author if author is not None else self.author
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            change_id = self._xml_generator.next_change_id
-            self._xml_generator.next_change_id += 1
-
-            # Add w:trPr with w:ins child to mark row as inserted
-            tr_pr = etree.Element(f"{{{WORD_NAMESPACE}}}trPr")
-            ins_elem = etree.SubElement(tr_pr, f"{{{WORD_NAMESPACE}}}ins")
-            ins_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
-            ins_elem.set(f"{{{WORD_NAMESPACE}}}author", author_name)
-            ins_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
-
-            # Insert trPr as first child of row
-            new_row.insert(0, tr_pr)
-
-            # Insert after the specified row
-            table_elem = table.element
-            rows = table_elem.findall(f"{{{WORD_NAMESPACE}}}tr")
-            target_row = rows[insert_after_index]
-            row_index = list(table_elem).index(target_row)
-            table_elem.insert(row_index + 1, new_row)
-
-            # Return the row
-            return TableRow(new_row, insert_after_index + 1)
-        else:
-            # Insert without tracking
-            table_elem = table.element
-            rows = table_elem.findall(f"{{{WORD_NAMESPACE}}}tr")
-            target_row = rows[insert_after_index]
-            row_index = list(table_elem).index(target_row)
-            table_elem.insert(row_index + 1, new_row)
-
-            return TableRow(new_row, insert_after_index + 1)
+        return self._table_ops.insert_row(
+            after_row, cells, table_index=table_index, track=track, author=author
+        )
 
     def delete_table_row(
         self,
