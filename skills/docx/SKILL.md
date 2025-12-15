@@ -383,6 +383,29 @@ The library handles text fragmented across multiple XML runs automatically:
 doc.replace_tracked("30 days", "45 days")
 ```
 
+### Smart Quote Handling
+
+Word documents typically contain "smart" or "curly" quotes (`'` `'` `"` `"`) instead of straight quotes (`'` `"`). The library **automatically normalizes quotes** so you can type straight quotes in Python and match curly quotes in documents:
+
+```python
+# Document contains: "The Defendant's motion" (with curly apostrophe U+2019)
+# You type straight quotes - it just works!
+doc.replace_tracked("Defendant's motion", "party's motion")
+
+# Also works with double quotes
+# Document contains: "free trial" (with curly quotes U+201C/U+201D)
+doc.replace_tracked('"free trial"', '"subscription"')
+```
+
+This is enabled by default (`enable_quote_normalization=True`). To require exact quote matching:
+
+```python
+# Only match if document has exact same quote characters
+doc.replace_tracked("Defendant's", "party's", enable_quote_normalization=False)
+```
+
+**Why this matters:** Legal documents use possessives (`Plaintiff's`, `Defendant's`) and contractions (`don't`, `won't`) extensively. Without quote normalization, you'd need to copy-paste exact characters from Word or use Unicode escapes (`\u2019`).
+
 ### Regex Support
 
 Use regular expressions with capture groups:
@@ -762,6 +785,7 @@ Options:
 | Delete tracked text | - | **Best** | Possible |
 | Replace tracked text | - | **Best** | Possible |
 | Regex find/replace | - | **Best** | Manual |
+| Smart quote normalization | - | **Best** | Manual |
 | Scoped edits (section/dict/callable) | - | **Best** | Manual |
 | Batch operations (list or YAML) | - | **Best** | Manual |
 | Accept/reject all changes | - | **Best** | Manual |
