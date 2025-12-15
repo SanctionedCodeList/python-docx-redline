@@ -2,6 +2,7 @@
 Validator for Word document XML files against XSD schemas.
 """
 
+import logging
 import re
 import tempfile
 import zipfile
@@ -9,6 +10,8 @@ import zipfile
 import lxml.etree
 
 from .validation_base import BaseSchemaValidator
+
+logger = logging.getLogger(__name__)
 
 
 class DOCXSchemaValidator(BaseSchemaValidator):
@@ -113,13 +116,15 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                 errors.append(f"  {xml_file.relative_to(self.unpacked_dir)}: Error: {e}")
 
         if errors:
-            print(f"FAILED - Found {len(errors)} whitespace preservation violations:")
-            for error in errors:
-                print(error)
+            logger.error(
+                "FAILED - Found %d whitespace preservation violations:\n%s",
+                len(errors),
+                "\n".join(errors),
+            )
             return False
         else:
             if self.verbose:
-                print("PASSED - All whitespace is properly preserved")
+                logger.info("PASSED - All whitespace is properly preserved")
             return True
 
     def validate_deletions(self):
@@ -160,13 +165,15 @@ class DOCXSchemaValidator(BaseSchemaValidator):
         if errors:
             # Store errors for detailed bug reporting
             self.all_errors.extend(errors)
-            print(f"FAILED - Found {len(errors)} deletion validation violations:")
-            for error in errors:
-                print(error)
+            logger.error(
+                "FAILED - Found %d deletion validation violations:\n%s",
+                len(errors),
+                "\n".join(errors),
+            )
             return False
         else:
             if self.verbose:
-                print("PASSED - No w:t elements found within w:del elements")
+                logger.info("PASSED - No w:t elements found within w:del elements")
             return True
 
     def count_paragraphs_in_unpacked(self):
@@ -184,7 +191,7 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                 paragraphs = root.findall(f".//{{{self.WORD_2006_NAMESPACE}}}p")
                 count = len(paragraphs)
             except Exception as e:
-                print(f"Error counting paragraphs in unpacked document: {e}")
+                logger.error("Error counting paragraphs in unpacked document: %s", e)
 
         return count
 
@@ -208,7 +215,7 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                 count = len(paragraphs)
 
         except Exception as e:
-            print(f"Error counting paragraphs in original document: {e}")
+            logger.error("Error counting paragraphs in original document: %s", e)
 
         return count
 
@@ -247,13 +254,15 @@ class DOCXSchemaValidator(BaseSchemaValidator):
                 errors.append(f"  {xml_file.relative_to(self.unpacked_dir)}: Error: {e}")
 
         if errors:
-            print(f"FAILED - Found {len(errors)} insertion validation violations:")
-            for error in errors:
-                print(error)
+            logger.error(
+                "FAILED - Found %d insertion validation violations:\n%s",
+                len(errors),
+                "\n".join(errors),
+            )
             return False
         else:
             if self.verbose:
-                print("PASSED - No w:delText elements within w:ins elements")
+                logger.info("PASSED - No w:delText elements within w:ins elements")
             return True
 
     def compare_paragraph_counts(self):
@@ -263,7 +272,7 @@ class DOCXSchemaValidator(BaseSchemaValidator):
 
         diff = new_count - original_count
         diff_str = f"+{diff}" if diff > 0 else str(diff)
-        print(f"\nParagraphs: {original_count} → {new_count} ({diff_str})")
+        logger.info("Paragraphs: %d -> %d (%s)", original_count, new_count, diff_str)
 
 
 if __name__ == "__main__":

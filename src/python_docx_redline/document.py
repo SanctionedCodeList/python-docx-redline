@@ -812,18 +812,21 @@ class Document:
         # Show context preview if requested
         if show_context:
             before, matched, after = self._get_detailed_context(match, context_chars)
-            print("\n" + "=" * 80)
-            print("CONTEXT PREVIEW")
-            print("=" * 80)
-            print(f"\nBEFORE ({len(before)} chars):")
-            print(f"  {repr(before)}")
-            print(f"\nMATCH ({len(matched)} chars):")
-            print(f"  {repr(matched)}")
-            print(f"\nAFTER ({len(after)} chars):")
-            print(f"  {repr(after)}")
-            print(f"\nREPLACEMENT ({len(replace)} chars):")
-            print(f"  {repr(replace)}")
-            print("\n" + "=" * 80 + "\n")
+            logger.debug(
+                "Context preview:\n"
+                "BEFORE (%d chars): %r\n"
+                "MATCH (%d chars): %r\n"
+                "AFTER (%d chars): %r\n"
+                "REPLACEMENT (%d chars): %r",
+                len(before),
+                before,
+                len(matched),
+                matched,
+                len(after),
+                after,
+                len(replace),
+                replace,
+            )
 
         # Handle capture group expansion for regex replacements
         if regex and match.match_obj:

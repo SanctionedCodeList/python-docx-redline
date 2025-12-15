@@ -2,12 +2,15 @@
 Validator for tracked changes in Word documents.
 """
 
+import logging
 import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
 
 from .constants import WORD_NAMESPACE
+
+logger = logging.getLogger(__name__)
 
 
 class RedliningValidator:
@@ -24,7 +27,7 @@ class RedliningValidator:
         # Verify unpacked directory exists and has correct structure
         modified_file = self.unpacked_dir / "word" / "document.xml"
         if not modified_file.exists():
-            print(f"FAILED - Modified document.xml not found at {modified_file}")
+            logger.error("FAILED - Modified document.xml not found at %s", modified_file)
             return False
 
         # First, check if there are any tracked changes by Claude to validate
@@ -53,7 +56,7 @@ class RedliningValidator:
             # Redlining validation is only needed if tracked changes by Claude have been used.
             if not claude_del_elements and not claude_ins_elements:
                 if self.verbose:
-                    print("PASSED - No tracked changes by Claude found.")
+                    logger.info("PASSED - No tracked changes by Claude found.")
                 return True
 
         except Exception:
@@ -69,12 +72,12 @@ class RedliningValidator:
                 with zipfile.ZipFile(self.original_docx, "r") as zip_ref:
                     zip_ref.extractall(temp_path)
             except Exception as e:
-                print(f"FAILED - Error unpacking original docx: {e}")
+                logger.error("FAILED - Error unpacking original docx: %s", e)
                 return False
 
             original_file = temp_path / "word" / "document.xml"
             if not original_file.exists():
-                print(f"FAILED - Original document.xml not found in {self.original_docx}")
+                logger.error("FAILED - Original document.xml not found in %s", self.original_docx)
                 return False
 
             # Parse both XML files using xml.etree.ElementTree for redlining validation
@@ -86,7 +89,7 @@ class RedliningValidator:
                 original_tree = ET.parse(original_file)
                 original_root = original_tree.getroot()
             except ET.ParseError as e:
-                print(f"FAILED - Error parsing XML files: {e}")
+                logger.error("FAILED - Error parsing XML files: %s", e)
                 return False
 
             # Remove Claude's tracked changes from both documents
@@ -100,11 +103,11 @@ class RedliningValidator:
             if modified_text != original_text:
                 # Show detailed character-level differences for each paragraph
                 error_message = self._generate_detailed_diff(original_text, modified_text)
-                print(error_message)
+                logger.error(error_message)
                 return False
 
             if self.verbose:
-                print("PASSED - All changes by Claude are properly tracked")
+                logger.info("PASSED - All changes by Claude are properly tracked")
             return True
 
     def _generate_detailed_diff(self, original_text, modified_text):
