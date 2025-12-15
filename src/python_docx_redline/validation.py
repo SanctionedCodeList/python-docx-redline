@@ -29,6 +29,73 @@ from .errors import ValidationError as BaseValidationError
 from .validation_docx import DOCXSchemaValidator
 from .validation_redlining import RedliningValidator
 
+# Files to extract from source docx for comprehensive validation
+# These are prioritized by importance for validation
+_VALIDATION_FILES = [
+    "[Content_Types].xml",
+    "_rels/.rels",
+    "word/_rels/document.xml.rels",
+    "word/styles.xml",
+    "word/settings.xml",
+    "word/fontTable.xml",
+    "word/numbering.xml",
+    "word/comments.xml",
+    "word/commentsExtended.xml",
+    "word/footnotes.xml",
+    "word/endnotes.xml",
+    "word/header1.xml",
+    "word/header2.xml",
+    "word/header3.xml",
+    "word/footer1.xml",
+    "word/footer2.xml",
+    "word/footer3.xml",
+    "word/theme/theme1.xml",
+    "word/webSettings.xml",
+    "docProps/core.xml",
+    "docProps/app.xml",
+]
+
+
+def _extract_document_structure(source_path: Path, dest_path: Path) -> None:
+    """Extract document structure from source docx for validation.
+
+    Extracts key files from the source document to create a validation
+    environment that can check relationships, styles, and cross-file
+    dependencies.
+
+    Args:
+        source_path: Path to the source .docx file
+        dest_path: Path to the destination directory
+
+    Note:
+        If source_path is not a valid docx file, creates minimal structure
+        with just the word/ directory.
+    """
+    if not source_path.exists() or not zipfile.is_zipfile(source_path):
+        # Create minimal structure if source isn't a valid docx
+        (dest_path / "word").mkdir(parents=True, exist_ok=True)
+        (dest_path / "_rels").mkdir(parents=True, exist_ok=True)
+        return
+
+    try:
+        with zipfile.ZipFile(source_path, "r") as zip_ref:
+            # Get list of files in the archive
+            archive_files = set(zip_ref.namelist())
+
+            # Extract validation-relevant files
+            for file_path in _VALIDATION_FILES:
+                if file_path in archive_files:
+                    zip_ref.extract(file_path, dest_path)
+
+            # Also extract any additional relationship files
+            for archive_file in archive_files:
+                if archive_file.endswith(".rels") and archive_file not in _VALIDATION_FILES:
+                    zip_ref.extract(archive_file, dest_path)
+    except Exception:
+        # If extraction fails, create minimal structure
+        (dest_path / "word").mkdir(parents=True, exist_ok=True)
+        (dest_path / "_rels").mkdir(parents=True, exist_ok=True)
+
 
 class ValidationError(BaseValidationError):
     """Raised when document validation fails with detailed error list."""
@@ -65,7 +132,8 @@ def validate_document(
 
     Args:
         xml_root: The root element of word/document.xml
-        document_path: Path to the current document being validated
+        document_path: Path to the current document being validated (used to
+            extract supporting files like styles.xml, comments.xml, etc.)
         original_path: Optional path to original document (for redlining validation)
         verbose: Enable verbose validation output
 
@@ -74,59 +142,48 @@ def validate_document(
     """
     errors = []
 
-    # Create a temporary docx file for validation
-    with tempfile.TemporaryDirectory() as temp_dir:
-        _ = Path(temp_dir) / "validation.docx"  # Not used but kept for reference
+    with tempfile.TemporaryDirectory() as unpack_dir:
+        unpack_path = Path(unpack_dir)
 
-        # Save the current document to temp location
-        # We need to create a proper .docx file structure
-        with tempfile.TemporaryDirectory() as unpack_dir:
-            unpack_path = Path(unpack_dir)
+        # Extract full document structure from source docx
+        # This allows validators to check relationships, styles, etc.
+        _extract_document_structure(document_path, unpack_path)
 
-            # Create the directory structure
-            word_dir = unpack_path / "word"
-            word_dir.mkdir(parents=True)
-            rels_dir = unpack_path / "_rels"
-            rels_dir.mkdir(parents=True)
+        # Override document.xml with the current (modified) content
+        doc_xml_path = unpack_path / "word" / "document.xml"
+        doc_xml_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(doc_xml_path, "wb") as f:
+            f.write(etree.tostring(xml_root, xml_declaration=True, encoding="UTF-8"))
 
-            # Write document.xml
-            doc_xml_path = word_dir / "document.xml"
-            with open(doc_xml_path, "wb") as f:
-                f.write(etree.tostring(xml_root, xml_declaration=True, encoding="UTF-8"))
+        # Run DOCXSchemaValidator
+        try:
+            validator = DOCXSchemaValidator(
+                unpacked_dir=unpack_path,
+                original_file=original_path if original_path else document_path,
+                verbose=verbose,
+            )
 
-            # Note: This creates a minimal structure with only document.xml.
-            # Full document structure (styles.xml, comments.xml, etc.) support
-            # is tracked in beads issue docx_redline-290.
+            # Run validation - returns False if any check fails
+            # The validator prints errors directly, we need to capture them
+            if not validator.validate():
+                errors.append("OOXML schema validation failed. See detailed output above.")
+        except Exception as e:
+            errors.append(f"Schema validation error: {e}")
 
-            # Run DOCXSchemaValidator
+        # Run RedliningValidator if we have an original
+        if original_path and original_path != document_path:
             try:
-                validator = DOCXSchemaValidator(
+                redline_validator = RedliningValidator(
                     unpacked_dir=unpack_path,
-                    original_file=original_path if original_path else document_path,
+                    original_docx=original_path,
                     verbose=verbose,
                 )
-
-                # Run validation - returns False if any check fails
-                # The validator prints errors directly, we need to capture them
-                if not validator.validate():
-                    errors.append("OOXML schema validation failed. See detailed output above.")
-            except Exception as e:
-                errors.append(f"Schema validation error: {e}")
-
-            # Run RedliningValidator if we have an original
-            if original_path and original_path != document_path:
-                try:
-                    redline_validator = RedliningValidator(
-                        unpacked_dir=unpack_path,
-                        original_docx=original_path,
-                        verbose=verbose,
+                if not redline_validator.validate():
+                    errors.append(
+                        "Redlining validation failed. Content changed outside tracked changes."
                     )
-                    if not redline_validator.validate():
-                        errors.append(
-                            "Redlining validation failed. Content changed outside tracked changes."
-                        )
-                except Exception as e:
-                    errors.append(f"Redlining validation error: {e}")
+            except Exception as e:
+                errors.append(f"Redlining validation error: {e}")
 
     if errors:
         raise ValidationError(
