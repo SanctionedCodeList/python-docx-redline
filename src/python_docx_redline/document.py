@@ -36,6 +36,7 @@ from .minimal_diff import (
 from .operations.change_management import ChangeManagement
 from .operations.comments import CommentOperations
 from .operations.formatting import FormatOperations
+from .operations.notes import NoteOperations
 from .operations.tables import TableOperations
 from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
@@ -43,7 +44,7 @@ from .relationships import RelationshipManager, RelationshipTypes
 from .results import ComparisonStats, EditResult, FormatResult
 from .scope import ScopeEvaluator
 from .suggestions import SuggestionGenerator
-from .text_search import TextSearch
+from .text_search import TextSearch, TextSpan
 from .tracked_xml import TrackedXMLGenerator
 from .validation import ValidationError
 
@@ -250,6 +251,13 @@ class Document:
         if not hasattr(self, "_table_ops_instance"):
             self._table_ops_instance = TableOperations(self)
         return self._table_ops_instance
+
+    @property
+    def _note_ops(self) -> NoteOperations:
+        """Get the NoteOperations instance (lazy initialization)."""
+        if not hasattr(self, "_note_ops_instance"):
+            self._note_ops_instance = NoteOperations(self)
+        return self._note_ops_instance
 
     # View capabilities (Phase 3)
 
@@ -1591,7 +1599,8 @@ class Document:
         Args:
             heading: Heading text of section to delete
             track: Delete as tracked change (default True)
-            update_toc: Automatically update Table of Contents (not implemented yet)
+            update_toc: No-op, kept for API compatibility. TOC updates require
+                opening the document in Word.
             author: Author name for tracked changes
             scope: Limit search scope
 
@@ -1727,13 +1736,15 @@ class Document:
                 if parent is not None:
                     parent.remove(para.element)
 
-        # TODO: Handle update_toc when implemented in separate task
-        if update_toc:
-            pass  # Will implement TOC updates in python_docx_redline-xpe
+        # Note: update_toc parameter is a no-op. TOC update feature was evaluated
+        # and deemed too complex for the value it provides - users should update
+        # TOC manually in Word after opening the document.
 
         return section
 
-    def _insert_after_match(self, match: Any, insertion_element: Any) -> None:
+    def _insert_after_match(
+        self, match: TextSpan, insertion_element: etree._Element
+    ) -> None:
         """Insert XML element(s) after a matched text span.
 
         Args:
@@ -1758,7 +1769,9 @@ class Document:
             # Insert the new element after the end run
             paragraph.insert(run_index + 1, insertion_element)
 
-    def _insert_before_match(self, match: Any, insertion_element: Any) -> None:
+    def _insert_before_match(
+        self, match: TextSpan, insertion_element: etree._Element
+    ) -> None:
         """Insert XML element(s) before a matched text span.
 
         Args:
@@ -3375,9 +3388,7 @@ class Document:
             >>> doc = Document("contract.docx")
             >>> doc.delete_table_column(column=2, track=True)
         """
-        self._table_ops.delete_column(
-            column, table_index=table_index, track=track, author=author
-        )
+        self._table_ops.delete_column(column, table_index=table_index, track=track, author=author)
 
     def _get_detailed_context(self, match: Any, context_chars: int = 50) -> tuple[str, str, str]:
         """Extract detailed context around a match for preview.
@@ -3429,7 +3440,7 @@ class Document:
             List of warning messages (empty if no issues detected)
         """
 
-        warnings = []
+        warnings: list[str] = []
 
         # Skip check if no following text or it's just whitespace
         if not next_text or not next_text.strip():
@@ -3730,292 +3741,29 @@ class Document:
         Returns:
             EditResult indicating success or failure
         """
+        # Dispatch table mapping edit types to handler methods
+        handlers = {
+            "insert_tracked": self._handle_insert_tracked,
+            "delete_tracked": self._handle_delete_tracked,
+            "replace_tracked": self._handle_replace_tracked,
+            "insert_paragraph": self._handle_insert_paragraph,
+            "insert_paragraphs": self._handle_insert_paragraphs,
+            "delete_section": self._handle_delete_section,
+            "format_tracked": self._handle_format_tracked,
+            "format_paragraph_tracked": self._handle_format_paragraph_tracked,
+        }
+
+        handler = handlers.get(edit_type)
+        if handler is None:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message=f"Unknown edit type: {edit_type}",
+                error=ValidationError(f"Unknown edit type: {edit_type}"),
+            )
+
         try:
-            if edit_type == "insert_tracked":
-                text = edit.get("text")
-                after = edit.get("after")
-                author = edit.get("author")
-                scope = edit.get("scope")
-                regex = edit.get("regex", False)
-
-                if not text or not after:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="Missing required parameter: 'text' or 'after'",
-                        error=ValidationError("Missing required parameter"),
-                    )
-
-                self.insert_tracked(text, after, author=author, scope=scope, regex=regex)
-                return EditResult(
-                    success=True,
-                    edit_type=edit_type,
-                    message=f"Inserted '{text}' after '{after}'",
-                )
-
-            elif edit_type == "delete_tracked":
-                text = edit.get("text")
-                author = edit.get("author")
-                scope = edit.get("scope")
-                regex = edit.get("regex", False)
-
-                if not text:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="Missing required parameter: 'text'",
-                        error=ValidationError("Missing required parameter"),
-                    )
-
-                self.delete_tracked(text, author=author, scope=scope, regex=regex)
-                return EditResult(success=True, edit_type=edit_type, message=f"Deleted '{text}'")
-
-            elif edit_type == "replace_tracked":
-                find = edit.get("find")
-                replace = edit.get("replace")
-                author = edit.get("author")
-                scope = edit.get("scope")
-                regex = edit.get("regex", False)
-
-                if not find or replace is None:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="Missing required parameter: 'find' or 'replace'",
-                        error=ValidationError("Missing required parameter"),
-                    )
-
-                self.replace_tracked(find, replace, author=author, scope=scope, regex=regex)
-                return EditResult(
-                    success=True,
-                    edit_type=edit_type,
-                    message=f"Replaced '{find}' with '{replace}'",
-                )
-
-            elif edit_type == "insert_paragraph":
-                text = edit.get("text")
-                after = edit.get("after")
-                before = edit.get("before")
-                style = edit.get("style")
-                track = edit.get("track", True)
-                author = edit.get("author")
-                scope = edit.get("scope")
-
-                if not text:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="Missing required parameter: 'text'",
-                        error=ValidationError("Missing required parameter"),
-                    )
-
-                if not after and not before:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="Missing required parameter: 'after' or 'before'",
-                        error=ValidationError("Missing required parameter"),
-                    )
-
-                self.insert_paragraph(
-                    text,
-                    after=after,
-                    before=before,
-                    style=style,
-                    track=track,
-                    author=author,
-                    scope=scope,
-                )
-                location = f"after '{after}'" if after else f"before '{before}'"
-                return EditResult(
-                    success=True,
-                    edit_type=edit_type,
-                    message=f"Inserted paragraph '{text}' {location}",
-                )
-
-            elif edit_type == "insert_paragraphs":
-                texts = edit.get("texts")
-                after = edit.get("after")
-                before = edit.get("before")
-                style = edit.get("style")
-                track = edit.get("track", True)
-                author = edit.get("author")
-                scope = edit.get("scope")
-
-                if not texts:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="Missing required parameter: 'texts'",
-                        error=ValidationError("Missing required parameter"),
-                    )
-
-                if not after and not before:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="Missing required parameter: 'after' or 'before'",
-                        error=ValidationError("Missing required parameter"),
-                    )
-
-                self.insert_paragraphs(
-                    texts,
-                    after=after,
-                    before=before,
-                    style=style,
-                    track=track,
-                    author=author,
-                    scope=scope,
-                )
-                location = f"after '{after}'" if after else f"before '{before}'"
-                return EditResult(
-                    success=True,
-                    edit_type=edit_type,
-                    message=f"Inserted {len(texts)} paragraphs {location}",
-                )
-
-            elif edit_type == "delete_section":
-                heading = edit.get("heading")
-                track = edit.get("track", True)
-                update_toc = edit.get("update_toc", False)
-                author = edit.get("author")
-                scope = edit.get("scope")
-
-                if not heading:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="Missing required parameter: 'heading'",
-                        error=ValidationError("Missing required parameter"),
-                    )
-
-                self.delete_section(
-                    heading, track=track, update_toc=update_toc, author=author, scope=scope
-                )
-                return EditResult(
-                    success=True,
-                    edit_type=edit_type,
-                    message=f"Deleted section '{heading}'",
-                )
-
-            elif edit_type == "format_tracked":
-                text = edit.get("text")
-                if not text:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="Missing required parameter: 'text'",
-                        error=ValidationError("Missing required parameter"),
-                    )
-
-                # Extract formatting parameters
-                format_params = {
-                    k: v
-                    for k, v in edit.items()
-                    if k
-                    in (
-                        "bold",
-                        "italic",
-                        "underline",
-                        "strikethrough",
-                        "font_name",
-                        "font_size",
-                        "color",
-                        "highlight",
-                        "superscript",
-                        "subscript",
-                        "small_caps",
-                        "all_caps",
-                    )
-                    and v is not None
-                }
-
-                if not format_params:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="At least one formatting parameter required",
-                        error=ValidationError("Missing formatting parameter"),
-                    )
-
-                result = self.format_tracked(
-                    text,
-                    scope=edit.get("scope"),
-                    occurrence=edit.get("occurrence", "first"),
-                    author=edit.get("author"),
-                    **format_params,
-                )
-                return EditResult(
-                    success=result.success,
-                    edit_type=edit_type,
-                    message=f"Formatted '{text}' with {format_params}",
-                )
-
-            elif edit_type == "format_paragraph_tracked":
-                # Extract targeting parameters
-                containing = edit.get("containing")
-                starting_with = edit.get("starting_with")
-                ending_with = edit.get("ending_with")
-                index = edit.get("index")
-
-                if not any([containing, starting_with, ending_with, index is not None]):
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="At least one targeting parameter required",
-                        error=ValidationError("Missing targeting parameter"),
-                    )
-
-                # Extract formatting parameters
-                format_params = {
-                    k: v
-                    for k, v in edit.items()
-                    if k
-                    in (
-                        "alignment",
-                        "spacing_before",
-                        "spacing_after",
-                        "line_spacing",
-                        "indent_left",
-                        "indent_right",
-                        "indent_first_line",
-                        "indent_hanging",
-                    )
-                    and v is not None
-                }
-
-                if not format_params:
-                    return EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message="At least one formatting parameter required",
-                        error=ValidationError("Missing formatting parameter"),
-                    )
-
-                result = self.format_paragraph_tracked(
-                    containing=containing,
-                    starting_with=starting_with,
-                    ending_with=ending_with,
-                    index=index,
-                    scope=edit.get("scope"),
-                    author=edit.get("author"),
-                    **format_params,
-                )
-                target_desc = containing or starting_with or ending_with or f"index {index}"
-                return EditResult(
-                    success=result.success,
-                    edit_type=edit_type,
-                    message=f"Formatted paragraph '{target_desc}' with {format_params}",
-                )
-
-            else:
-                return EditResult(
-                    success=False,
-                    edit_type=edit_type,
-                    message=f"Unknown edit type: {edit_type}",
-                    error=ValidationError(f"Unknown edit type: {edit_type}"),
-                )
-
+            return handler(edit_type, edit)
         except TextNotFoundError as e:
             return EditResult(
                 success=False,
@@ -4034,6 +3782,284 @@ class Document:
             return EditResult(
                 success=False, edit_type=edit_type, message=f"Error: {str(e)}", error=e
             )
+
+    def _handle_insert_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+        """Handle insert_tracked edit type."""
+        text = edit.get("text")
+        after = edit.get("after")
+        author = edit.get("author")
+        scope = edit.get("scope")
+        regex = edit.get("regex", False)
+
+        if not text or not after:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'text' or 'after'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        self.insert_tracked(text, after, author=author, scope=scope, regex=regex)
+        return EditResult(
+            success=True,
+            edit_type=edit_type,
+            message=f"Inserted '{text}' after '{after}'",
+        )
+
+    def _handle_delete_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+        """Handle delete_tracked edit type."""
+        text = edit.get("text")
+        author = edit.get("author")
+        scope = edit.get("scope")
+        regex = edit.get("regex", False)
+
+        if not text:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'text'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        self.delete_tracked(text, author=author, scope=scope, regex=regex)
+        return EditResult(success=True, edit_type=edit_type, message=f"Deleted '{text}'")
+
+    def _handle_replace_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+        """Handle replace_tracked edit type."""
+        find = edit.get("find")
+        replace = edit.get("replace")
+        author = edit.get("author")
+        scope = edit.get("scope")
+        regex = edit.get("regex", False)
+
+        if not find or replace is None:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'find' or 'replace'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        self.replace_tracked(find, replace, author=author, scope=scope, regex=regex)
+        return EditResult(
+            success=True,
+            edit_type=edit_type,
+            message=f"Replaced '{find}' with '{replace}'",
+        )
+
+    def _handle_insert_paragraph(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+        """Handle insert_paragraph edit type."""
+        text = edit.get("text")
+        after = edit.get("after")
+        before = edit.get("before")
+        style = edit.get("style")
+        track = edit.get("track", True)
+        author = edit.get("author")
+        scope = edit.get("scope")
+
+        if not text:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'text'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        if not after and not before:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'after' or 'before'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        self.insert_paragraph(
+            text,
+            after=after,
+            before=before,
+            style=style,
+            track=track,
+            author=author,
+            scope=scope,
+        )
+        location = f"after '{after}'" if after else f"before '{before}'"
+        return EditResult(
+            success=True,
+            edit_type=edit_type,
+            message=f"Inserted paragraph '{text}' {location}",
+        )
+
+    def _handle_insert_paragraphs(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+        """Handle insert_paragraphs edit type."""
+        texts = edit.get("texts")
+        after = edit.get("after")
+        before = edit.get("before")
+        style = edit.get("style")
+        track = edit.get("track", True)
+        author = edit.get("author")
+        scope = edit.get("scope")
+
+        if not texts:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'texts'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        if not after and not before:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'after' or 'before'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        self.insert_paragraphs(
+            texts,
+            after=after,
+            before=before,
+            style=style,
+            track=track,
+            author=author,
+            scope=scope,
+        )
+        location = f"after '{after}'" if after else f"before '{before}'"
+        return EditResult(
+            success=True,
+            edit_type=edit_type,
+            message=f"Inserted {len(texts)} paragraphs {location}",
+        )
+
+    def _handle_delete_section(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+        """Handle delete_section edit type."""
+        heading = edit.get("heading")
+        track = edit.get("track", True)
+        update_toc = edit.get("update_toc", False)
+        author = edit.get("author")
+        scope = edit.get("scope")
+
+        if not heading:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'heading'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        self.delete_section(heading, track=track, update_toc=update_toc, author=author, scope=scope)
+        return EditResult(
+            success=True,
+            edit_type=edit_type,
+            message=f"Deleted section '{heading}'",
+        )
+
+    def _handle_format_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+        """Handle format_tracked edit type."""
+        text = edit.get("text")
+        if not text:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'text'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        format_params = self._extract_character_format_params(edit)
+
+        if not format_params:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="At least one formatting parameter required",
+                error=ValidationError("Missing formatting parameter"),
+            )
+
+        result = self.format_tracked(
+            text,
+            scope=edit.get("scope"),
+            occurrence=edit.get("occurrence", "first"),
+            author=edit.get("author"),
+            **format_params,
+        )
+        return EditResult(
+            success=result.success,
+            edit_type=edit_type,
+            message=f"Formatted '{text}' with {format_params}",
+        )
+
+    def _handle_format_paragraph_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+        """Handle format_paragraph_tracked edit type."""
+        containing = edit.get("containing")
+        starting_with = edit.get("starting_with")
+        ending_with = edit.get("ending_with")
+        index = edit.get("index")
+
+        if not any([containing, starting_with, ending_with, index is not None]):
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="At least one targeting parameter required",
+                error=ValidationError("Missing targeting parameter"),
+            )
+
+        format_params = self._extract_paragraph_format_params(edit)
+
+        if not format_params:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="At least one formatting parameter required",
+                error=ValidationError("Missing formatting parameter"),
+            )
+
+        result = self.format_paragraph_tracked(
+            containing=containing,
+            starting_with=starting_with,
+            ending_with=ending_with,
+            index=index,
+            scope=edit.get("scope"),
+            author=edit.get("author"),
+            **format_params,
+        )
+        target_desc = containing or starting_with or ending_with or f"index {index}"
+        return EditResult(
+            success=result.success,
+            edit_type=edit_type,
+            message=f"Formatted paragraph '{target_desc}' with {format_params}",
+        )
+
+    def _extract_character_format_params(self, edit: dict[str, Any]) -> dict[str, Any]:
+        """Extract character formatting parameters from an edit dict."""
+        format_keys = (
+            "bold",
+            "italic",
+            "underline",
+            "strikethrough",
+            "font_name",
+            "font_size",
+            "color",
+            "highlight",
+            "superscript",
+            "subscript",
+            "small_caps",
+            "all_caps",
+        )
+        return {k: v for k, v in edit.items() if k in format_keys and v is not None}
+
+    def _extract_paragraph_format_params(self, edit: dict[str, Any]) -> dict[str, Any]:
+        """Extract paragraph formatting parameters from an edit dict."""
+        format_keys = (
+            "alignment",
+            "spacing_before",
+            "spacing_after",
+            "line_spacing",
+            "indent_left",
+            "indent_right",
+            "indent_first_line",
+            "indent_hanging",
+        )
+        return {k: v for k, v in edit.items() if k in format_keys and v is not None}
 
     def apply_edit_file(
         self, path: str | Path, format: str = "yaml", stop_on_error: bool = False
@@ -4449,28 +4475,7 @@ class Document:
         Returns:
             List of Footnote objects
         """
-        from python_docx_redline.models.footnote import Footnote
-
-        if not self._temp_dir:
-            return []
-
-        footnotes_path = self._temp_dir / "word" / "footnotes.xml"
-        if not footnotes_path.exists():
-            return []
-
-        tree = etree.parse(str(footnotes_path))
-        root = tree.getroot()
-
-        # Find all footnote elements
-        footnote_elems = root.findall(f"{{{WORD_NAMESPACE}}}footnote")
-
-        # Filter out special footnotes (separator, continuationSeparator)
-        # These have type attribute and IDs -1, 0, etc.
-        return [
-            Footnote(elem, self)
-            for elem in footnote_elems
-            if elem.get(f"{{{WORD_NAMESPACE}}}type") is None
-        ]
+        return self._note_ops.footnotes
 
     @property
     def endnotes(self) -> list["Endnote"]:
@@ -4479,27 +4484,7 @@ class Document:
         Returns:
             List of Endnote objects
         """
-        from python_docx_redline.models.footnote import Endnote
-
-        if not self._temp_dir:
-            return []
-
-        endnotes_path = self._temp_dir / "word" / "endnotes.xml"
-        if not endnotes_path.exists():
-            return []
-
-        tree = etree.parse(str(endnotes_path))
-        root = tree.getroot()
-
-        # Find all endnote elements
-        endnote_elems = root.findall(f"{{{WORD_NAMESPACE}}}endnote")
-
-        # Filter out special endnotes (separator, continuationSeparator)
-        return [
-            Endnote(elem, self)
-            for elem in endnote_elems
-            if elem.get(f"{{{WORD_NAMESPACE}}}type") is None
-        ]
+        return self._note_ops.endnotes
 
     def insert_footnote(
         self,
@@ -4526,35 +4511,7 @@ class Document:
         Example:
             >>> doc.insert_footnote("See Smith (2020) for details", at="original study")
         """
-        if not self._is_zip or not self._temp_dir:
-            raise ValueError("Cannot add footnotes to non-ZIP documents")
-
-        author_name = author if author is not None else self.author
-
-        # Find location for footnote reference
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        matches = self._text_search.find_text(at, paragraphs)
-
-        if not matches:
-            raise TextNotFoundError(at, scope)
-
-        if len(matches) > 1:
-            raise AmbiguousTextError(at, matches)
-
-        match = matches[0]
-
-        # Generate new footnote ID
-        footnote_id = self._get_next_footnote_id()
-
-        # Add footnote content to footnotes.xml
-        self._add_footnote_to_xml(footnote_id, text, author_name)
-
-        # Insert footnote reference in document
-        self._insert_footnote_reference(match, footnote_id)
-
-        return footnote_id
+        return self._note_ops.insert_footnote(text, at, author=author, scope=scope)
 
     def insert_endnote(
         self,
@@ -4581,35 +4538,7 @@ class Document:
         Example:
             >>> doc.insert_endnote("Additional details here", at="main conclusion")
         """
-        if not self._is_zip or not self._temp_dir:
-            raise ValueError("Cannot add endnotes to non-ZIP documents")
-
-        author_name = author if author is not None else self.author
-
-        # Find location for endnote reference
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        matches = self._text_search.find_text(at, paragraphs)
-
-        if not matches:
-            raise TextNotFoundError(at, scope)
-
-        if len(matches) > 1:
-            raise AmbiguousTextError(at, matches)
-
-        match = matches[0]
-
-        # Generate new endnote ID
-        endnote_id = self._get_next_endnote_id()
-
-        # Add endnote content to endnotes.xml
-        self._add_endnote_to_xml(endnote_id, text, author_name)
-
-        # Insert endnote reference in document
-        self._insert_endnote_reference(match, endnote_id)
-
-        return endnote_id
+        return self._note_ops.insert_endnote(text, at, author=author, scope=scope)
 
     def _get_next_footnote_id(self) -> int:
         """Get the next available footnote ID.
@@ -5445,25 +5374,6 @@ class Document:
 
         # Save the modified header/footer XML
         self._save_header_footer_xml(file_path, element)
-
-    def _replace_match_with_elements(self, match: Any, elements: list[etree._Element]) -> None:
-        """Replace a text match with multiple XML elements.
-
-        Args:
-            match: The TextSpan match to replace
-            elements: List of elements to insert (e.g., deletion + insertion)
-        """
-        # This uses the existing replacement logic but inserts multiple elements
-        # For simplicity, we use the single element replacement twice
-        if len(elements) >= 1:
-            self._replace_match_with_element(match, elements[0])
-            # For additional elements, insert after the first
-            if len(elements) > 1:
-                parent = elements[0].getparent()
-                if parent is not None:
-                    index = list(parent).index(elements[0])
-                    for i, elem in enumerate(elements[1:], 1):
-                        parent.insert(index + i, elem)
 
     def __del__(self) -> None:
         """Clean up package resources on object destruction."""
