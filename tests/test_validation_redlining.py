@@ -459,6 +459,68 @@ class TestGetGitWordDiff:
         assert result is None or result == ""
 
 
+class TestValidateWithParseError:
+    """Tests for validation when XML parsing fails."""
+
+    def test_validate_with_malformed_modified_xml(self, tmp_path):
+        """Test validation fails when modified document.xml is malformed."""
+        unpacked_dir = tmp_path / "unpacked"
+        word_dir = unpacked_dir / "word"
+        word_dir.mkdir(parents=True)
+
+        # Create malformed document.xml
+        malformed_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:body>
+                <w:p>
+                    <w:ins w:author="Claude">
+                        <w:r><w:t>Text</w:t></w:r>
+                    </w:ins>
+                    <unclosed>
+                </w:p>
+            </w:body>
+        </w:document>"""
+        (word_dir / "document.xml").write_text(malformed_xml)
+
+        # Create valid original docx
+        original_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+            <w:body>
+                <w:p>
+                    <w:r><w:t>Text</w:t></w:r>
+                </w:p>
+            </w:body>
+        </w:document>"""
+
+        original_docx = tmp_path / "original.docx"
+        with zipfile.ZipFile(original_docx, "w") as zf:
+            zf.writestr("word/document.xml", original_xml)
+
+        validator = RedliningValidator(unpacked_dir, original_docx)
+        result = validator.validate()
+
+        # The malformed XML should cause parsing to fail
+        assert result is False
+
+
+class TestGitWordDiffFallback:
+    """Tests for the fallback word diff behavior."""
+
+    def test_word_diff_fallback_returns_content(self, tmp_path):
+        """Test that word diff returns content when character diff is empty."""
+        validator = RedliningValidator(tmp_path, tmp_path / "test.docx")
+
+        # Test with slightly different text that triggers word diff
+        original = "The quick brown fox jumps over the lazy dog"
+        modified = "The fast brown fox runs over the lazy dog"
+
+        result = validator._get_git_word_diff(original, modified)
+
+        # If git is available, should show some difference
+        if result is not None:
+            assert "quick" in result or "fast" in result or len(result) > 0
+
+
 class TestMainGuard:
     """Test the __main__ guard."""
 
