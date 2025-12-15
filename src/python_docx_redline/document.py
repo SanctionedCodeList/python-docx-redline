@@ -34,6 +34,8 @@ from .minimal_diff import (
     apply_minimal_edits_to_paragraph,
     should_use_minimal_editing,
 )
+from .operations.comments import CommentOperations
+from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
 from .relationships import RelationshipManager, RelationshipTypes
 from .results import ComparisonStats, EditResult, FormatResult
@@ -212,6 +214,20 @@ class Document:
         """Check if this is a ZIP package (backward compatibility)."""
         return self._package is not None
 
+    @property
+    def _comment_ops(self) -> CommentOperations:
+        """Get the CommentOperations instance (lazy initialization)."""
+        if not hasattr(self, "_comment_ops_instance"):
+            self._comment_ops_instance = CommentOperations(self)
+        return self._comment_ops_instance
+
+    @property
+    def _tracked_ops(self) -> TrackedChangeOperations:
+        """Get the TrackedChangeOperations instance (lazy initialization)."""
+        if not hasattr(self, "_tracked_ops_instance"):
+            self._tracked_ops_instance = TrackedChangeOperations(self)
+        return self._tracked_ops_instance
+
     # View capabilities (Phase 3)
 
     @property
@@ -310,23 +326,7 @@ class Document:
             ...     if comment.marked_text:
             ...         print(f"  Regarding: '{comment.marked_text}'")
         """
-        from python_docx_redline.models.comment import Comment
-
-        comments_xml = self._load_comments_xml()
-        if comments_xml is None:
-            return []
-
-        # Build mapping of comment ID -> marked text from document body
-        range_map = self._build_comment_ranges()
-
-        # Parse comments
-        result = []
-        for comment_elem in comments_xml.findall(f".//{{{WORD_NAMESPACE}}}comment"):
-            comment_id = comment_elem.get(f"{{{WORD_NAMESPACE}}}id", "")
-            range_info = range_map.get(comment_id)
-            result.append(Comment(comment_elem, range_info, document=self))
-
-        return result
+        return self._comment_ops.all
 
     def get_comments(
         self,
@@ -351,20 +351,7 @@ class Document:
             >>> # Get comments in a specific section
             >>> comments = doc.get_comments(scope="section:Introduction")
         """
-        all_comments = self.comments
-
-        if author:
-            all_comments = [c for c in all_comments if c.author == author]
-
-        if scope:
-            evaluator = ScopeEvaluator.parse(scope)
-            # Filter to comments whose marked text falls within scope
-            # Pass the underlying XML element to the evaluator
-            all_comments = [
-                c for c in all_comments if c.range and evaluator(c.range.start_paragraph.element)
-            ]
-
-        return all_comments
+        return self._comment_ops.get(author=author, scope=scope)
 
     def _load_comments_xml(self) -> etree._Element | None:
         """Load word/comments.xml if it exists.
@@ -579,60 +566,15 @@ class Document:
             AmbiguousTextError: If multiple occurrences of anchor text are found
             re.error: If regex=True and the pattern is invalid
         """
-        # Validate parameters
-        if after is not None and before is not None:
-            raise ValueError("Cannot specify both 'after' and 'before' parameters")
-        if after is None and before is None:
-            raise ValueError("Must specify either 'after' or 'before' parameter")
-
-        # Determine anchor text and insertion mode
-        anchor: str = after if after is not None else before  # type: ignore[assignment]
-        insert_after = after is not None
-
-        # Get all paragraphs in the document
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-
-        # Apply scope filter if specified
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Search with optional quote normalization
-        matches = self._text_search.find_text(
-            anchor,
-            paragraphs,
+        self._tracked_ops.insert(
+            text,
+            after=after,
+            before=before,
+            author=author,
+            scope=scope,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            enable_quote_normalization=enable_quote_normalization,
         )
-
-        if not matches:
-            # Generate smart suggestions
-            suggestions = SuggestionGenerator.generate_suggestions(anchor, paragraphs)
-            raise TextNotFoundError(anchor, suggestions=suggestions)
-
-        if len(matches) > 1:
-            raise AmbiguousTextError(anchor, matches)
-
-        # We have exactly one match
-        match = matches[0]
-
-        # Generate the insertion XML
-        insertion_xml = self._xml_generator.create_insertion(text, author)
-
-        # Parse the insertion XML with namespace context
-        # Need to wrap it with namespace declarations
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {insertion_xml}
-</root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        insertion_element = root[0]  # Get the first child (the actual insertion)
-
-        # Insert at the appropriate position
-        if insert_after:
-            self._insert_after_match(match, insertion_element)
-        else:
-            self._insert_before_match(match, insertion_element)
 
     def delete_tracked(
         self,
@@ -660,46 +602,13 @@ class Document:
             AmbiguousTextError: If multiple occurrences of text are found
             re.error: If regex=True and the pattern is invalid
         """
-        # Get all paragraphs in the document
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-
-        # Apply scope filter if specified
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Search with optional quote normalization
-        matches = self._text_search.find_text(
+        self._tracked_ops.delete(
             text,
-            paragraphs,
+            author=author,
+            scope=scope,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            enable_quote_normalization=enable_quote_normalization,
         )
-
-        if not matches:
-            # Generate smart suggestions
-            suggestions = SuggestionGenerator.generate_suggestions(text, paragraphs)
-            raise TextNotFoundError(text, suggestions=suggestions)
-
-        if len(matches) > 1:
-            raise AmbiguousTextError(text, matches)
-
-        # We have exactly one match
-        match = matches[0]
-
-        # Generate the deletion XML
-        deletion_xml = self._xml_generator.create_deletion(text, author)
-
-        # Parse the deletion XML with namespace context
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {deletion_xml}
-</root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        deletion_element = root[0]  # Get the first child (the actual deletion)
-
-        # Replace the matched text with deletion
-        self._replace_match_with_element(match, deletion_element)
 
     def replace_tracked(
         self,
@@ -764,101 +673,17 @@ class Document:
             ...     check_continuity=True
             ... )
         """
-        # Get all paragraphs in the document
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-
-        # Apply scope filter if specified
-        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-        # Search with optional quote normalization
-        matches = self._text_search.find_text(
+        self._tracked_ops.replace(
             find,
-            paragraphs,
+            replace,
+            author=author,
+            scope=scope,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            enable_quote_normalization=enable_quote_normalization,
+            show_context=show_context,
+            check_continuity=check_continuity,
+            context_chars=context_chars,
         )
-
-        if not matches:
-            # Generate smart suggestions
-            suggestions = SuggestionGenerator.generate_suggestions(find, paragraphs)
-            raise TextNotFoundError(find, suggestions=suggestions)
-
-        if len(matches) > 1:
-            raise AmbiguousTextError(find, matches)
-
-        # We have exactly one match
-        match = matches[0]
-
-        # Get the actual matched text for deletion
-        matched_text = match.text
-
-        # Show context preview if requested
-        if show_context:
-            before, matched, after = self._get_detailed_context(match, context_chars)
-            logger.debug(
-                "Context preview:\n"
-                "BEFORE (%d chars): %r\n"
-                "MATCH (%d chars): %r\n"
-                "AFTER (%d chars): %r\n"
-                "REPLACEMENT (%d chars): %r",
-                len(before),
-                before,
-                len(matched),
-                matched,
-                len(after),
-                after,
-                len(replace),
-                replace,
-            )
-
-        # Handle capture group expansion for regex replacements
-        if regex and match.match_obj:
-            # Use expand() to handle capture group references like \1, \2, etc.
-            replacement_text = match.match_obj.expand(replace)
-        else:
-            replacement_text = replace
-
-        # Check continuity if requested
-        if check_continuity:
-            _, _, after_text = self._get_detailed_context(match, context_chars)
-            continuity_warnings = self._check_continuity(replacement_text, after_text)
-
-            if continuity_warnings:
-                import warnings
-
-                from .errors import ContinuityWarning
-
-                for warning_msg in continuity_warnings:
-                    suggestions = [
-                        "Include more context in your replacement text",
-                        "Adjust the 'find' text to include the connecting phrase",
-                        "Review the following text to ensure grammatical correctness",
-                    ]
-                    warnings.warn(
-                        ContinuityWarning(warning_msg, after_text, suggestions),
-                        stacklevel=2,
-                    )
-
-        # Generate deletion XML for the old text (use actual matched text)
-        deletion_xml = self._xml_generator.create_deletion(matched_text, author)
-
-        # Generate insertion XML for the new text (with expanded capture groups if regex)
-        insertion_xml = self._xml_generator.create_insertion(replacement_text, author)
-
-        # Parse both XMLs with namespace context
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {deletion_xml}
-    {insertion_xml}
-</root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        deletion_element = root[0]  # First child (deletion)
-        insertion_element = root[1]  # Second child (insertion)
-
-        # Replace the matched text with deletion + insertion
-        self._replace_match_with_elements(match, [deletion_element, insertion_element])
 
     def move_tracked(
         self,
@@ -914,95 +739,16 @@ class Document:
             ...     source_scope="section:Appendix"
             ... )
         """
-        # Validate parameters
-        if after is not None and before is not None:
-            raise ValueError("Cannot specify both 'after' and 'before' parameters")
-        if after is None and before is None:
-            raise ValueError("Must specify either 'after' or 'before' parameter")
-
-        # Determine destination anchor and insertion mode
-        dest_anchor: str = after if after is not None else before  # type: ignore[assignment]
-        insert_after = after is not None
-
-        # Get all paragraphs
-        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-
-        # 1. Find the source text to move
-        source_paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, source_scope)
-        source_matches = self._text_search.find_text(
+        self._tracked_ops.move(
             text,
-            source_paragraphs,
+            after=after,
+            before=before,
+            author=author,
+            source_scope=source_scope,
+            dest_scope=dest_scope,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            enable_quote_normalization=enable_quote_normalization,
         )
-
-        if not source_matches:
-            suggestions = SuggestionGenerator.generate_suggestions(text, source_paragraphs)
-            raise TextNotFoundError(text, suggestions=suggestions)
-
-        if len(source_matches) > 1:
-            raise AmbiguousTextError(text, source_matches)
-
-        source_match = source_matches[0]
-        source_text = source_match.text
-
-        # 2. Find the destination anchor
-        dest_paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, dest_scope)
-        dest_matches = self._text_search.find_text(
-            dest_anchor,
-            dest_paragraphs,
-            regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
-        )
-
-        if not dest_matches:
-            suggestions = SuggestionGenerator.generate_suggestions(dest_anchor, dest_paragraphs)
-            raise TextNotFoundError(dest_anchor, suggestions=suggestions)
-
-        if len(dest_matches) > 1:
-            raise AmbiguousTextError(dest_anchor, dest_matches)
-
-        dest_match = dest_matches[0]
-
-        # 3. Generate a unique move name to link source and destination
-        move_name = self._generate_move_name()
-
-        # 4. Generate moveFrom XML (for source location)
-        move_from_xml, _, _ = self._xml_generator.create_move_from(source_text, move_name, author)
-
-        # 5. Generate moveTo XML (for destination location)
-        move_to_xml, _, _ = self._xml_generator.create_move_to(source_text, move_name, author)
-
-        # 6. Parse both XMLs with namespace context
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {move_to_xml}
-</root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        # Get all three elements (moveToRangeStart, moveTo, moveToRangeEnd)
-        move_to_elements = list(root)
-
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<root xmlns:w="{WORD_NAMESPACE}"
-      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
-      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
-    {move_from_xml}
-</root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        # Get all three elements (moveFromRangeStart, moveFrom, moveFromRangeEnd)
-        move_from_elements = list(root)
-
-        # 7. First, insert the moveTo at the destination
-        # (do this first so we don't mess up source position)
-        if insert_after:
-            self._insert_after_match(dest_match, move_to_elements)
-        else:
-            self._insert_before_match(dest_match, move_to_elements)
-
-        # 8. Replace the source text with moveFrom markers
-        self._replace_match_with_elements(source_match, move_from_elements)
 
     def _generate_move_name(self) -> str:
         """Generate a unique move name for linking source and destination.
@@ -3593,68 +3339,7 @@ class Document:
         This ensures the document package is valid OOXML with no orphaned comments.
         This is typically used as a preprocessing step before making new edits.
         """
-        # Remove comment range markers
-        for elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentRangeStart")):
-            parent = elem.getparent()
-            if parent is not None:
-                parent.remove(elem)
-
-        for elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentRangeEnd")):
-            parent = elem.getparent()
-            if parent is not None:
-                parent.remove(elem)
-
-        # Remove comment references
-        # Comment references are typically in their own runs, so we'll remove the whole run
-        for elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentReference")):
-            parent = elem.getparent()
-            if parent is not None:
-                # If parent is a run, remove the run
-                if parent.tag == f"{{{WORD_NAMESPACE}}}r":
-                    grandparent = parent.getparent()
-                    if grandparent is not None:
-                        grandparent.remove(parent)
-                else:
-                    # Otherwise just remove the reference
-                    parent.remove(elem)
-
-        # Clean up comments-related files in the ZIP package
-        if self._is_zip and self._temp_dir:
-            # Delete comment XML files
-            comment_files = [
-                "word/comments.xml",
-                "word/commentsExtended.xml",
-                "word/commentsIds.xml",
-                "word/commentsExtensible.xml",
-            ]
-            for file_path in comment_files:
-                full_path = self._temp_dir / file_path
-                if full_path.exists():
-                    full_path.unlink()
-
-            # Remove comment relationships from document.xml.rels
-            if self._package:
-                rel_mgr = RelationshipManager(self._package, "word/document.xml")
-                comment_rel_types = [
-                    RelationshipTypes.COMMENTS,
-                    RelationshipTypes.COMMENTS_EXTENDED,
-                    RelationshipTypes.COMMENTS_IDS,
-                    RelationshipTypes.COMMENTS_EXTENSIBLE,
-                ]
-                rel_mgr.remove_relationships(comment_rel_types)
-                rel_mgr.save()
-
-            # Remove comment content types from [Content_Types].xml
-            if self._package:
-                ct_mgr = ContentTypeManager(self._package)
-                comment_part_names = [
-                    "/word/comments.xml",
-                    "/word/commentsExtended.xml",
-                    "/word/commentsIds.xml",
-                    "/word/commentsExtensible.xml",
-                ]
-                ct_mgr.remove_overrides(comment_part_names)
-                ct_mgr.save()
+        self._comment_ops.delete_all()
 
     def add_comment(
         self,
@@ -3707,94 +3392,15 @@ class Document:
             ... )
             >>> doc.save("contract_reviewed.docx")
         """
-        from datetime import datetime, timezone
-
-        from python_docx_redline.models.comment import Comment, CommentRange
-
-        # Validate arguments
-        if reply_to is None and on is None:
-            raise ValueError("Either 'on' or 'reply_to' must be provided")
-
-        # Determine author
-        effective_author = author or self.author
-
-        # Generate initials if not provided
-        if initials is None:
-            # Take first letter of each word in author name
-            initials = "".join(word[0].upper() for word in effective_author.split() if word)
-            if not initials:
-                initials = effective_author[:2].upper() if effective_author else "AU"
-
-        # Get next available comment ID
-        comment_id = self._get_next_comment_id()
-
-        # Get current timestamp
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        # Handle reply vs new comment
-        if reply_to is not None:
-            # This is a reply to an existing comment
-            parent_comment = self._resolve_comment_reference(reply_to)
-            parent_para_id = parent_comment.para_id
-
-            if parent_para_id is None:
-                raise ValueError("Cannot reply to comment without paraId")
-
-            # Add comment to comments.xml (no document markers for replies)
-            comment_elem = self._add_comment_to_comments_xml(
-                comment_id, text, effective_author, initials, timestamp
-            )
-
-            # Get the paraId of the new comment
-            new_para_id = comment_elem.find(f".//{{{WORD_NAMESPACE}}}p").get(
-                "{http://schemas.microsoft.com/office/word/2010/wordml}paraId"
-            )
-
-            # Create parent-child relationship in commentsExtended.xml
-            self._link_comment_reply(new_para_id, parent_para_id)
-
-            # Replies don't have a range
-            return Comment(comment_elem, None, document=self)
-
-        else:
-            # This is a new top-level comment
-            # Get all paragraphs in the document
-            all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
-
-            # Apply scope filter if specified
-            paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
-
-            # Search for the target text
-            matches = self._text_search.find_text(on, paragraphs, regex=regex)
-
-            if not matches:
-                suggestions = SuggestionGenerator.generate_suggestions(on, paragraphs)
-                raise TextNotFoundError(on, suggestions=suggestions)
-
-            if len(matches) > 1:
-                raise AmbiguousTextError(on, matches)
-
-            match = matches[0]
-
-            # Insert comment markers in document body
-            self._insert_comment_markers(match, comment_id)
-
-            # Add comment to comments.xml (create file if needed)
-            comment_elem = self._add_comment_to_comments_xml(
-                comment_id, text, effective_author, initials, timestamp
-            )
-
-            # Build the CommentRange for the return value
-            from python_docx_redline.models.paragraph import Paragraph
-
-            start_para = Paragraph(match.paragraph)
-            comment_range = CommentRange(
-                start_paragraph=start_para,
-                end_paragraph=start_para,
-                marked_text=match.text,
-            )
-
-            return Comment(comment_elem, comment_range, document=self)
+        return self._comment_ops.add(
+            text=text,
+            on=on,
+            author=author,
+            scope=scope,
+            regex=regex,
+            initials=initials,
+            reply_to=reply_to,
+        )
 
     def _resolve_comment_reference(self, ref: "Comment | str | int") -> "Comment":
         """Resolve a comment reference to a Comment object.
