@@ -18,6 +18,8 @@ __all__ = [
     "Document",
     "compare_documents",
     "OOXMLPackage",
+    "RelationshipManager",
+    "RelationshipTypes",
     "AuthorIdentity",
     "from_python_docx",
     "to_python_docx",
@@ -94,6 +96,9 @@ from .models.tracked_change import ChangeType, TrackedChange
 
 # Import package class
 from .package import OOXMLPackage
+
+# Import relationship manager
+from .relationships import RelationshipManager, RelationshipTypes
 
 # Import result types
 from .results import AcceptResult, ComparisonStats, EditResult, FormatResult, RejectResult

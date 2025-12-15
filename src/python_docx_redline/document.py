@@ -34,6 +34,7 @@ from .minimal_diff import (
     should_use_minimal_editing,
 )
 from .package import OOXMLPackage
+from .relationships import RelationshipManager, RelationshipTypes
 from .results import ComparisonStats, EditResult, FormatResult
 from .scope import ScopeEvaluator
 from .suggestions import SuggestionGenerator
@@ -3631,33 +3632,16 @@ class Document:
                     full_path.unlink()
 
             # Remove comment relationships from document.xml.rels
-            rels_path = self._temp_dir / "word" / "_rels" / "document.xml.rels"
-            if rels_path.exists():
-                from lxml import etree as lxml_etree
-
-                rels_tree = lxml_etree.parse(str(rels_path))
-                rels_root = rels_tree.getroot()
-
-                # Find and remove comment relationships
+            if self._package:
+                rel_mgr = RelationshipManager(self._package, "word/document.xml")
                 comment_rel_types = [
-                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments",
-                    "http://schemas.microsoft.com/office/2011/relationships/commentsExtended",
-                    "http://schemas.microsoft.com/office/2016/09/relationships/commentsIds",
-                    "http://schemas.microsoft.com/office/2018/08/relationships/commentsExtensible",
+                    RelationshipTypes.COMMENTS,
+                    RelationshipTypes.COMMENTS_EXTENDED,
+                    RelationshipTypes.COMMENTS_IDS,
+                    RelationshipTypes.COMMENTS_EXTENSIBLE,
                 ]
-
-                for rel in list(rels_root):
-                    rel_type = rel.get("Type")
-                    if rel_type in comment_rel_types:
-                        rels_root.remove(rel)
-
-                # Write back the modified relationships
-                rels_tree.write(
-                    str(rels_path),
-                    encoding="utf-8",
-                    xml_declaration=True,
-                    pretty_print=False,
-                )
+                rel_mgr.remove_relationships(comment_rel_types)
+                rel_mgr.save()
 
             # Remove comment content types from [Content_Types].xml
             content_types_path = self._temp_dir / "[Content_Types].xml"
@@ -4045,58 +4029,12 @@ class Document:
 
     def _ensure_comments_relationship(self) -> None:
         """Ensure comments.xml relationship exists in document.xml.rels."""
-        if not self._temp_dir:
+        if not self._package:
             return
 
-        rels_path = self._temp_dir / "word" / "_rels" / "document.xml.rels"
-        rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
-        comment_rel_type = (
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
-        )
-
-        if rels_path.exists():
-            rels_tree = etree.parse(str(rels_path))
-            rels_root = rels_tree.getroot()
-
-            # Check if relationship already exists
-            for rel in rels_root:
-                if rel.get("Type") == comment_rel_type:
-                    return  # Already exists
-        else:
-            # Create new rels file
-            rels_path.parent.mkdir(parents=True, exist_ok=True)
-            rels_root = etree.Element(
-                f"{{{rels_ns}}}Relationships",
-                nsmap={None: rels_ns},
-            )
-            rels_tree = etree.ElementTree(rels_root)
-
-        # Find next available rId
-        existing_ids = set()
-        for rel in rels_root:
-            rel_id = rel.get("Id", "")
-            if rel_id.startswith("rId"):
-                try:
-                    existing_ids.add(int(rel_id[3:]))
-                except ValueError:
-                    pass
-
-        next_id = 1
-        while next_id in existing_ids:
-            next_id += 1
-
-        # Add relationship
-        rel_elem = etree.SubElement(rels_root, f"{{{rels_ns}}}Relationship")
-        rel_elem.set("Id", f"rId{next_id}")
-        rel_elem.set("Type", comment_rel_type)
-        rel_elem.set("Target", "comments.xml")
-
-        rels_tree.write(
-            str(rels_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
+        rel_mgr = RelationshipManager(self._package, "word/document.xml")
+        rel_mgr.add_relationship(RelationshipTypes.COMMENTS, "comments.xml")
+        rel_mgr.save()
 
     def _ensure_comments_content_type(self) -> None:
         """Ensure comments.xml content type exists in [Content_Types].xml."""
@@ -4232,55 +4170,12 @@ class Document:
 
     def _ensure_comments_extended_relationship(self) -> None:
         """Ensure commentsExtended.xml relationship exists."""
-        if not self._temp_dir:
+        if not self._package:
             return
 
-        rels_path = self._temp_dir / "word" / "_rels" / "document.xml.rels"
-        rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
-        rel_type = "http://schemas.microsoft.com/office/2011/relationships/commentsExtended"
-
-        if rels_path.exists():
-            rels_tree = etree.parse(str(rels_path))
-            rels_root = rels_tree.getroot()
-
-            # Check if relationship already exists
-            for rel in rels_root:
-                if rel.get("Type") == rel_type:
-                    return
-        else:
-            rels_path.parent.mkdir(parents=True, exist_ok=True)
-            rels_root = etree.Element(
-                f"{{{rels_ns}}}Relationships",
-                nsmap={None: rels_ns},
-            )
-            rels_tree = etree.ElementTree(rels_root)
-
-        # Find next available rId
-        existing_ids = set()
-        for rel in rels_root:
-            rel_id = rel.get("Id", "")
-            if rel_id.startswith("rId"):
-                try:
-                    existing_ids.add(int(rel_id[3:]))
-                except ValueError:
-                    pass
-
-        next_id = 1
-        while next_id in existing_ids:
-            next_id += 1
-
-        # Add relationship
-        rel_elem = etree.SubElement(rels_root, f"{{{rels_ns}}}Relationship")
-        rel_elem.set("Id", f"rId{next_id}")
-        rel_elem.set("Type", rel_type)
-        rel_elem.set("Target", "commentsExtended.xml")
-
-        rels_tree.write(
-            str(rels_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
+        rel_mgr = RelationshipManager(self._package, "word/document.xml")
+        rel_mgr.add_relationship(RelationshipTypes.COMMENTS_EXTENDED, "commentsExtended.xml")
+        rel_mgr.save()
 
     def _ensure_comments_extended_content_type(self) -> None:
         """Ensure commentsExtended.xml content type exists."""
@@ -6577,117 +6472,21 @@ class Document:
 
     def _ensure_footnotes_relationship(self) -> None:
         """Ensure footnotes.xml relationship exists in document.xml.rels."""
-        if not self._temp_dir:
+        if not self._package:
             return
 
-        rels_path = self._temp_dir / "word" / "_rels" / "document.xml.rels"
-        rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
-        footnote_rel_type = (
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
-        )
-
-        # Ensure _rels directory exists
-        rels_dir = rels_path.parent
-        rels_dir.mkdir(parents=True, exist_ok=True)
-
-        # Load or create rels file
-        if rels_path.exists():
-            tree = etree.parse(str(rels_path))
-            root = tree.getroot()
-        else:
-            root = etree.Element(
-                f"{{{rels_ns}}}Relationships",
-                nsmap={None: rels_ns},
-            )
-            tree = etree.ElementTree(root)
-
-        # Check if footnotes relationship already exists
-        for rel in root.findall(f"{{{rels_ns}}}Relationship"):
-            if rel.get("Type") == footnote_rel_type:
-                return  # Already exists
-
-        # Find next relationship ID
-        existing_ids = []
-        for rel in root.findall(f"{{{rels_ns}}}Relationship"):
-            rel_id = rel.get("Id", "")
-            if rel_id.startswith("rId"):
-                try:
-                    existing_ids.append(int(rel_id[3:]))
-                except ValueError:
-                    pass
-
-        next_id = max(existing_ids) + 1 if existing_ids else 1
-
-        # Add footnotes relationship
-        rel_elem = etree.SubElement(root, f"{{{rels_ns}}}Relationship")
-        rel_elem.set("Id", f"rId{next_id}")
-        rel_elem.set("Type", footnote_rel_type)
-        rel_elem.set("Target", "footnotes.xml")
-
-        # Write rels file
-        tree.write(
-            str(rels_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
+        rel_mgr = RelationshipManager(self._package, "word/document.xml")
+        rel_mgr.add_relationship(RelationshipTypes.FOOTNOTES, "footnotes.xml")
+        rel_mgr.save()
 
     def _ensure_endnotes_relationship(self) -> None:
         """Ensure endnotes.xml relationship exists in document.xml.rels."""
-        if not self._temp_dir:
+        if not self._package:
             return
 
-        rels_path = self._temp_dir / "word" / "_rels" / "document.xml.rels"
-        rels_ns = "http://schemas.openxmlformats.org/package/2006/relationships"
-        endnote_rel_type = (
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes"
-        )
-
-        # Ensure _rels directory exists
-        rels_dir = rels_path.parent
-        rels_dir.mkdir(parents=True, exist_ok=True)
-
-        # Load or create rels file
-        if rels_path.exists():
-            tree = etree.parse(str(rels_path))
-            root = tree.getroot()
-        else:
-            root = etree.Element(
-                f"{{{rels_ns}}}Relationships",
-                nsmap={None: rels_ns},
-            )
-            tree = etree.ElementTree(root)
-
-        # Check if endnotes relationship already exists
-        for rel in root.findall(f"{{{rels_ns}}}Relationship"):
-            if rel.get("Type") == endnote_rel_type:
-                return  # Already exists
-
-        # Find next relationship ID
-        existing_ids = []
-        for rel in root.findall(f"{{{rels_ns}}}Relationship"):
-            rel_id = rel.get("Id", "")
-            if rel_id.startswith("rId"):
-                try:
-                    existing_ids.append(int(rel_id[3:]))
-                except ValueError:
-                    pass
-
-        next_id = max(existing_ids) + 1 if existing_ids else 1
-
-        # Add endnotes relationship
-        rel_elem = etree.SubElement(root, f"{{{rels_ns}}}Relationship")
-        rel_elem.set("Id", f"rId{next_id}")
-        rel_elem.set("Type", endnote_rel_type)
-        rel_elem.set("Target", "endnotes.xml")
-
-        # Write rels file
-        tree.write(
-            str(rels_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
+        rel_mgr = RelationshipManager(self._package, "word/document.xml")
+        rel_mgr.add_relationship(RelationshipTypes.ENDNOTES, "endnotes.xml")
+        rel_mgr.save()
 
     def _ensure_footnotes_content_type(self) -> None:
         """Ensure footnotes.xml content type exists in [Content_Types].xml."""
