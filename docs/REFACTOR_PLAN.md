@@ -1,7 +1,23 @@
 # python_docx_redline Refactoring Plan
 
-**Based on:** CODE_REVIEW_REPORT.md (2025-12-09)
+**Based on:** CODE_REVIEW_REPORT.md (2025-12-09), Audit (2025-12-13)
 **Goal:** Transform the codebase from prototype to production-grade library
+**Last Updated:** 2025-12-13
+
+---
+
+## Current State (2025-12-13 Audit)
+
+| Metric | Value | Target |
+|--------|-------|--------|
+| `document.py` lines | 7,522 | <500 |
+| Document class methods | 131 | <30 (facade) |
+| Longest method | 314 lines (`_apply_single_edit`) | <50 |
+| Test count | 877 | Maintain |
+| Coverage | 80%+ | 90%+ |
+| Mypy error codes disabled | 9 | 0 |
+| Print statements | 39 | 0 (use logging) |
+| Namespace duplications | 6 files | 1 (constants.py) |
 
 ---
 
@@ -497,27 +513,47 @@ Each phase can be completed independently with passing tests between phases.
 
 ## Implementation Order Recommendation
 
+**Epic:** docx_redline-6jg
+
+### Foundation (No Dependencies)
+| Phase | Task | Beads ID |
+|-------|------|----------|
+| 1 | Centralize namespace constants | docx_redline-7ds |
+| 2 | Replace print with logging | docx_redline-4zk |
+
+### Infrastructure Extraction (Sequential)
+| Phase | Task | Beads ID | Depends On |
+|-------|------|----------|------------|
+| 3 | Extract OOXMLPackage | docx_redline-7g1 | Phase 1 |
+| 4 | Extract RelationshipManager | docx_redline-j11 | Phase 3 |
+| 5 | Extract ContentTypeManager | docx_redline-1jg | Phase 3 |
+
+### Domain Operations (Parallel after Infrastructure)
+| Phase | Task | Beads ID | Depends On |
+|-------|------|----------|------------|
+| 6 | Extract TrackedChangeOperations | docx_redline-8no | Phase 4 |
+| 7 | Extract CommentOperations | docx_redline-j42 | Phase 5 |
+| 8 | Extract ChangeManagement | docx_redline-de0 | Phase 6 |
+| 9 | Extract FormatOperations | docx_redline-hxd | Phase 6 |
+| 10 | Extract TableOperations | docx_redline-xr8 | Phase 4 |
+| 11 | Extract NoteOperations | docx_redline-9qc | Phase 5 |
+
+### Cleanup (After Extraction)
+| Phase | Task | Beads ID | Depends On |
+|-------|------|----------|------------|
+| 12 | Enable stricter mypy | docx_redline-hfx | - |
+| 13 | Break up large methods | docx_redline-7af | Phase 6, 9 |
+| 14 | Clean up TODO comments | docx_redline-b94 | - |
+| 15 | Validation test coverage | docx_redline-j6i | - |
+
+### Commands
+```bash
+bd ready              # Show tasks with no blockers
+bd blocked            # Show blocked tasks
+bd show <id>          # View task details
+bd update <id> -s in_progress  # Start work
+bd close <id>         # Complete task
 ```
-Phase 1 (Critical Bugs)     ████████████████████  1-2 days
-    └── Can be done immediately, fixes real bugs
-
-Phase 2 (Foundation)        ████████████████████  1-2 days
-    └── Do before Phase 3-4, makes refactoring easier
-
-Phase 3 (Package Mgmt)      ████████████████████████████  2-3 days
-    └── Extract infrastructure classes first
-
-Phase 4 (Domain Ops)        ████████████████████████████████████████  4-5 days
-    └── Biggest phase, break up God class
-
-Phase 5 (XML Generation)    ████████████████████  1-2 days
-    └── Can be done in parallel with Phase 4
-
-Phase 6 (Production)        ████████████████████████████  2-3 days
-    └── Do last, once architecture is stable
-```
-
-**Total estimate:** 12-17 days of focused work
 
 ---
 
@@ -525,14 +561,18 @@ Phase 6 (Production)        █████████████████�
 
 After refactoring, the codebase should have:
 
-1. **No file over 500 lines** (except possibly Document facade)
-2. **Document class under 200 lines** (delegates to operation classes)
-3. **No `Any` types** in public APIs
-4. **90%+ test coverage** including validation modules
-5. **Zero FutureWarnings** from lxml
-6. **Proper resource cleanup** verified by tests
-7. **Logging throughout** for debuggability
-8. **All existing tests passing** (backward compatibility)
+| Criteria | Target | Verification |
+|----------|--------|--------------|
+| document.py size | <500 lines | `wc -l src/python_docx_redline/document.py` |
+| Document class methods | <30 | Facade only, delegates to operations |
+| Maximum method size | <50 lines | No method exceeds 50 lines |
+| Test count | ≥877 | All existing tests pass |
+| Coverage | ≥90% | `pytest --cov-fail-under=90` |
+| Mypy strictness | 0 disabled codes | Enable all error codes |
+| Print statements | 0 | Use logging module |
+| FutureWarnings | 0 | `pytest -W error::FutureWarning` |
+| Resource cleanup | Verified | Tests confirm temp dir cleanup |
+| Backward compatibility | 100% | Public API unchanged |
 
 ---
 

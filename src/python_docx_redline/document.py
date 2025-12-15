@@ -750,36 +750,6 @@ class Document:
             enable_quote_normalization=enable_quote_normalization,
         )
 
-    def _generate_move_name(self) -> str:
-        """Generate a unique move name for linking source and destination.
-
-        Scans the document for existing move names and returns the next one.
-
-        Returns:
-            Unique move name (e.g., "move1", "move2", etc.)
-        """
-        # Find all existing move names
-        existing_names: set[str] = set()
-
-        # Check moveFromRangeStart elements
-        for elem in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}moveFromRangeStart"):
-            name = elem.get(f"{{{WORD_NAMESPACE}}}name")
-            if name:
-                existing_names.add(name)
-
-        # Check moveToRangeStart elements
-        for elem in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}moveToRangeStart"):
-            name = elem.get(f"{{{WORD_NAMESPACE}}}name")
-            if name:
-                existing_names.add(name)
-
-        # Find next available number
-        counter = 1
-        while f"move{counter}" in existing_names:
-            counter += 1
-
-        return f"move{counter}"
-
     def normalize_currency(
         self,
         currency_symbol: str = "$",

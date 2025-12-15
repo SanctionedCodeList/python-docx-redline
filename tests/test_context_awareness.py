@@ -55,7 +55,9 @@ def test_replace_with_context_preview(caplog):
     doc_path = create_test_document(text)
 
     try:
-        with caplog.at_level(logging.DEBUG, logger="python_docx_redline.document"):
+        with caplog.at_level(
+            logging.DEBUG, logger="python_docx_redline.operations.tracked_changes"
+        ):
             doc = Document(doc_path)
             doc.replace_tracked(
                 "Sentence two.",
@@ -89,7 +91,9 @@ def test_context_preview_with_different_lengths(caplog):
     doc_path = create_test_document(text)
 
     try:
-        with caplog.at_level(logging.DEBUG, logger="python_docx_redline.document"):
+        with caplog.at_level(
+            logging.DEBUG, logger="python_docx_redline.operations.tracked_changes"
+        ):
             doc = Document(doc_path)
             doc.replace_tracked(
                 "MATCH",
@@ -245,7 +249,9 @@ def test_both_features_together(caplog):
     try:
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            with caplog.at_level(logging.DEBUG, logger="python_docx_redline.document"):
+            with caplog.at_level(
+                logging.DEBUG, logger="python_docx_redline.operations.tracked_changes"
+            ):
                 doc = Document(doc_path)
                 doc.replace_tracked(
                     "First sentence.",
