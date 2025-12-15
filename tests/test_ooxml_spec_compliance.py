@@ -1595,6 +1595,38 @@ class TestPatternOperations:
             output_path.unlink(missing_ok=True)
 
 
+class TestDocumentComparison:
+    """Test document comparison produces valid OOXML."""
+
+    @pytest.mark.xfail(
+        reason="Bug docx_redline-owf: compare_to places w:del inside w:r, violating OOXML schema"
+    )
+    def test_compare_to(self) -> None:
+        """Test compare_to produces valid OOXML with tracked changes."""
+        # Create two documents - original and modified
+        original_path = create_test_document()
+        modified_path = create_test_document()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+        try:
+            # Modify the second document
+            modified_doc = Document(modified_path)
+            modified_doc.insert_tracked(" [MODIFIED]", after="Introduction")
+            modified_doc.save(modified_path)
+
+            # Now compare original to modified - this writes tracked changes to original
+            original_doc = Document(original_path)
+            modified_doc = Document(modified_path)
+            original_doc.compare_to(modified_doc)
+            original_doc.save(output_path, validate=False)
+
+            errors = validate_document(output_path)
+            assert errors == [], f"Validation errors: {errors}"
+        finally:
+            original_path.unlink()
+            modified_path.unlink()
+            output_path.unlink(missing_ok=True)
+
+
 class TestStrictValidationOnSave:
     """Test the strict_validation parameter on save()."""
 
