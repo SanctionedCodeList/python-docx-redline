@@ -299,39 +299,37 @@ class ComparisonOperations:
             paragraph: The paragraph XML element
             author: Author for the deletion
         """
-        # Get all runs in the paragraph
-        runs = paragraph.findall(f".//{{{WORD_NAMESPACE}}}r")
+        # Get all direct child runs in the paragraph (not nested ones)
+        runs = paragraph.findall(f"{{{WORD_NAMESPACE}}}r")
 
         for run in runs:
             # Get all text elements in this run
             text_elements = run.findall(f"{{{WORD_NAMESPACE}}}t")
 
-            for t_elem in text_elements:
-                text = t_elem.text or ""
-                if not text:
-                    continue
+            # Collect all text from this run
+            run_text = "".join((t.text or "") for t in text_elements)
+            if not run_text:
+                continue
 
-                # Create deletion XML
-                del_xml = self._document._xml_generator.create_deletion(text, author)
+            # Create deletion XML (this creates w:del containing w:r with w:delText)
+            del_xml = self._document._xml_generator.create_deletion(run_text, author)
 
-                # Parse the deletion XML
-                del_elem = etree.fromstring(
-                    f'<root xmlns:w="{WORD_NAMESPACE}" '
-                    f'xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du" '
-                    f'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml">'
-                    f"{del_xml}</root>"
-                )
+            # Parse the deletion XML
+            del_elem = etree.fromstring(
+                f'<root xmlns:w="{WORD_NAMESPACE}" '
+                f'xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du" '
+                f'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml">'
+                f"{del_xml}</root>"
+            )
 
-                # Get the w:del element
-                del_node = del_elem.find(f"{{{WORD_NAMESPACE}}}del")
-                if del_node is not None:
-                    # Insert the deletion before the original text element
-                    parent = t_elem.getparent()
-                    if parent is not None:
-                        idx = list(parent).index(t_elem)
-                        parent.insert(idx, del_node)
-                        # Remove the original text element
-                        parent.remove(t_elem)
+            # Get the w:del element
+            del_node = del_elem.find(f"{{{WORD_NAMESPACE}}}del")
+            if del_node is not None:
+                # Insert the w:del at the paragraph level, before the original run
+                run_idx = list(paragraph).index(run)
+                paragraph.insert(run_idx, del_node)
+                # Remove the original run
+                paragraph.remove(run)
 
     def _insert_comparison_paragraph(
         self,

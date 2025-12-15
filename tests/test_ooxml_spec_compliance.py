@@ -1598,9 +1598,6 @@ class TestPatternOperations:
 class TestDocumentComparison:
     """Test document comparison produces valid OOXML."""
 
-    @pytest.mark.xfail(
-        reason="Bug docx_redline-owf: compare_to places w:del inside w:r, violating OOXML schema"
-    )
     def test_compare_to(self) -> None:
         """Test compare_to produces valid OOXML with tracked changes."""
         # Create two documents - original and modified
@@ -1617,7 +1614,7 @@ class TestDocumentComparison:
             original_doc = Document(original_path)
             modified_doc = Document(modified_path)
             original_doc.compare_to(modified_doc)
-            original_doc.save(output_path, validate=False)
+            original_doc.save(output_path)
 
             errors = validate_document(output_path)
             assert errors == [], f"Validation errors: {errors}"
