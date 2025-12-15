@@ -497,13 +497,51 @@ class TrackedXMLGenerator:
     def _get_max_change_id(doc: Any) -> int:
         """Find the maximum change ID in the document.
 
+        Scans document.xml for all w:id attributes on w:ins, w:del, w:moveFrom,
+        w:moveTo, and w:pPrChange elements to find the maximum existing ID.
+
         Args:
-            doc: Document object with parsed XML
+            doc: Document object with parsed XML (must have xml_root attribute)
 
         Returns:
             Maximum change ID found, or 0 if none exist
         """
-        # This will be implemented when we have the Document class
-        # For now, return 0 to start from ID 1
-        # TODO: Scan document.xml for all w:id attributes on w:ins/w:del elements
-        return 0
+        max_id = 0
+
+        # Get the XML root from the document
+        xml_root = getattr(doc, "xml_root", None)
+        if xml_root is None:
+            return 0
+
+        # Elements that use w:id for tracked changes
+        change_tags = [
+            _w("ins"),
+            _w("del"),
+            _w("moveFrom"),
+            _w("moveTo"),
+            _w("pPrChange"),
+            _w("rPrChange"),
+            _w("sectPrChange"),
+            _w("tblPrChange"),
+            _w("trPrChange"),
+            _w("tcPrChange"),
+            _w("customXmlInsRangeStart"),
+            _w("customXmlDelRangeStart"),
+            _w("customXmlMoveFromRangeStart"),
+            _w("customXmlMoveToRangeStart"),
+        ]
+
+        # Find all elements with w:id attribute
+        for tag in change_tags:
+            for elem in xml_root.iter(tag):
+                id_attr = elem.get(_w("id"))
+                if id_attr is not None:
+                    try:
+                        id_val = int(id_attr)
+                        if id_val > max_id:
+                            max_id = id_val
+                    except ValueError:
+                        # Non-integer ID, skip
+                        pass
+
+        return max_id

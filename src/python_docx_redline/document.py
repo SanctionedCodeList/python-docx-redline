@@ -1742,9 +1742,7 @@ class Document:
 
         return section
 
-    def _insert_after_match(
-        self, match: TextSpan, insertion_element: etree._Element
-    ) -> None:
+    def _insert_after_match(self, match: TextSpan, insertion_element: etree._Element) -> None:
         """Insert XML element(s) after a matched text span.
 
         Args:
@@ -1769,9 +1767,7 @@ class Document:
             # Insert the new element after the end run
             paragraph.insert(run_index + 1, insertion_element)
 
-    def _insert_before_match(
-        self, match: TextSpan, insertion_element: etree._Element
-    ) -> None:
+    def _insert_before_match(self, match: TextSpan, insertion_element: etree._Element) -> None:
         """Insert XML element(s) before a matched text span.
 
         Args:
@@ -1796,7 +1792,9 @@ class Document:
             # Insert the new element before the start run
             paragraph.insert(run_index, insertion_element)
 
-    def _replace_match_with_element(self, match: Any, replacement_element: Any) -> None:
+    def _replace_match_with_element(
+        self, match: TextSpan, replacement_element: etree._Element
+    ) -> None:
         """Replace matched text with a single XML element.
 
         This handles the complexity of text potentially spanning multiple runs.
@@ -1837,7 +1835,9 @@ class Document:
             # Insert replacement at the position of the first removed run
             paragraph.insert(start_run_index, replacement_element)
 
-    def _replace_match_with_elements(self, match: Any, replacement_elements: list[Any]) -> None:
+    def _replace_match_with_elements(
+        self, match: TextSpan, replacement_elements: list[etree._Element]
+    ) -> None:
         """Replace matched text with multiple XML elements.
 
         Used for replace_tracked which needs both deletion and insertion elements.
@@ -2743,7 +2743,7 @@ class Document:
 
         return max_id + 1
 
-    def _insert_comment_markers(self, match: Any, comment_id: int) -> None:
+    def _insert_comment_markers(self, match: TextSpan, comment_id: int) -> None:
         """Insert comment range markers around matched text.
 
         Inserts commentRangeStart before the match, commentRangeEnd after,
@@ -3390,7 +3390,9 @@ class Document:
         """
         self._table_ops.delete_column(column, table_index=table_index, track=track, author=author)
 
-    def _get_detailed_context(self, match: Any, context_chars: int = 50) -> tuple[str, str, str]:
+    def _get_detailed_context(
+        self, match: TextSpan, context_chars: int = 50
+    ) -> tuple[str, str, str]:
         """Extract detailed context around a match for preview.
 
         Args:
@@ -4546,6 +4548,8 @@ class Document:
         Returns:
             Integer ID for new footnote
         """
+        if self._temp_dir is None:
+            return 1
         footnotes_path = self._temp_dir / "word" / "footnotes.xml"
 
         if not footnotes_path.exists():
@@ -4574,6 +4578,8 @@ class Document:
         Returns:
             Integer ID for new endnote
         """
+        if self._temp_dir is None:
+            return 1
         endnotes_path = self._temp_dir / "word" / "endnotes.xml"
 
         if not endnotes_path.exists():
@@ -4604,6 +4610,8 @@ class Document:
             text: Footnote text content
             author: Author name (for tracking if needed)
         """
+        if self._temp_dir is None:
+            return
         footnotes_path = self._temp_dir / "word" / "footnotes.xml"
 
         # Load or create footnotes.xml
@@ -4665,6 +4673,8 @@ class Document:
             text: Endnote text content
             author: Author name (for tracking if needed)
         """
+        if self._temp_dir is None:
+            return
         endnotes_path = self._temp_dir / "word" / "endnotes.xml"
 
         # Load or create endnotes.xml
@@ -4716,7 +4726,7 @@ class Document:
             pretty_print=True,
         )
 
-    def _insert_footnote_reference(self, match: Any, footnote_id: int) -> None:
+    def _insert_footnote_reference(self, match: TextSpan, footnote_id: int) -> None:
         """Insert a footnote reference at the matched text location.
 
         Args:
@@ -4740,7 +4750,7 @@ class Document:
         index = list(parent).index(end_run)
         parent.insert(index + 1, new_run)
 
-    def _insert_endnote_reference(self, match: Any, endnote_id: int) -> None:
+    def _insert_endnote_reference(self, match: TextSpan, endnote_id: int) -> None:
         """Insert an endnote reference at the matched text location.
 
         Args:

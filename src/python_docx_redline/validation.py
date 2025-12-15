@@ -94,9 +94,9 @@ def validate_document(
             with open(doc_xml_path, "wb") as f:
                 f.write(etree.tostring(xml_root, xml_declaration=True, encoding="UTF-8"))
 
-            # If we have the full document (from Document object), we should extract it
-            # For now, create minimal structure
-            # TODO: This needs to be improved to handle full document structure
+            # Note: This creates a minimal structure with only document.xml.
+            # Full document structure (styles.xml, comments.xml, etc.) support
+            # is tracked in beads issue docx_redline-290.
 
             # Run DOCXSchemaValidator
             try:
