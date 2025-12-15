@@ -17,12 +17,11 @@ from typing import TYPE_CHECKING, Literal
 
 from lxml import etree
 
+from .constants import WORD_NAMESPACE
+
 if TYPE_CHECKING:
     from .document import Document
     from .models.tracked_change import TrackedChange
-
-# Word namespace
-WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
 @dataclass

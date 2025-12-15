@@ -10,24 +10,8 @@ from typing import Any
 
 from lxml import etree
 
-# Word namespaces
-WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-W14_NAMESPACE = "http://schemas.microsoft.com/office/word/2010/wordml"
-W15_NAMESPACE = "http://schemas.microsoft.com/office/word/2012/wordml"
-W16DU_NAMESPACE = "http://schemas.microsoft.com/office/word/2023/wordml"
-
-NSMAP = {
-    "w": WORD_NAMESPACE,
-    "w14": W14_NAMESPACE,
-    "w15": W15_NAMESPACE,
-    "w16du": W16DU_NAMESPACE,
-}
-
-
-def _w(tag: str) -> str:
-    """Create a fully qualified Word namespace tag."""
-    return f"{{{WORD_NAMESPACE}}}{tag}"
-
+from .constants import WORD_NAMESPACE
+from .constants import w as _w
 
 # Unit conversion utilities
 

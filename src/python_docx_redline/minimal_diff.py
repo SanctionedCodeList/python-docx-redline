@@ -19,10 +19,7 @@ from typing import Any
 
 from lxml import etree
 
-from .text_search import WORD_NAMESPACE
-
-# Default tuning parameters (per spec)
-MAX_TRACKED_HUNKS_PER_PARAGRAPH = 8
+from .constants import MAX_TRACKED_HUNKS_PER_PARAGRAPH, WORD_NAMESPACE
 
 # Tokenizer pattern:
 # - \s+ : whitespace runs

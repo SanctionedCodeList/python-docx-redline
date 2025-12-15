@@ -12,16 +12,11 @@ from typing import TYPE_CHECKING
 
 from lxml import etree
 
+from python_docx_redline.constants import W14_NAMESPACE, W15_NAMESPACE, WORD_NAMESPACE
+
 if TYPE_CHECKING:
     from python_docx_redline.document import Document
     from python_docx_redline.models.paragraph import Paragraph
-
-# Word namespace
-WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-# Word 2010 namespace (for paraId)
-W14_NAMESPACE = "http://schemas.microsoft.com/office/word/2010/wordml"
-# Word 2012 namespace (for commentsExtended)
-W15_NAMESPACE = "http://schemas.microsoft.com/office/word/2012/wordml"
 
 
 @dataclass

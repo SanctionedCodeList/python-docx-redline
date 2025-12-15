@@ -15,8 +15,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-# Word namespace
-WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+from .constants import WORD_NAMESPACE
 
 
 def _parse_tag(tag: str) -> str:

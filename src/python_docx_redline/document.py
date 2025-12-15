@@ -29,6 +29,7 @@ import yaml
 from lxml import etree
 
 from .author import AuthorIdentity
+from .constants import WORD_NAMESPACE
 from .errors import AmbiguousTextError, TextNotFoundError
 from .format_builder import ParagraphPropertyBuilder, RunPropertyBuilder
 from .minimal_diff import (
@@ -43,10 +44,6 @@ from .tracked_xml import TrackedXMLGenerator
 from .validation import ValidationError
 
 logger = logging.getLogger(__name__)
-
-# Word namespace
-WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-NSMAP = {"w": WORD_NAMESPACE}
 
 
 class Document:

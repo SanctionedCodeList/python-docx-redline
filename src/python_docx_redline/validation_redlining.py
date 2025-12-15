@@ -7,6 +7,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from .constants import WORD_NAMESPACE
+
 
 class RedliningValidator:
     """Validator for tracked changes in Word documents."""
@@ -15,7 +17,7 @@ class RedliningValidator:
         self.unpacked_dir = Path(unpacked_dir)
         self.original_docx = Path(original_docx)
         self.verbose = verbose
-        self.namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        self.namespaces = {"w": WORD_NAMESPACE}
 
     def validate(self):
         """Main validation method that returns True if valid, False otherwise."""

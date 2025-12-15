@@ -13,12 +13,11 @@ from typing import TYPE_CHECKING
 
 from lxml import etree
 
+from python_docx_redline.constants import WORD_NAMESPACE
+
 if TYPE_CHECKING:
     from python_docx_redline.document import Document
     from python_docx_redline.models.paragraph import Paragraph
-
-WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-RELATIONSHIP_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 
 class HeaderFooterType(Enum):

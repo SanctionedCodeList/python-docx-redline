@@ -8,8 +8,7 @@ search operations to specific sections, paragraphs, or text ranges.
 from collections.abc import Callable
 from typing import Any
 
-# Word namespace
-WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+from .constants import WORD_NAMESPACE
 
 
 class ScopeEvaluator:

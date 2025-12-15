@@ -12,11 +12,10 @@ from typing import TYPE_CHECKING
 
 from lxml import etree
 
+from python_docx_redline.constants import WORD_NAMESPACE
+
 if TYPE_CHECKING:
     from python_docx_redline.document import Document
-
-# Word namespace
-WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
 class ChangeType(Enum):

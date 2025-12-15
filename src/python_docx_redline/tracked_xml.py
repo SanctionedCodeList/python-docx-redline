@@ -18,23 +18,12 @@ from typing import TYPE_CHECKING, Any
 
 from lxml import etree
 
+from .constants import w as _w
+from .constants import w15 as _w15
+
 if TYPE_CHECKING:
     from python_docx_redline.author import AuthorIdentity
     from python_docx_redline.markdown_parser import TextSegment
-
-# Word namespaces
-WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-W15_NAMESPACE = "http://schemas.microsoft.com/office/word/2012/wordml"
-
-
-def _w(tag: str) -> str:
-    """Create a fully qualified Word namespace tag."""
-    return f"{{{WORD_NAMESPACE}}}" f"{tag}"
-
-
-def _w15(tag: str) -> str:
-    """Create a fully qualified W15 namespace tag."""
-    return f"{{{W15_NAMESPACE}}}" f"{tag}"
 
 
 class TrackedXMLGenerator:
