@@ -175,7 +175,7 @@ doc.replace_tracked(r"(\d{2})/(\d{2})/(\d{4})", r"\2/\1/\3", regex=True)
 
 ### Scoped Edits
 
-Limit changes to specific sections:
+Limit changes to specific sections using string shortcuts:
 
 ```python
 # Only modify in Payment Terms section
@@ -193,9 +193,67 @@ doc.replace_tracked(
 )
 ```
 
-### Batch Operations from YAML
+**Dictionary format** for complex filtering:
 
-Apply multiple edits from a configuration file:
+```python
+# Combine multiple conditions
+doc.replace_tracked(
+    "Client",
+    "Customer",
+    scope={
+        "contains": "payment",      # Paragraph must contain this
+        "not_contains": "excluded", # Paragraph must NOT contain this
+        "section": "Terms"          # Must be under this heading
+    }
+)
+```
+
+**Callable scope** for custom logic:
+
+```python
+# Custom filter function
+def my_filter(paragraph):
+    text = "".join(paragraph.itertext())
+    return "important" in text.lower() and len(text) > 100
+
+doc.replace_tracked("old", "new", scope=my_filter)
+```
+
+### Batch Operations
+
+Apply multiple edits programmatically or from YAML files.
+
+**From a list of dictionaries:**
+
+```python
+from python_docx_redline import Document
+
+doc = Document("contract.docx")
+
+edits = [
+    {"type": "replace_tracked", "find": "net 30 days", "replace": "net 45 days"},
+    {"type": "replace_tracked", "find": "Contractor", "replace": "Service Provider"},
+    {"type": "insert_tracked", "text": " (as amended)", "after": "Agreement dated"},
+    {"type": "delete_tracked", "text": "subject to board approval"},
+]
+
+# Apply all edits, continue even if some fail
+results = doc.apply_edits(edits, stop_on_error=False)
+
+# Check results
+for i, result in enumerate(results):
+    if result.success:
+        print(f"Edit {i}: OK - {result.message}")
+    else:
+        print(f"Edit {i}: FAILED - {result.message}")
+        # Access the actual exception for debugging
+        if result.error:
+            print(f"  Error type: {type(result.error).__name__}")
+
+doc.save("contract_edited.docx")
+```
+
+**From YAML file:**
 
 ```yaml
 # edits.yaml
@@ -204,16 +262,10 @@ edits:
     find: "net 30 days"
     replace: "net 45 days"
 
-  - type: replace_tracked
-    find: "Contractor"
-    replace: "Service Provider"
-
   - type: insert_tracked
     text: " (as amended)"
     after: "Agreement dated"
-
-  - type: delete_tracked
-    text: "subject to board approval"
+    scope: "section:Introduction"  # Scoped edit
 
   # Regex operations
   - type: replace_tracked
@@ -223,15 +275,8 @@ edits:
 ```
 
 ```python
-from python_docx_redline import Document
-
-doc = Document("contract.docx")
-results = doc.apply_edit_file("edits.yaml")
-
-for result in results:
-    print(f"{'OK' if result.success else 'FAIL'} {result.message}")
-
-doc.save("contract_edited.docx")
+results = doc.apply_edit_file("edits.yaml", stop_on_error=False)
+print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")
 ```
 
 ### Image Insertion
@@ -359,160 +404,71 @@ for comment in doc.comments:
 doc.save("contract_with_comments.docx")
 ```
 
-## Advanced: Raw OOXML editing
+### Document Management
 
-Use raw OOXML manipulation only for scenarios not supported by python-docx-redline:
-- Modifying another author's tracked changes
-- Inserting images with tracked changes
-- Complex nested revision scenarios
-
-### Helper Scripts
-
-This skill includes helper scripts from [Anthropic Skills](https://github.com/anthropics/skills) in the `scripts/` and `ooxml/` directories:
+Accept, reject, or clean up tracked changes and comments:
 
 ```python
-# Using the Document class for comments and tracked changes
-from skills.docx.scripts.document import Document
+from python_docx_redline import Document
 
-doc = Document('workspace/unpacked', author="Claude")
-node = doc["word/document.xml"].get_node(tag="w:del", attrs={"w:id": "1"})
-doc.add_comment(start=node, end=node, text="Please review this deletion")
-doc.save()
+doc = Document("contract_with_changes.docx")
+
+# Accept all tracked changes (removes revision marks, keeps new text)
+result = doc.accept_all_changes()
+print(f"Accepted {result.insertions} insertions, {result.deletions} deletions")
+
+# Or reject all tracked changes (removes revision marks, keeps original text)
+result = doc.reject_all_changes()
+
+# Delete all comments
+doc.delete_all_comments()
+
+doc.save("contract_clean.docx")
 ```
 
-See `scripts/README.md` and `ooxml.md` for detailed documentation.
+### Text Formatting with Tracking
 
-### Workflow
+Apply formatting changes as tracked revisions:
 
-1. **Unpack** the document:
-   ```bash
-   unzip document.docx -d unpacked/
-   # Or use the helper script:
-   python -m skills.docx.ooxml.scripts.unpack document.docx unpacked/
-   ```
+```python
+# Format text with tracked changes (shows in Word's review pane)
+doc.format_tracked(
+    "IMPORTANT",
+    bold=True,
+    color="#FF0000",
+    occurrence="all"  # Format all occurrences: "first", "last", "all", or index
+)
 
-2. **Edit** `word/document.xml` directly with proper OOXML patterns (or use the helper scripts)
-
-3. **Repack**:
-   ```bash
-   cd unpacked && zip -r ../modified.docx *
-   # Or use the helper script:
-   python -m skills.docx.ooxml.scripts.pack unpacked/ modified.docx
-   ```
-
-### Schema Compliance
-- **Element ordering in `<w:pPr>`**: `<w:pStyle>`, `<w:numPr>`, `<w:spacing>`, `<w:ind>`, `<w:jc>`
-- **Whitespace**: Add `xml:space='preserve'` to `<w:t>` elements with leading/trailing spaces
-- **Unicode**: Escape characters in ASCII content: `"` becomes `&#8220;`
-- **RSIDs must be 8-digit hex**: Use values like `00AB1234` (only 0-9, A-F characters)
-
-### Tracked Change XML Patterns
-
-**Text Insertion:**
-```xml
-<w:ins w:id="1" w:author="Claude" w:date="2025-01-15T10:00:00Z">
-  <w:r w:rsidR="00AB1234">
-    <w:t>inserted text</w:t>
-  </w:r>
-</w:ins>
+# Paragraph formatting with tracking
+doc.format_paragraph_tracked(
+    containing="Section 1",
+    alignment="center",
+    spacing_after=12.0
+)
 ```
 
-**Text Deletion:**
-```xml
-<w:del w:id="2" w:author="Claude" w:date="2025-01-15T10:00:00Z">
-  <w:r w:rsidDel="00AB1234">
-    <w:delText>deleted text</w:delText>
-  </w:r>
-</w:del>
-```
+## Advanced: Raw OOXML Editing
 
-**Minimal Edit Principle:**
-Only mark text that actually changes. Keep ALL unchanged text outside `<w:del>`/`<w:ins>` tags.
+For scenarios not covered by python-docx-redline, you may need to manipulate the raw OOXML directly:
+- Modifying another author's tracked changes
+- Complex nested revision scenarios
+- Custom XML manipulations
 
-```xml
-<!-- BAD - Replaces entire sentence -->
-<w:del><w:r><w:delText>The term is 30 days.</w:delText></w:r></w:del>
-<w:ins><w:r><w:t>The term is 60 days.</w:t></w:r></w:ins>
+See **[ooxml.md](./ooxml.md)** for comprehensive documentation including:
+- XML patterns for tracked changes, tables, formatting
+- Schema compliance rules (element ordering, whitespace, RSIDs)
+- Helper scripts for unpacking/repacking documents
+- Document library (Python) for OOXML manipulation
 
-<!-- GOOD - Only marks what changed -->
-<w:r><w:t>The term is </w:t></w:r>
-<w:del><w:r><w:delText>30</w:delText></w:r></w:del>
-<w:ins><w:r><w:t>60</w:t></w:r></w:ins>
-<w:r><w:t> days.</w:t></w:r>
-```
+Quick reference for unpack/repack workflow:
+```bash
+# Unpack
+unzip document.docx -d unpacked/
 
-**Deleting Another Author's Insertion:**
-```xml
-<!-- Nest deletion inside the original insertion -->
-<w:ins w:author="Jane Smith" w:id="16">
-  <w:del w:author="Claude" w:id="40">
-    <w:r><w:delText>monthly</w:delText></w:r>
-  </w:del>
-</w:ins>
-<w:ins w:author="Claude" w:id="41">
-  <w:r><w:t>weekly</w:t></w:r>
-</w:ins>
-```
+# Edit word/document.xml
 
-**Restoring Another Author's Deletion:**
-```xml
-<!-- Leave their deletion unchanged, add new insertion after it -->
-<w:del w:author="Jane Smith" w:id="50">
-  <w:r><w:delText>within 30 days</w:delText></w:r>
-</w:del>
-<w:ins w:author="Claude" w:id="51">
-  <w:r><w:t>within 30 days</w:t></w:r>
-</w:ins>
-```
-
-### Document Content Patterns
-
-**Basic Structure:**
-```xml
-<w:p>
-  <w:r><w:t>Text content</w:t></w:r>
-</w:p>
-```
-
-**Headings:**
-```xml
-<w:p>
-  <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
-  <w:r><w:t>Section Heading</w:t></w:r>
-</w:p>
-```
-
-**Text Formatting:**
-```xml
-<!-- Bold -->
-<w:r><w:rPr><w:b/><w:bCs/></w:rPr><w:t>Bold</w:t></w:r>
-<!-- Italic -->
-<w:r><w:rPr><w:i/><w:iCs/></w:rPr><w:t>Italic</w:t></w:r>
-<!-- Underline -->
-<w:r><w:rPr><w:u w:val="single"/></w:rPr><w:t>Underlined</w:t></w:r>
-```
-
-**Tables:**
-```xml
-<w:tbl>
-  <w:tblPr>
-    <w:tblStyle w:val="TableGrid"/>
-    <w:tblW w:w="0" w:type="auto"/>
-  </w:tblPr>
-  <w:tblGrid>
-    <w:gridCol w:w="4675"/><w:gridCol w:w="4675"/>
-  </w:tblGrid>
-  <w:tr>
-    <w:tc>
-      <w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>
-      <w:p><w:r><w:t>Cell 1</w:t></w:r></w:p>
-    </w:tc>
-    <w:tc>
-      <w:tcPr><w:tcW w:w="4675" w:type="dxa"/></w:tcPr>
-      <w:p><w:r><w:t>Cell 2</w:t></w:r></w:p>
-    </w:tc>
-  </w:tr>
-</w:tbl>
+# Repack
+cd unpacked && zip -r ../modified.docx *
 ```
 
 ## Converting Documents to Images
@@ -577,8 +533,10 @@ Options:
 | Delete tracked text | - | **Best** | Possible |
 | Replace tracked text | - | **Best** | Possible |
 | Regex find/replace | - | **Best** | Manual |
-| Scoped edits | - | **Best** | Manual |
-| Batch from YAML | - | **Best** | Manual |
+| Scoped edits (section/dict/callable) | - | **Best** | Manual |
+| Batch operations (list or YAML) | - | **Best** | Manual |
+| Accept/reject all changes | - | **Best** | Manual |
+| Format text w/ tracking | - | **Best** | Manual |
 | Render to images | - | **Best** | Manual |
 | Add comments | - | **Best** | Possible |
 | Comments on tracked text | - | **Best** | Manual |
