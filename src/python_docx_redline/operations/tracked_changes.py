@@ -52,6 +52,48 @@ class TrackedChangeOperations:
         """
         self._document = document
 
+    def _select_matches(
+        self, matches: list[TextSpan], occurrence: int | list[int] | str, text: str
+    ) -> list[TextSpan]:
+        """Select target matches based on occurrence parameter.
+
+        Args:
+            matches: List of all matches found
+            occurrence: Which occurrence(s) to select - int (1-indexed), list of ints, or string
+            text: Original search text (for error messages)
+
+        Returns:
+            List of selected TextSpan matches
+
+        Raises:
+            AmbiguousTextError: If multiple matches and occurrence not specified
+            ValueError: If occurrence is out of range
+        """
+        if occurrence == "first" or occurrence == 1:
+            return [matches[0]]
+        elif occurrence == "last":
+            return [matches[-1]]
+        elif occurrence == "all":
+            return matches
+        elif isinstance(occurrence, list):
+            # Handle list of indices (1-indexed)
+            selected = []
+            for idx in occurrence:
+                if not isinstance(idx, int):
+                    raise ValueError(f"List elements must be integers, got {type(idx)}")
+                if not (1 <= idx <= len(matches)):
+                    raise ValueError(f"Occurrence {idx} out of range (1-{len(matches)})")
+                selected.append(matches[idx - 1])
+            return selected
+        elif isinstance(occurrence, int) and 1 <= occurrence <= len(matches):
+            return [matches[occurrence - 1]]
+        elif isinstance(occurrence, int):
+            raise ValueError(f"Occurrence {occurrence} out of range (1-{len(matches)})")
+        elif len(matches) > 1:
+            raise AmbiguousTextError(text, matches)
+        else:
+            return matches
+
     def _find_unique_match(
         self,
         text: str,
@@ -118,6 +160,7 @@ class TrackedChangeOperations:
         before: str | None = None,
         author: str | None = None,
         scope: str | dict | Any | None = None,
+        occurrence: int | list[int] | str = "first",
         regex: bool = False,
         enable_quote_normalization: bool = True,
     ) -> None:
@@ -133,6 +176,8 @@ class TrackedChangeOperations:
             before: The text or regex pattern to insert before (optional)
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            occurrence: Which occurrence(s) to insert at: 1 (first), 2 (second), "first",
+                "last", "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat anchor as a regex pattern (default: False)
             enable_quote_normalization: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
@@ -140,7 +185,8 @@ class TrackedChangeOperations:
         Raises:
             ValueError: If both 'after' and 'before' are specified, or if neither is specified
             TextNotFoundError: If the anchor text is not found
-            AmbiguousTextError: If multiple occurrences of anchor text are found
+            AmbiguousTextError: If multiple occurrences of anchor text are found and
+                occurrence not specified
             re.error: If regex=True and the pattern is invalid
         """
         # Validate parameters
@@ -153,25 +199,42 @@ class TrackedChangeOperations:
         anchor: str = after if after is not None else before  # type: ignore[assignment]
         insert_after = after is not None
 
-        # Find the anchor text
-        match = self._find_unique_match(anchor, scope, regex, enable_quote_normalization)
+        # Find all matches
+        all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+        matches = self._document._text_search.find_text(
+            anchor,
+            paragraphs,
+            regex=regex,
+            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+        )
 
-        # Generate and parse the insertion XML
+        if not matches:
+            suggestions = SuggestionGenerator.generate_suggestions(anchor, paragraphs)
+            raise TextNotFoundError(anchor, suggestions=suggestions)
+
+        # Select target matches based on occurrence
+        target_matches = self._select_matches(matches, occurrence, anchor)
+
+        # Generate insertion XML
         insertion_xml = self._document._xml_generator.create_insertion(text, author)
-        elements = self._parse_xml_elements(insertion_xml)
-        insertion_element = elements[0]
 
-        # Insert at the appropriate position
-        if insert_after:
-            self._insert_after_match(match, insertion_element)
-        else:
-            self._insert_before_match(match, insertion_element)
+        # Insert at each target match (process in reverse to preserve indices)
+        for match in reversed(target_matches):
+            elements = self._parse_xml_elements(insertion_xml)
+            insertion_element = elements[0]
+
+            if insert_after:
+                self._insert_after_match(match, insertion_element)
+            else:
+                self._insert_before_match(match, insertion_element)
 
     def delete(
         self,
         text: str,
         author: str | None = None,
         scope: str | dict | Any | None = None,
+        occurrence: int | list[int] | str = "first",
         regex: bool = False,
         enable_quote_normalization: bool = True,
     ) -> None:
@@ -184,25 +247,44 @@ class TrackedChangeOperations:
             text: The text or regex pattern to delete
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            occurrence: Which occurrence(s) to delete: 1 (first), 2 (second), "first", "last",
+                "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat 'text' as a regex pattern (default: False)
             enable_quote_normalization: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
 
         Raises:
             TextNotFoundError: If the text is not found
-            AmbiguousTextError: If multiple occurrences of text are found
+            AmbiguousTextError: If multiple occurrences of text are found and
+                occurrence not specified
             re.error: If regex=True and the pattern is invalid
         """
-        # Find the text to delete
-        match = self._find_unique_match(text, scope, regex, enable_quote_normalization)
+        # Find all matches
+        all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+        matches = self._document._text_search.find_text(
+            text,
+            paragraphs,
+            regex=regex,
+            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+        )
 
-        # Generate and parse the deletion XML
-        deletion_xml = self._document._xml_generator.create_deletion(text, author)
-        elements = self._parse_xml_elements(deletion_xml)
-        deletion_element = elements[0]
+        if not matches:
+            suggestions = SuggestionGenerator.generate_suggestions(text, paragraphs)
+            raise TextNotFoundError(text, suggestions=suggestions)
 
-        # Replace the matched text with deletion
-        self._replace_match_with_element(match, deletion_element)
+        # Select target matches based on occurrence
+        target_matches = self._select_matches(matches, occurrence, text)
+
+        # Delete each target match (process in reverse to preserve indices)
+        for match in reversed(target_matches):
+            # Generate and parse the deletion XML
+            deletion_xml = self._document._xml_generator.create_deletion(match.text, author)
+            elements = self._parse_xml_elements(deletion_xml)
+            deletion_element = elements[0]
+
+            # Replace the matched text with deletion
+            self._replace_match_with_element(match, deletion_element)
 
     def replace(
         self,
@@ -210,6 +292,7 @@ class TrackedChangeOperations:
         replace: str,
         author: str | None = None,
         scope: str | dict | Any | None = None,
+        occurrence: int | list[int] | str = "first",
         regex: bool = False,
         enable_quote_normalization: bool = True,
         show_context: bool = False,
@@ -231,6 +314,8 @@ class TrackedChangeOperations:
             replace: Replacement text (can include capture group references if regex=True)
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            occurrence: Which occurrence(s) to replace: 1 (first), 2 (second), "first", "last",
+                "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat 'find' as a regex pattern (default: False)
             enable_quote_normalization: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
@@ -241,34 +326,52 @@ class TrackedChangeOperations:
 
         Raises:
             TextNotFoundError: If the 'find' text is not found
-            AmbiguousTextError: If multiple occurrences of 'find' text are found
+            AmbiguousTextError: If multiple occurrences of 'find' text are found and
+                occurrence not specified
             re.error: If regex=True and the pattern is invalid
 
         Warnings:
             ContinuityWarning: If check_continuity=True and potential sentence fragment detected
         """
-        # Find the text to replace
-        match = self._find_unique_match(find, scope, regex, enable_quote_normalization)
-        matched_text = match.text
+        # Find all matches
+        all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+        matches = self._document._text_search.find_text(
+            find,
+            paragraphs,
+            regex=regex,
+            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+        )
 
-        # Show context preview if requested
-        if show_context:
-            self._log_context_preview(match, replace, context_chars)
+        if not matches:
+            suggestions = SuggestionGenerator.generate_suggestions(find, paragraphs)
+            raise TextNotFoundError(find, suggestions=suggestions)
 
-        # Handle capture group expansion for regex replacements
-        replacement_text = self._expand_replacement(match, replace, regex)
+        # Select target matches based on occurrence
+        target_matches = self._select_matches(matches, occurrence, find)
 
-        # Check continuity if requested
-        if check_continuity:
-            self._check_and_warn_continuity(match, replacement_text, context_chars)
+        # Replace each target match (process in reverse to preserve indices)
+        for match in reversed(target_matches):
+            matched_text = match.text
 
-        # Generate and parse deletion + insertion XMLs
-        deletion_xml = self._document._xml_generator.create_deletion(matched_text, author)
-        insertion_xml = self._document._xml_generator.create_insertion(replacement_text, author)
-        elements = self._parse_xml_elements(f"{deletion_xml}\n    {insertion_xml}")
+            # Show context preview if requested
+            if show_context:
+                self._log_context_preview(match, replace, context_chars)
 
-        # Replace the matched text with deletion + insertion
-        self._replace_match_with_elements(match, elements)
+            # Handle capture group expansion for regex replacements
+            replacement_text = self._expand_replacement(match, replace, regex)
+
+            # Check continuity if requested
+            if check_continuity:
+                self._check_and_warn_continuity(match, replacement_text, context_chars)
+
+            # Generate and parse deletion + insertion XMLs
+            deletion_xml = self._document._xml_generator.create_deletion(matched_text, author)
+            insertion_xml = self._document._xml_generator.create_insertion(replacement_text, author)
+            elements = self._parse_xml_elements(f"{deletion_xml}\n    {insertion_xml}")
+
+            # Replace the matched text with deletion + insertion
+            self._replace_match_with_elements(match, elements)
 
     def _log_context_preview(self, match: TextSpan, replacement: str, context_chars: int) -> None:
         """Log context preview for debugging."""

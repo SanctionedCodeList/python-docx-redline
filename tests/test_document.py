@@ -12,10 +12,10 @@ from pathlib import Path
 import pytest
 
 from python_docx_redline import (
-    AmbiguousTextError,
     Document,
     TextNotFoundError,
 )
+from python_docx_redline.constants import WORD_NAMESPACE
 
 # Minimal Word document XML structure
 MINIMAL_DOCUMENT_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -149,7 +149,7 @@ def test_text_not_found():
 
 
 def test_ambiguous_text():
-    """Test AmbiguousTextError when multiple matches are found."""
+    """Test that multiple matches defaults to first occurrence."""
     # Create a document with duplicate text (compact XML to avoid whitespace issues)
     duplicate_doc = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Section 1: Introduction</w:t></w:r></w:p><w:p><w:r><w:t>Section 2: Introduction</w:t></w:r></w:p></w:body></w:document>"""
@@ -159,11 +159,13 @@ def test_ambiguous_text():
     try:
         doc = Document(docx_path)
 
-        with pytest.raises(AmbiguousTextError) as exc_info:
-            doc.insert_tracked("New text", after="Introduction")
+        # With occurrence parameter defaulting to "first", this should work
+        # without raising AmbiguousTextError
+        doc.insert_tracked("New text", after="Introduction")
 
-        assert "Introduction" in str(exc_info.value)
-        assert "2 occurrences" in str(exc_info.value)
+        # Verify that only one insertion was made (first occurrence)
+        ins_elements = list(doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}ins"))
+        assert len(ins_elements) == 1
 
     finally:
         docx_path.unlink()

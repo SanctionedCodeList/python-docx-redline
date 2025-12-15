@@ -23,6 +23,7 @@ from lxml import etree
 
 from .author import AuthorIdentity
 from .constants import WORD_NAMESPACE
+from .match import Match
 from .operations.batch import BatchOperations
 from .operations.change_management import ChangeManagement
 from .operations.comments import CommentOperations
@@ -37,6 +38,7 @@ from .operations.tables import TableOperations
 from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
 from .results import ComparisonStats, EditResult, FormatResult
+from .scope import ScopeEvaluator
 from .text_search import TextSearch, TextSpan
 from .tracked_xml import TrackedXMLGenerator
 from .validation import ValidationError
@@ -532,6 +534,207 @@ class Document:
 
         return False
 
+    def find_all(
+        self,
+        text: str,
+        regex: bool = False,
+        case_sensitive: bool = True,
+        scope: str | dict | Any | None = None,
+        context_chars: int = 40,
+    ) -> list[Match]:
+        """Find all occurrences of text in the document with location metadata.
+
+        This method returns all matches with rich context information, making it
+        easy to preview what text will be matched before performing operations.
+        It's especially useful for understanding ambiguous text searches.
+
+        Args:
+            text: The text or regex pattern to search for
+            regex: Whether to treat text as a regex pattern (default: False)
+            case_sensitive: Whether to perform case-sensitive search (default: True)
+            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            context_chars: Number of characters to show before/after match (default: 40)
+
+        Returns:
+            List of Match objects with text, context, location, and metadata
+
+        Raises:
+            re.error: If regex=True and the pattern is invalid
+
+        Example:
+            >>> # Find all occurrences of a phrase
+            >>> matches = doc.find_all("production products")
+            >>> print(f"Found {len(matches)} occurrences")
+            >>> for match in matches:
+            ...     print(f"[{match.index}] {match.location}: {match.context}")
+            Found 2 occurrences
+            [0] body: ...Therefore, production products utilizing...
+            [1] table:0:row:45:cell:1: ...Therefore, production products utilizing...
+            >>>
+            >>> # Use regex
+            >>> matches = doc.find_all(r"\\d+ days", regex=True)
+            >>>
+            >>> # Case-insensitive search
+            >>> matches = doc.find_all("IMPORTANT", case_sensitive=False)
+            >>>
+            >>> # Search only in tables
+            >>> matches = doc.find_all("text", scope={"location": "tables"})
+        """
+        # Get all paragraphs, then filter by scope
+        all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        # Find all text spans using TextSearch
+        spans = self._text_search.find_text(
+            text, paragraphs, case_sensitive=case_sensitive, regex=regex
+        )
+
+        # Convert TextSpans to Match objects with rich metadata
+        matches = []
+        for idx, span in enumerate(spans):
+            # Get paragraph index within ALL paragraphs (not just filtered)
+            paragraph_index = all_paragraphs.index(span.paragraph)
+
+            # Get full paragraph text
+            text_elements = span.paragraph.findall(f".//{{{WORD_NAMESPACE}}}t")
+            paragraph_text = "".join(elem.text or "" for elem in text_elements)
+
+            # Determine location string
+            location = self._get_location_string(span.paragraph)
+
+            # Get context with custom size
+            context = self._get_context_with_size(span, context_chars)
+
+            # Create Match object
+            match = Match(
+                index=idx,
+                text=span.text,
+                context=context,
+                paragraph_index=paragraph_index,
+                paragraph_text=paragraph_text,
+                location=location,
+                span=span,
+            )
+            matches.append(match)
+
+        return matches
+
+    def _get_location_string(self, paragraph: Any) -> str:
+        """Get a human-readable location string for a paragraph.
+
+        Returns strings like:
+        - "body" for main document body
+        - "table:0:row:2:cell:1" for table cells
+        - "header:0" for headers
+        - "footer:0" for footers
+
+        Args:
+            paragraph: The paragraph Element
+
+        Returns:
+            A human-readable location string
+        """
+        # Check if in table
+        parent = paragraph.getparent()
+        while parent is not None:
+            tag = parent.tag
+            if tag == f"{{{WORD_NAMESPACE}}}tc":  # Table cell
+                # Find table, row, and cell indices
+                return self._get_table_location(parent)
+            elif tag == f"{{{WORD_NAMESPACE}}}hdr":  # Header
+                # Find which header (first, default, even)
+                return "header"
+            elif tag == f"{{{WORD_NAMESPACE}}}ftr":  # Footer
+                return "footer"
+            elif tag == f"{{{WORD_NAMESPACE}}}footnote":
+                return "footnote"
+            elif tag == f"{{{WORD_NAMESPACE}}}endnote":
+                return "endnote"
+            parent = parent.getparent()
+
+        return "body"
+
+    def _get_table_location(self, cell: Any) -> str:
+        """Get detailed location string for a table cell.
+
+        Args:
+            cell: The table cell Element
+
+        Returns:
+            Location string like "table:0:row:2:cell:1"
+        """
+        # Find the row
+        row = cell.getparent()
+        if row is None or row.tag != f"{{{WORD_NAMESPACE}}}tr":
+            return "table"
+
+        # Find the table body
+        tbl_body = row.getparent()
+        if tbl_body is None:
+            return "table"
+
+        # Find the table
+        table = tbl_body.getparent() if tbl_body.tag != f"{{{WORD_NAMESPACE}}}tbl" else tbl_body
+        if table is None or table.tag != f"{{{WORD_NAMESPACE}}}tbl":
+            return "table"
+
+        # Get all tables in document
+        all_tables = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}tbl"))
+        try:
+            table_idx = all_tables.index(table)
+        except ValueError:
+            table_idx = 0
+
+        # Get row index within table
+        all_rows = list(table.iter(f"{{{WORD_NAMESPACE}}}tr"))
+        try:
+            row_idx = all_rows.index(row)
+        except ValueError:
+            row_idx = 0
+
+        # Get cell index within row
+        all_cells = list(row.iter(f"{{{WORD_NAMESPACE}}}tc"))
+        try:
+            cell_idx = all_cells.index(cell)
+        except ValueError:
+            cell_idx = 0
+
+        return f"table:{table_idx}:row:{row_idx}:cell:{cell_idx}"
+
+    def _get_context_with_size(self, span: TextSpan, context_chars: int) -> str:
+        """Get surrounding context with custom size.
+
+        Args:
+            span: The TextSpan to get context for
+            context_chars: Number of characters before/after to include
+
+        Returns:
+            Context string with ellipsis if needed
+        """
+        # Extract text only from w:t elements
+        text_elements = span.paragraph.findall(f".//{{{WORD_NAMESPACE}}}t")
+        para_text = "".join(elem.text or "" for elem in text_elements)
+        matched = span.text
+
+        # Find the match position in the full paragraph text
+        match_pos = para_text.find(matched)
+        if match_pos == -1:
+            return matched
+
+        # Get context window
+        start = max(0, match_pos - context_chars)
+        end = min(len(para_text), match_pos + len(matched) + context_chars)
+
+        context = para_text[start:end]
+
+        # Add ellipsis if needed
+        if start > 0:
+            context = "..." + context
+        if end < len(para_text):
+            context = context + "..."
+
+        return context
+
     def insert_tracked(
         self,
         text: str,
@@ -539,6 +742,7 @@ class Document:
         before: str | None = None,
         author: str | None = None,
         scope: str | dict | Any | None = None,
+        occurrence: int | list[int] | str = "first",
         regex: bool = False,
         enable_quote_normalization: bool = True,
     ) -> None:
@@ -554,6 +758,8 @@ class Document:
             before: The text or regex pattern to insert before (optional)
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            occurrence: Which occurrence(s) to use: 1 (first), 2 (second), "first", "last",
+                "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat anchor as a regex pattern (default: False)
             enable_quote_normalization: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
@@ -561,8 +767,19 @@ class Document:
         Raises:
             ValueError: If both 'after' and 'before' are specified, or if neither is specified
             TextNotFoundError: If the anchor text is not found
-            AmbiguousTextError: If multiple occurrences of anchor text are found
+            AmbiguousTextError: If multiple occurrences of anchor text are found and
+                occurrence not specified
             re.error: If regex=True and the pattern is invalid
+
+        Example:
+            >>> # Insert after first occurrence
+            >>> doc.insert_tracked("new text", after="anchor")
+            >>>
+            >>> # Insert after all occurrences
+            >>> doc.insert_tracked("note:", after="Section", occurrence="all")
+            >>>
+            >>> # Insert after specific occurrences (1-indexed)
+            >>> doc.insert_tracked("text", after="marker", occurrence=[1, 3])
         """
         self._tracked_ops.insert(
             text,
@@ -570,6 +787,7 @@ class Document:
             before=before,
             author=author,
             scope=scope,
+            occurrence=occurrence,
             regex=regex,
             enable_quote_normalization=enable_quote_normalization,
         )
@@ -704,6 +922,7 @@ class Document:
         text: str,
         author: str | None = None,
         scope: str | dict | Any | None = None,
+        occurrence: int | list[int] | str = "first",
         regex: bool = False,
         enable_quote_normalization: bool = True,
     ) -> None:
@@ -716,19 +935,33 @@ class Document:
             text: The text or regex pattern to delete
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            occurrence: Which occurrence(s) to delete: 1 (first), 2 (second), "first", "last",
+                "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat 'text' as a regex pattern (default: False)
             enable_quote_normalization: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
 
         Raises:
             TextNotFoundError: If the text is not found
-            AmbiguousTextError: If multiple occurrences of text are found
+            AmbiguousTextError: If multiple occurrences of text are found and
+                occurrence not specified
             re.error: If regex=True and the pattern is invalid
+
+        Example:
+            >>> # Delete first occurrence
+            >>> doc.delete_tracked("old text")
+            >>>
+            >>> # Delete all occurrences
+            >>> doc.delete_tracked("obsolete", occurrence="all")
+            >>>
+            >>> # Delete specific occurrences (1-indexed)
+            >>> doc.delete_tracked("text", occurrence=[1, 3])
         """
         self._tracked_ops.delete(
             text,
             author=author,
             scope=scope,
+            occurrence=occurrence,
             regex=regex,
             enable_quote_normalization=enable_quote_normalization,
         )
@@ -739,6 +972,7 @@ class Document:
         replace: str,
         author: str | None = None,
         scope: str | dict | Any | None = None,
+        occurrence: int | list[int] | str = "first",
         regex: bool = False,
         enable_quote_normalization: bool = True,
         show_context: bool = False,
@@ -760,6 +994,8 @@ class Document:
             replace: Replacement text (can include capture group references if regex=True)
             author: Optional author override (uses document author if None)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            occurrence: Which occurrence(s) to replace: 1 (first), 2 (second), "first",
+                "last", "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat 'find' as a regex pattern (default: False)
             enable_quote_normalization: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
@@ -770,7 +1006,8 @@ class Document:
 
         Raises:
             TextNotFoundError: If the 'find' text is not found
-            AmbiguousTextError: If multiple occurrences of 'find' text are found
+            AmbiguousTextError: If multiple occurrences of 'find' text are found and
+                occurrence not specified
             re.error: If regex=True and the pattern is invalid
 
         Warnings:
@@ -779,6 +1016,12 @@ class Document:
         Example:
             >>> # Simple replacement
             >>> doc.replace_tracked("30 days", "45 days")
+            >>>
+            >>> # Replace all occurrences
+            >>> doc.replace_tracked("old", "new", occurrence="all")
+            >>>
+            >>> # Replace specific occurrences (1-indexed)
+            >>> doc.replace_tracked("text", "updated", occurrence=[1, 3])
             >>>
             >>> # Regex with capture groups
             >>> doc.replace_tracked(r"(\\d+) days", r"\\1 business days", regex=True)
@@ -801,6 +1044,7 @@ class Document:
             replace,
             author=author,
             scope=scope,
+            occurrence=occurrence,
             regex=regex,
             enable_quote_normalization=enable_quote_normalization,
             show_context=show_context,

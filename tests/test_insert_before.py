@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from python_docx_redline import Document
-from python_docx_redline.errors import AmbiguousTextError, TextNotFoundError
+from python_docx_redline.errors import TextNotFoundError
 
 
 def create_test_document(text: str) -> Path:
@@ -170,13 +170,19 @@ def test_insert_before_not_found() -> None:
 
 
 def test_insert_before_ambiguous() -> None:
-    """Raises AmbiguousTextError when before anchor appears multiple times."""
+    """Test that multiple matches defaults to first occurrence with before parameter."""
     doc_path = create_test_document("Hello world. Hello universe.")
     try:
         doc = Document(doc_path)
 
-        with pytest.raises(AmbiguousTextError):
-            doc.insert_tracked("Greetings! ", before="Hello")
+        # With occurrence parameter defaulting to "first", this should work
+        # without raising AmbiguousTextError (inserts before first "Hello")
+        doc.insert_tracked("Greetings! ", before="Hello")
+
+        # Verify that text was inserted and there's only one insertion
+        text = doc.get_text()
+        # Should be "Greetings! Hello world. Hello universe."
+        assert text.startswith("Greetings! Hello")
 
     finally:
         doc_path.unlink()

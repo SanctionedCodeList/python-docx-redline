@@ -32,6 +32,7 @@ __all__ = [
     "ContinuityWarning",
     "TextSearch",
     "TextSpan",
+    "Match",
     "TrackedXMLGenerator",
     "SuggestionGenerator",
     "ScopeEvaluator",
@@ -100,6 +101,9 @@ from .export import (
     generate_change_report,
 )
 
+# Import text search and match
+from .match import Match
+
 # Import model classes
 from .models.comment import Comment, CommentRange
 from .models.footnote import Endnote, Footnote
@@ -137,8 +141,6 @@ from .scope import ScopeEvaluator
 
 # Import suggestion generator
 from .suggestions import SuggestionGenerator
-
-# Import text search
 from .text_search import TextSearch, TextSpan
 
 # Import XML generation
