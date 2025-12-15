@@ -17,6 +17,7 @@ __author__ = "Parker Hancock"
 __all__ = [
     "Document",
     "compare_documents",
+    "OOXMLPackage",
     "AuthorIdentity",
     "from_python_docx",
     "to_python_docx",
@@ -62,7 +63,6 @@ from .author import AuthorIdentity
 # Import compatibility helpers (python-docx integration)
 from .compat import from_python_docx, to_python_docx
 
-# Import error classes
 # Import document class and standalone functions
 from .document import Document, compare_documents
 from .errors import (
@@ -91,6 +91,9 @@ from .models.header_footer import Footer, Header, HeaderFooterType
 from .models.paragraph import Paragraph
 from .models.section import Section
 from .models.tracked_change import ChangeType, TrackedChange
+
+# Import package class
+from .package import OOXMLPackage
 
 # Import result types
 from .results import AcceptResult, ComparisonStats, EditResult, FormatResult, RejectResult

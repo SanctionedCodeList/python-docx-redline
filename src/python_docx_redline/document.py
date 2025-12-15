@@ -9,9 +9,6 @@ import difflib
 import io
 import logging
 import re
-import shutil
-import tempfile
-import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
@@ -36,6 +33,7 @@ from .minimal_diff import (
     apply_minimal_edits_to_paragraph,
     should_use_minimal_editing,
 )
+from .package import OOXMLPackage
 from .results import ComparisonStats, EditResult, FormatResult
 from .scope import ScopeEvaluator
 from .suggestions import SuggestionGenerator
@@ -137,8 +135,7 @@ class Document:
             self._author_identity = author
             self.author = author.display_name
 
-        self._temp_dir: Path | None = None
-        self._is_zip = False
+        self._package: OOXMLPackage | None = None
 
         # Initialize components
         self._text_search = TextSearch()
@@ -153,7 +150,8 @@ class Document:
         """Load and parse the Word document XML.
 
         If the document is a .docx file (ZIP archive), it will be extracted
-        to a temporary directory. The main document.xml is then parsed.
+        to a temporary directory using OOXMLPackage. The main document.xml
+        is then parsed.
 
         Supports loading from file paths or in-memory streams (BytesIO).
 
@@ -162,38 +160,27 @@ class Document:
         """
         # Determine source: stream or path
         if self._source_stream is not None:
-            zip_source: Path | BinaryIO = self._source_stream
+            source: Path | BinaryIO = self._source_stream
             source_desc = "<in-memory document>"
         else:
             assert self.path is not None
-            if not self.path.exists():
-                raise ValidationError(f"Document not found: {self.path}")
-            zip_source = self.path
+            source = self.path
             source_desc = str(self.path)
 
-        # Check if it's a ZIP file (.docx)
+        # Try to open as ZIP package (.docx)
         try:
-            if zipfile.is_zipfile(zip_source):
-                self._is_zip = True
-                # Reset stream position if it was checked by is_zipfile
-                if self._source_stream is not None and hasattr(self._source_stream, "seek"):
-                    self._source_stream.seek(0)
-                self._extract_docx(zip_source)
-            else:
-                if self._source_stream is not None:
-                    raise ValidationError("In-memory source must be a valid .docx (ZIP) file")
-                # Assume it's already an unpacked XML file
-                self._is_zip = False
-                self._temp_dir = self.path.parent  # type: ignore
-        except ValidationError:
-            raise
-        except Exception as e:
-            raise ValidationError(f"Failed to load document: {e}") from e
+            self._package = OOXMLPackage.open(source)
+        except ValidationError as e:
+            # Not a valid ZIP - check if it's raw XML
+            if self._source_stream is not None:
+                raise ValidationError("In-memory source must be a valid .docx (ZIP) file") from e
+            # Assume it's already an unpacked XML file
+            self._package = None
 
         # Parse the document.xml
         try:
-            if self._is_zip:
-                document_xml = self._temp_dir / "word" / "document.xml"  # type: ignore
+            if self._package is not None:
+                document_xml = self._package.get_part_path("word/document.xml")
             else:
                 document_xml = self.path  # type: ignore
 
@@ -212,22 +199,16 @@ class Document:
         except Exception as e:
             raise ValidationError(f"Failed to parse document XML: {e}") from e
 
-    def _extract_docx(self, source: Path | BinaryIO) -> None:
-        """Extract the .docx ZIP archive to a temporary directory.
+    # Backward compatibility properties for package access
+    @property
+    def _temp_dir(self) -> Path | None:
+        """Get the temp directory from the package (backward compatibility)."""
+        return self._package.temp_dir if self._package is not None else None
 
-        Args:
-            source: Path to the .docx file or a file-like object containing it
-        """
-        self._temp_dir = Path(tempfile.mkdtemp(prefix="python_docx_redline_"))
-
-        try:
-            with zipfile.ZipFile(source, "r") as zip_ref:
-                zip_ref.extractall(self._temp_dir)
-        except Exception as e:
-            # Clean up on failure
-            if self._temp_dir and self._temp_dir.exists():
-                shutil.rmtree(self._temp_dir)
-            raise ValidationError(f"Failed to extract .docx file: {e}") from e
+    @property
+    def _is_zip(self) -> bool:
+        """Check if this is a ZIP package (backward compatibility)."""
+        return self._package is not None
 
     # View capabilities (Phase 3)
 
@@ -5138,59 +5119,6 @@ class Document:
                 # Remove cell without tracking
                 row_elem.remove(cell_to_delete)
 
-    def _fix_encoding_declarations(self, directory: Path) -> None:
-        """Fix encoding declarations in all XML files to use UTF-8.
-
-        OOXML specification requires UTF-8 or UTF-16 encoding, but some tools
-        (including Microsoft Word in certain cases) generate files with encoding="ASCII".
-        This causes validation failures and documents that won't open in Word.
-
-        This method fixes all XML files in the directory tree to use encoding="UTF-8".
-
-        Args:
-            directory: Root directory containing unpacked .docx files
-        """
-        import re
-
-        # Find all XML and .rels files
-        xml_files = list(directory.rglob("*.xml")) + list(directory.rglob("*.rels"))
-
-        for xml_file in xml_files:
-            try:
-                # Read the file
-                with open(xml_file, "rb") as f:
-                    data = f.read()
-
-                # Decode and check if it has an encoding declaration
-                try:
-                    text = data.decode("utf-8")
-                except UnicodeDecodeError:
-                    text = data.decode("latin-1")
-
-                # Look for encoding declaration
-                pattern = r'(<\?xml[^>]*encoding=)["\']([^"\']*)["\']'
-                match = re.search(pattern, text[:200])
-
-                if match:
-                    encoding = match.group(2).upper()
-                    # Only fix if it's not already UTF-8 or UTF-16
-                    if encoding not in ["UTF-8", "UTF-16", "UTF-16LE", "UTF-16BE"]:
-                        # Replace encoding declaration with UTF-8
-                        new_text = re.sub(
-                            pattern,
-                            r'\1"UTF-8"',
-                            text,
-                            count=1,
-                        )
-
-                        # Write back as UTF-8
-                        with open(xml_file, "wb") as f:
-                            f.write(new_text.encode("utf-8"))
-
-            except Exception:
-                # Log but don't fail - validation will catch serious issues
-                pass
-
     def _get_detailed_context(self, match: Any, context_chars: int = 50) -> tuple[str, str, str]:
         """Extract detailed context around a match for preview.
 
@@ -5361,19 +5289,9 @@ class Document:
             output_path = Path(output_path)
 
         try:
-            if self._is_zip and self._temp_dir:
-                # Write the modified XML back to the temp directory
-                document_xml = self._temp_dir / "word" / "document.xml"
-                self.xml_tree.write(
-                    str(document_xml),
-                    encoding="utf-8",
-                    xml_declaration=True,
-                    pretty_print=False,
-                )
-
-                # Fix encoding declarations in all XML files
-                # OOXML spec requires UTF-8 or UTF-16, but some tools create files with ASCII
-                self._fix_encoding_declarations(self._temp_dir)
+            if self._package is not None:
+                # Write the modified XML back to the package
+                self._package.set_part("word/document.xml", self.xml_root)
 
                 # Validate the full document structure before creating ZIP
                 # This catches OOXML spec violations that would produce broken Word files
@@ -5381,7 +5299,7 @@ class Document:
                     from .validation_docx import DOCXSchemaValidator
 
                     validator = DOCXSchemaValidator(
-                        unpacked_dir=self._temp_dir,
+                        unpacked_dir=self._package.temp_dir,
                         original_file=self.path,
                         verbose=False,
                     )
@@ -5396,15 +5314,10 @@ class Document:
                             errors=error_list,
                         )
 
-                # Create a new .docx ZIP file
-                with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zip_ref:
-                    # Add all files from temp directory
-                    for file in self._temp_dir.rglob("*"):
-                        if file.is_file():
-                            arcname = file.relative_to(self._temp_dir)
-                            zip_ref.write(file, arcname)
+                # Save the package to the output path
+                self._package.save(output_path)
             else:
-                # Save XML directly
+                # Save XML directly (raw XML file, not a package)
                 self.xml_tree.write(
                     str(output_path),
                     encoding="utf-8",
@@ -5443,28 +5356,19 @@ class Document:
             >>> doc_bytes = doc.save_to_bytes()
             >>> # Store in database, send over network, etc.
         """
-        if not self._is_zip or not self._temp_dir:
+        if self._package is None:
             raise ValidationError("save_to_bytes only supported for .docx files")
 
         try:
-            # Write the modified XML back to the temp directory
-            document_xml = self._temp_dir / "word" / "document.xml"
-            self.xml_tree.write(
-                str(document_xml),
-                encoding="utf-8",
-                xml_declaration=True,
-                pretty_print=False,
-            )
-
-            # Fix encoding declarations in all XML files
-            self._fix_encoding_declarations(self._temp_dir)
+            # Write the modified XML back to the package
+            self._package.set_part("word/document.xml", self.xml_root)
 
             # Validate if requested and we have an original file to compare against
             if validate and self.path is not None:
                 from .validation_docx import DOCXSchemaValidator
 
                 validator = DOCXSchemaValidator(
-                    unpacked_dir=self._temp_dir,
+                    unpacked_dir=self._package.temp_dir,
                     original_file=self.path,
                     verbose=False,
                 )
@@ -5476,16 +5380,8 @@ class Document:
                         errors=error_list,
                     )
 
-            # Create ZIP in memory
-            buffer = io.BytesIO()
-            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zip_ref:
-                for file in self._temp_dir.rglob("*"):
-                    if file.is_file():
-                        arcname = file.relative_to(self._temp_dir)
-                        zip_ref.write(file, arcname)
-
-            buffer.seek(0)
-            return buffer.read()
+            # Save to bytes using the package
+            return self._package.save_to_bytes()
 
         except ValidationError:
             raise
@@ -7456,13 +7352,9 @@ class Document:
                         parent.insert(index + i, elem)
 
     def __del__(self) -> None:
-        """Clean up temporary directory on object destruction."""
-        if self._temp_dir and self._temp_dir.exists() and self._is_zip:
-            try:
-                shutil.rmtree(self._temp_dir)
-            except Exception:
-                # Ignore cleanup errors
-                pass
+        """Clean up package resources on object destruction."""
+        if self._package is not None:
+            self._package.close()
 
     def __enter__(self) -> "Document":
         """Context manager support."""
@@ -7470,7 +7362,8 @@ class Document:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Context manager cleanup."""
-        self.__del__()
+        if self._package is not None:
+            self._package.close()
 
 
 def compare_documents(
