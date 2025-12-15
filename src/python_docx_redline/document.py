@@ -34,6 +34,7 @@ from .minimal_diff import (
     apply_minimal_edits_to_paragraph,
     should_use_minimal_editing,
 )
+from .operations.change_management import ChangeManagement
 from .operations.comments import CommentOperations
 from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
@@ -227,6 +228,13 @@ class Document:
         if not hasattr(self, "_tracked_ops_instance"):
             self._tracked_ops_instance = TrackedChangeOperations(self)
         return self._tracked_ops_instance
+
+    @property
+    def _change_mgmt(self) -> ChangeManagement:
+        """Get the ChangeManagement instance (lazy initialization)."""
+        if not hasattr(self, "_change_mgmt_instance"):
+            self._change_mgmt_instance = ChangeManagement(self)
+        return self._change_mgmt_instance
 
     # View capabilities (Phase 3)
 
@@ -2398,11 +2406,9 @@ class Document:
 
         This is typically used as a preprocessing step before making new edits.
         """
-        self.accept_insertions()
-        self.accept_deletions()
-        self.accept_format_changes()
+        self._change_mgmt.accept_all()
 
-    # Helper methods for change management
+    # Helper methods
 
     def _get_paragraph_text(self, para: Any) -> str:
         """Extract text from a paragraph element.
@@ -2416,54 +2422,6 @@ class Document:
         text_elements = para.findall(f".//{{{WORD_NAMESPACE}}}t")
         return "".join(elem.text or "" for elem in text_elements)
 
-    def _unwrap_element(self, element: Any) -> None:
-        """Unwrap an element by moving its children to its parent.
-
-        Args:
-            element: The element to unwrap
-        """
-        parent = element.getparent()
-        if parent is None:
-            return
-
-        # Get the position of the element
-        elem_index = list(parent).index(element)
-
-        # Move all children to parent
-        for child in list(element):
-            parent.insert(elem_index, child)
-            elem_index += 1
-
-        # Remove the wrapper
-        parent.remove(element)
-
-    def _unwrap_deletion(self, del_elem: Any) -> None:
-        """Unwrap a deletion element, converting w:delText back to w:t.
-
-        When rejecting a deletion, we need to restore the deleted text by:
-        1. Converting all <w:delText> elements to <w:t>
-        2. Unwrapping the <w:del> element
-
-        Args:
-            del_elem: The <w:del> element to unwrap
-        """
-        # First, convert all w:delText to w:t within this deletion
-        for deltext in del_elem.iter(f"{{{WORD_NAMESPACE}}}delText"):
-            deltext.tag = f"{{{WORD_NAMESPACE}}}t"
-
-        # Then unwrap the deletion element
-        self._unwrap_element(del_elem)
-
-    def _remove_element(self, element: Any) -> None:
-        """Remove an element from its parent.
-
-        Args:
-            element: The element to remove
-        """
-        parent = element.getparent()
-        if parent is not None:
-            parent.remove(element)
-
     # Accept/Reject by type
 
     def accept_insertions(self) -> int:
@@ -2474,10 +2432,7 @@ class Document:
         Returns:
             Number of insertions accepted
         """
-        insertions = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}ins"))
-        for ins in insertions:
-            self._unwrap_element(ins)
-        return len(insertions)
+        return self._change_mgmt.accept_insertions()
 
     def reject_insertions(self) -> int:
         """Reject all tracked insertions in the document.
@@ -2487,10 +2442,7 @@ class Document:
         Returns:
             Number of insertions rejected
         """
-        insertions = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}ins"))
-        for ins in insertions:
-            self._remove_element(ins)
-        return len(insertions)
+        return self._change_mgmt.reject_insertions()
 
     def accept_deletions(self) -> int:
         """Accept all tracked deletions in the document.
@@ -2500,10 +2452,7 @@ class Document:
         Returns:
             Number of deletions accepted
         """
-        deletions = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del"))
-        for del_elem in deletions:
-            self._remove_element(del_elem)
-        return len(deletions)
+        return self._change_mgmt.accept_deletions()
 
     def reject_deletions(self) -> int:
         """Reject all tracked deletions in the document.
@@ -2514,10 +2463,7 @@ class Document:
         Returns:
             Number of deletions rejected
         """
-        deletions = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del"))
-        for del_elem in deletions:
-            self._unwrap_deletion(del_elem)
-        return len(deletions)
+        return self._change_mgmt.reject_deletions()
 
     def accept_format_changes(self) -> int:
         """Accept all tracked formatting changes in the document.
@@ -2528,23 +2474,7 @@ class Document:
         Returns:
             Number of formatting changes accepted
         """
-        count = 0
-
-        # Accept run property changes (character formatting)
-        for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
-            parent = rpr_change.getparent()
-            if parent is not None:
-                parent.remove(rpr_change)
-                count += 1
-
-        # Accept paragraph property changes
-        for ppr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange")):
-            parent = ppr_change.getparent()
-            if parent is not None:
-                parent.remove(ppr_change)
-                count += 1
-
-        return count
+        return self._change_mgmt.accept_format_changes()
 
     def reject_format_changes(self) -> int:
         """Reject all tracked formatting changes in the document.
@@ -2555,73 +2485,7 @@ class Document:
         Returns:
             Number of formatting changes rejected
         """
-        from copy import deepcopy
-
-        count = 0
-
-        # Reject run property changes - restore previous formatting
-        for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
-            parent_rpr = rpr_change.getparent()
-            if parent_rpr is None:
-                continue
-
-            # Get the previous rPr from inside the change element
-            previous_rpr = rpr_change.find(f"{{{WORD_NAMESPACE}}}rPr")
-
-            # Replace parent's children with previous state (except rPrChange)
-            # First, collect children to remove (excluding the change element)
-            children_to_remove = [
-                child for child in list(parent_rpr) if child.tag != f"{{{WORD_NAMESPACE}}}rPrChange"
-            ]
-            for child in children_to_remove:
-                parent_rpr.remove(child)
-
-            # Remove the rPrChange element
-            parent_rpr.remove(rpr_change)
-
-            # Add back the previous properties
-            if previous_rpr is not None:
-                for child in previous_rpr:
-                    parent_rpr.append(deepcopy(child))
-
-            count += 1
-
-        # Reject paragraph property changes - restore previous formatting
-        for ppr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange")):
-            parent_ppr = ppr_change.getparent()
-            if parent_ppr is None:
-                continue
-
-            # Get the previous pPr from inside the change element
-            previous_ppr = ppr_change.find(f"{{{WORD_NAMESPACE}}}pPr")
-
-            # Replace parent's children with previous state (except pPrChange and rPr)
-            # Note: rPr inside pPr is for paragraph mark formatting, keep it separate
-            children_to_remove = [
-                child
-                for child in list(parent_ppr)
-                if child.tag
-                not in (
-                    f"{{{WORD_NAMESPACE}}}pPrChange",
-                    f"{{{WORD_NAMESPACE}}}rPr",
-                )
-            ]
-            for child in children_to_remove:
-                parent_ppr.remove(child)
-
-            # Remove the pPrChange element
-            parent_ppr.remove(ppr_change)
-
-            # Add back the previous properties (insert at beginning, before rPr)
-            if previous_ppr is not None:
-                insert_idx = 0
-                for child in previous_ppr:
-                    parent_ppr.insert(insert_idx, deepcopy(child))
-                    insert_idx += 1
-
-            count += 1
-
-        return count
+        return self._change_mgmt.reject_format_changes()
 
     def reject_all_changes(self) -> None:
         """Reject all tracked changes in the document.
@@ -2632,9 +2496,7 @@ class Document:
         - <w:rPrChange> elements restore previous formatting
         - <w:pPrChange> elements restore previous formatting
         """
-        self.reject_insertions()
-        self.reject_deletions()
-        self.reject_format_changes()
+        self._change_mgmt.reject_all()
 
     # Accept/Reject by change ID
 
@@ -2650,37 +2512,7 @@ class Document:
         Example:
             >>> doc.accept_change("5")
         """
-        change_id_str = str(change_id)
-
-        # Search for insertion with this ID
-        for ins in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}ins"):
-            if ins.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
-                self._unwrap_element(ins)
-                return
-
-        # Search for deletion with this ID
-        for del_elem in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del"):
-            if del_elem.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
-                self._remove_element(del_elem)
-                return
-
-        # Search for run property change with this ID
-        for rpr_change in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange"):
-            if rpr_change.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
-                parent = rpr_change.getparent()
-                if parent is not None:
-                    parent.remove(rpr_change)
-                return
-
-        # Search for paragraph property change with this ID
-        for ppr_change in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange"):
-            if ppr_change.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
-                parent = ppr_change.getparent()
-                if parent is not None:
-                    parent.remove(ppr_change)
-                return
-
-        raise ValueError(f"No tracked change found with ID: {change_id}")
+        self._change_mgmt.accept_change(change_id)
 
     def reject_change(self, change_id: str | int) -> None:
         """Reject a specific tracked change by its ID.
@@ -2694,62 +2526,7 @@ class Document:
         Example:
             >>> doc.reject_change("5")
         """
-        from copy import deepcopy
-
-        change_id_str = str(change_id)
-
-        # Search for insertion with this ID
-        for ins in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}ins"):
-            if ins.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
-                self._remove_element(ins)
-                return
-
-        # Search for deletion with this ID
-        for del_elem in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del"):
-            if del_elem.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
-                self._unwrap_deletion(del_elem)
-                return
-
-        # Search for run property change with this ID
-        for rpr_change in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange"):
-            if rpr_change.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
-                parent_rpr = rpr_change.getparent()
-                if parent_rpr is not None:
-                    previous_rpr = rpr_change.find(f"{{{WORD_NAMESPACE}}}rPr")
-                    # Remove current properties (except rPrChange)
-                    for child in list(parent_rpr):
-                        if child.tag != f"{{{WORD_NAMESPACE}}}rPrChange":
-                            parent_rpr.remove(child)
-                    parent_rpr.remove(rpr_change)
-                    # Restore previous
-                    if previous_rpr is not None:
-                        for child in previous_rpr:
-                            parent_rpr.append(deepcopy(child))
-                return
-
-        # Search for paragraph property change with this ID
-        for ppr_change in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange"):
-            if ppr_change.get(f"{{{WORD_NAMESPACE}}}id") == change_id_str:
-                parent_ppr = ppr_change.getparent()
-                if parent_ppr is not None:
-                    previous_ppr = ppr_change.find(f"{{{WORD_NAMESPACE}}}pPr")
-                    # Remove current properties (except pPrChange and rPr)
-                    for child in list(parent_ppr):
-                        if child.tag not in (
-                            f"{{{WORD_NAMESPACE}}}pPrChange",
-                            f"{{{WORD_NAMESPACE}}}rPr",
-                        ):
-                            parent_ppr.remove(child)
-                    parent_ppr.remove(ppr_change)
-                    # Restore previous
-                    if previous_ppr is not None:
-                        insert_idx = 0
-                        for child in previous_ppr:
-                            parent_ppr.insert(insert_idx, deepcopy(child))
-                            insert_idx += 1
-                return
-
-        raise ValueError(f"No tracked change found with ID: {change_id}")
+        self._change_mgmt.reject_change(change_id)
 
     # Accept/Reject by author
 
@@ -2766,36 +2543,7 @@ class Document:
             >>> count = doc.accept_by_author("John Doe")
             >>> print(f"Accepted {count} changes from John Doe")
         """
-        count = 0
-
-        # Accept insertions by this author
-        for ins in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}ins")):
-            if ins.get(f"{{{WORD_NAMESPACE}}}author") == author:
-                self._unwrap_element(ins)
-                count += 1
-
-        # Accept deletions by this author
-        for del_elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del")):
-            if del_elem.get(f"{{{WORD_NAMESPACE}}}author") == author:
-                self._remove_element(del_elem)
-                count += 1
-
-        # Accept format changes by this author (remove rPrChange/pPrChange, keep new formatting)
-        for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
-            if rpr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
-                parent = rpr_change.getparent()
-                if parent is not None:
-                    parent.remove(rpr_change)
-                count += 1
-
-        for ppr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange")):
-            if ppr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
-                parent = ppr_change.getparent()
-                if parent is not None:
-                    parent.remove(ppr_change)
-                count += 1
-
-        return count
+        return self._change_mgmt.accept_by_author(author)
 
     def reject_by_author(self, author: str) -> int:
         """Reject all tracked changes by a specific author.
@@ -2810,67 +2558,7 @@ class Document:
             >>> count = doc.reject_by_author("John Doe")
             >>> print(f"Rejected {count} changes from John Doe")
         """
-        count = 0
-
-        # Reject insertions by this author
-        for ins in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}ins")):
-            if ins.get(f"{{{WORD_NAMESPACE}}}author") == author:
-                self._remove_element(ins)
-                count += 1
-
-        # Reject deletions by this author (convert delText back to t)
-        for del_elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}del")):
-            if del_elem.get(f"{{{WORD_NAMESPACE}}}author") == author:
-                self._unwrap_deletion(del_elem)
-                count += 1
-
-        # Reject format changes by this author (restore previous formatting)
-        from copy import deepcopy
-
-        for rpr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}rPrChange")):
-            if rpr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
-                parent_rpr = rpr_change.getparent()
-                if parent_rpr is not None:
-                    # Get the previous rPr from inside the change element
-                    prev_rpr = rpr_change.find(f"{{{WORD_NAMESPACE}}}rPr")
-                    if prev_rpr is not None:
-                        # Replace current rPr content with previous
-                        # Clear all children except rPrChange
-                        for child in list(parent_rpr):
-                            if child.tag != f"{{{WORD_NAMESPACE}}}rPrChange":
-                                parent_rpr.remove(child)
-                        # Copy previous formatting back using deepcopy and append
-                        # (preserves order and doesn't move nodes from prev_rpr)
-                        for child in list(prev_rpr):
-                            parent_rpr.append(deepcopy(child))
-                    # Remove the change tracking element
-                    parent_rpr.remove(rpr_change)
-                count += 1
-
-        for ppr_change in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}pPrChange")):
-            if ppr_change.get(f"{{{WORD_NAMESPACE}}}author") == author:
-                parent_ppr = ppr_change.getparent()
-                if parent_ppr is not None:
-                    # Get the previous pPr from inside the change element
-                    prev_ppr = ppr_change.find(f"{{{WORD_NAMESPACE}}}pPr")
-                    if prev_ppr is not None:
-                        # Replace current pPr content with previous
-                        # Clear all children except pPrChange and rPr (run props are separate)
-                        for child in list(parent_ppr):
-                            if child.tag not in (
-                                f"{{{WORD_NAMESPACE}}}pPrChange",
-                                f"{{{WORD_NAMESPACE}}}rPr",
-                            ):
-                                parent_ppr.remove(child)
-                        # Copy previous formatting back using deepcopy and append
-                        # (preserves order and doesn't move nodes from prev_ppr)
-                        for child in list(prev_ppr):
-                            parent_ppr.append(deepcopy(child))
-                    # Remove the change tracking element
-                    parent_ppr.remove(ppr_change)
-                count += 1
-
-        return count
+        return self._change_mgmt.reject_by_author(author)
 
     # List and query tracked changes
 
@@ -3003,32 +2691,7 @@ class Document:
             >>> # Accept only insertions by a specific author
             >>> count = doc.accept_changes(change_type="insertion", author="John Doe")
         """
-        # Special case: no filters = accept all
-        if change_type is None and author is None:
-            self.accept_all_changes()
-            # Count how many we accepted (we need to re-scan since accept_all
-            # doesn't return a count - approximate by counting changes before)
-            return 0  # Can't determine count after the fact
-
-        count = 0
-
-        # If only author filter, use existing method for efficiency
-        if change_type is None and author is not None:
-            return self.accept_by_author(author)
-
-        # Otherwise, get filtered changes and accept each
-        changes = self.get_tracked_changes(change_type=change_type, author=author)
-
-        # Accept changes in reverse order to handle nested elements properly
-        for change in reversed(changes):
-            try:
-                self.accept_change(change.id)
-                count += 1
-            except ValueError:
-                # Change may have already been accepted (e.g., nested structure)
-                pass
-
-        return count
+        return self._change_mgmt.accept_changes(change_type=change_type, author=author)
 
     def reject_changes(
         self,
@@ -3062,30 +2725,7 @@ class Document:
             >>> # Reject only deletions by a specific author
             >>> count = doc.reject_changes(change_type="deletion", author="John Doe")
         """
-        # Special case: no filters = reject all
-        if change_type is None and author is None:
-            self.reject_all_changes()
-            return 0  # Can't determine count after the fact
-
-        count = 0
-
-        # If only author filter, use existing method for efficiency
-        if change_type is None and author is not None:
-            return self.reject_by_author(author)
-
-        # Otherwise, get filtered changes and reject each
-        changes = self.get_tracked_changes(change_type=change_type, author=author)
-
-        # Reject changes in reverse order to handle nested elements properly
-        for change in reversed(changes):
-            try:
-                self.reject_change(change.id)
-                count += 1
-            except ValueError:
-                # Change may have already been rejected (e.g., nested structure)
-                pass
-
-        return count
+        return self._change_mgmt.reject_changes(change_type=change_type, author=author)
 
     @property
     def tracked_changes(self) -> list["TrackedChange"]:
