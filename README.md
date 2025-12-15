@@ -119,7 +119,7 @@ doc.save("contract_edited.docx")
 - ✅ **Batch operations** - apply multiple edits efficiently
 - ✅ **YAML/JSON support** - define edits in configuration files
 - ✅ **Type hints** - full type annotation support
-- ✅ **Thoroughly tested** - 661 tests with 80% coverage
+- ✅ **Thoroughly tested** - 1050+ tests with 88% coverage
 
 ## Installation
 
