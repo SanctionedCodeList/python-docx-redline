@@ -448,22 +448,52 @@ Only mark text that actually changes. Keep ALL unchanged text outside `<w:del>`/
 
 ## Converting Documents to Images
 
-To visually analyze Word documents, convert them to images using a two-step process:
+### Using python-docx-redline (Recommended)
+
+The easiest way to render documents to images:
+
+```python
+from python_docx_redline import Document
+from python_docx_redline.rendering import is_rendering_available
+
+if is_rendering_available():
+    doc = Document("contract.docx")
+    images = doc.render_to_images(output_dir="./images", dpi=150)
+    for img in images:
+        print(f"Generated: {img}")  # page-1.png, page-2.png, etc.
+```
+
+Or use the standalone function:
+
+```python
+from python_docx_redline.rendering import render_document_to_images
+
+images = render_document_to_images("contract.docx", dpi=200)
+```
+
+**Why render documents?**
+- AI agents can visually inspect document layout
+- See how tracked changes appear (strikethrough, underlines)
+- Verify formatting before sending to clients
+
+### Manual Command-Line Approach
+
+Alternatively, convert using shell commands:
 
 1. **Convert DOCX to PDF**:
    ```bash
    soffice --headless --convert-to pdf document.docx
    ```
 
-2. **Convert PDF pages to JPEG images**:
+2. **Convert PDF pages to images**:
    ```bash
-   pdftoppm -jpeg -r 150 document.pdf page
+   pdftoppm -png -r 150 document.pdf page
    ```
-   This creates files like `page-1.jpg`, `page-2.jpg`, etc.
+   Creates files like `page-1.png`, `page-2.png`, etc.
 
 Options:
 - `-r 150`: Sets resolution to 150 DPI
-- `-jpeg`: Output JPEG format (use `-png` for PNG)
+- `-png` or `-jpeg`: Output format
 - `-f N`: First page to convert
 - `-l N`: Last page to convert
 
@@ -480,6 +510,7 @@ Options:
 | Regex find/replace | - | **Best** | Manual |
 | Scoped edits | - | **Best** | Manual |
 | Batch from YAML | - | **Best** | Manual |
+| Render to images | - | **Best** | Manual |
 | Add comments | - | - | **Required** |
 | Modify other's changes | - | - | **Required** |
 | Insert images w/ tracking | - | - | **Required** |

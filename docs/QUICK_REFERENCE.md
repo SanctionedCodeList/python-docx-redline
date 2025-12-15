@@ -470,6 +470,43 @@ print("Done! Applied 7 surgical edits.")
 
 ---
 
+## Document Rendering
+
+### Render to Images
+
+```python
+from python_docx_redline import Document
+from python_docx_redline.rendering import is_rendering_available
+
+# Check availability
+if is_rendering_available():
+    doc = Document("contract.docx")
+    images = doc.render_to_images(output_dir="./images", dpi=150)
+    for img in images:
+        print(f"Page: {img}")
+```
+
+### Standalone Rendering
+
+```python
+from python_docx_redline.rendering import render_document_to_images
+
+# Render any DOCX directly
+images = render_document_to_images("contract.docx", dpi=200)
+```
+
+### Requirements
+
+```bash
+# macOS
+brew install --cask libreoffice && brew install poppler
+
+# Linux
+sudo apt install libreoffice poppler-utils
+```
+
+---
+
 ## Getting Help
 
 - **Full API**: See `PROPOSED_API.md`
@@ -480,4 +517,4 @@ print("Done! Applied 7 surgical edits.")
 
 ---
 
-**Quick Reference v1.0** • December 2025
+**Quick Reference v1.1** • December 2025

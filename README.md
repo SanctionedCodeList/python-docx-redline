@@ -107,6 +107,12 @@ doc.save("contract_edited.docx")
 - ✅ **Paragraph formatting** - track alignment and style changes
 - ✅ **Accept/reject support** - `accept_by_author()` and `reject_by_author()` include format changes
 
+**Phase 9 - Document Rendering:**
+- ✅ **Render to images** - convert documents to PNG page images
+- ✅ **Visual inspection** - AI agents can see document layout and tracked changes
+- ✅ **LibreOffice backend** - high-fidelity rendering with full formatting support
+- ✅ **Configurable output** - custom DPI, prefix, and output directory
+
 **General:**
 - ✅ **python-docx integration** - seamlessly convert between libraries
 - ✅ **In-memory workflows** - load from bytes/BytesIO, save to bytes
@@ -544,6 +550,65 @@ print(result.previous_formatting)  # Previous state per run
 print(result.change_id)         # OOXML change ID for tracking
 ```
 
+### Document Rendering (Phase 9)
+
+Render documents to PNG images for visual inspection by AI agents:
+
+```python
+from python_docx_redline import Document
+from python_docx_redline.rendering import is_rendering_available
+
+# Check if rendering tools are installed
+if is_rendering_available():
+    doc = Document("contract.docx")
+
+    # Render to PNG images
+    images = doc.render_to_images(
+        output_dir="./images",  # Optional: defaults to temp directory
+        dpi=150,                # Optional: resolution (default: 150)
+        prefix="page"           # Optional: filename prefix (default: "page")
+    )
+
+    for img in images:
+        print(f"Generated: {img}")
+    # Output: Generated: images/page-1.png
+    #         Generated: images/page-2.png
+```
+
+**Why render documents?**
+- AI agents can visually inspect document layout
+- See how tracked changes appear (strikethrough, underlines)
+- Verify formatting before sending to clients
+- Debug complex document structures
+
+**Requirements:**
+Install LibreOffice and poppler-utils:
+```bash
+# macOS
+brew install --cask libreoffice
+brew install poppler
+
+# Linux (Ubuntu/Debian)
+sudo apt install libreoffice poppler-utils
+
+# Windows
+# Download LibreOffice from https://www.libreoffice.org/download/
+# Download poppler from https://github.com/oschwartz10612/poppler-windows
+```
+
+**Standalone rendering function:**
+```python
+from python_docx_redline.rendering import render_document_to_images
+
+# Render any DOCX file directly
+images = render_document_to_images(
+    "contract.docx",
+    output_dir="./output",
+    dpi=200,
+    timeout=120  # seconds
+)
+```
+
 ### Using Scopes
 
 Limit operations to specific sections or paragraphs:
@@ -689,6 +754,9 @@ Save the document. If path is None, overwrites the original file. For in-memory 
 
 #### `save_to_bytes(validate=True)`
 Save the document to bytes (in-memory). Useful for passing documents between libraries, storing in databases, or sending over network.
+
+#### `render_to_images(output_dir=None, dpi=150, prefix="page", timeout=120)`
+Render document pages to PNG images using LibreOffice. Requires LibreOffice and poppler-utils. Returns `list[Path]`.
 
 ### Compatibility Functions
 
