@@ -3297,63 +3297,7 @@ class Document:
             >>> doc = Document("contract.docx")
             >>> doc.delete_table_row(row=5, track=True)
         """
-
-        tables = self.tables
-        if table_index < 0 or table_index >= len(tables):
-            raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
-
-        table = tables[table_index]
-
-        # Find the row to delete
-        if isinstance(row, int):
-            if row < 0 or row >= table.row_count:
-                raise IndexError(f"Row index {row} out of range (0-{table.row_count - 1})")
-            delete_index = row
-        else:
-            # Find row containing text
-            matching_rows = [(i, r) for i, r in enumerate(table.rows) if r.contains(row)]
-
-            if not matching_rows:
-                raise ValueError(f"No row found containing text: {row}")
-            if len(matching_rows) > 1:
-                raise ValueError(
-                    f"Text '{row}' found in {len(matching_rows)} rows - "
-                    "please use a more specific search or row index"
-                )
-
-            delete_index = matching_rows[0][0]
-
-        row_to_delete = table.rows[delete_index]
-
-        if track:
-            # Add deletion properties to row
-            from datetime import datetime, timezone
-
-            author_name = author if author is not None else self.author
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            change_id = self._xml_generator.next_change_id
-            self._xml_generator.next_change_id += 1
-
-            # Convert all w:t to w:delText within the row
-            for t_elem in row_to_delete.element.findall(f".//{{{WORD_NAMESPACE}}}t"):
-                t_elem.tag = f"{{{WORD_NAMESPACE}}}delText"
-
-            # Add or update w:trPr with w:del child to mark row as deleted
-            tr_pr = row_to_delete.element.find(f"{{{WORD_NAMESPACE}}}trPr")
-            if tr_pr is None:
-                tr_pr = etree.Element(f"{{{WORD_NAMESPACE}}}trPr")
-                row_to_delete.element.insert(0, tr_pr)
-
-            del_elem = etree.SubElement(tr_pr, f"{{{WORD_NAMESPACE}}}del")
-            del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
-            del_elem.set(f"{{{WORD_NAMESPACE}}}author", author_name)
-            del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
-        else:
-            # Remove without tracking
-            table_elem = table.element
-            table_elem.remove(row_to_delete.element)
-
-        return row_to_delete
+        return self._table_ops.delete_row(row, table_index=table_index, track=track, author=author)
 
     def insert_table_column(
         self,
@@ -3395,134 +3339,14 @@ class Document:
             ...     track=True
             ... )
         """
-        tables = self.tables
-        if table_index < 0 or table_index >= len(tables):
-            raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
-
-        table = tables[table_index]
-
-        # Find the column to insert after
-        if isinstance(after_column, int):
-            if after_column < -1 or after_column >= table.col_count:
-                raise IndexError(
-                    f"Column index {after_column} out of range (-1 to {table.col_count - 1})"
-                )
-            insert_after_index = after_column
-        else:
-            # Find column containing text (check first row / header)
-            matching_cols: list[int] = []
-            for row in table.rows:
-                for cell in row.cells:
-                    if cell.contains(after_column):
-                        if cell.col_index not in matching_cols:
-                            matching_cols.append(cell.col_index)
-
-            if not matching_cols:
-                raise ValueError(f"No column found containing text: {after_column}")
-            if len(matching_cols) > 1:
-                raise ValueError(
-                    f"Text '{after_column}' found in {len(matching_cols)} columns - "
-                    "please use a more specific search or column index"
-                )
-
-            insert_after_index = matching_cols[0]
-
-        # Calculate expected cell count
-        expected_cells = table.row_count
-        if header is not None:
-            expected_cells -= 1  # Header row handled separately
-
-        if len(cells) != expected_cells:
-            raise ValueError(
-                f"Expected {expected_cells} cells (got {len(cells)}). "
-                f"Table has {table.row_count} rows"
-                + (", header is provided separately" if header else "")
-            )
-
-        # Prepare tracking info
-        if track:
-            from datetime import datetime, timezone
-
-            author_name = author if author is not None else self.author
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        # Insert a new gridCol in tblGrid
-        tbl_grid = table.element.find(f"{{{WORD_NAMESPACE}}}tblGrid")
-        if tbl_grid is not None:
-            grid_cols = tbl_grid.findall(f"{{{WORD_NAMESPACE}}}gridCol")
-            # Default width for new column
-            new_grid_col = etree.Element(f"{{{WORD_NAMESPACE}}}gridCol")
-            new_grid_col.set(f"{{{WORD_NAMESPACE}}}w", "2880")
-
-            if insert_after_index == -1:
-                # Insert at beginning
-                tbl_grid.insert(0, new_grid_col)
-            elif insert_after_index < len(grid_cols):
-                # Insert after specified column
-                tbl_grid.insert(insert_after_index + 1, new_grid_col)
-            else:
-                # Append at end
-                tbl_grid.append(new_grid_col)
-
-        # Insert cells into each row
-        cell_index = 0
-        for row_idx, row in enumerate(table.rows):
-            # Determine cell content
-            if header is not None and row_idx == 0:
-                cell_text = header
-            else:
-                cell_text = cells[cell_index]
-                cell_index += 1
-
-            # Create new cell element
-            new_tc = etree.Element(f"{{{WORD_NAMESPACE}}}tc")
-
-            # Add cell properties
-            tc_pr = etree.SubElement(new_tc, f"{{{WORD_NAMESPACE}}}tcPr")
-            tc_w = etree.SubElement(tc_pr, f"{{{WORD_NAMESPACE}}}tcW")
-            tc_w.set(f"{{{WORD_NAMESPACE}}}w", "2880")
-            tc_w.set(f"{{{WORD_NAMESPACE}}}type", "dxa")
-
-            # Add paragraph with content
-            para = etree.SubElement(new_tc, f"{{{WORD_NAMESPACE}}}p")
-
-            if cell_text:
-                if track:
-                    # Wrap content in insertion tracking
-                    change_id = self._xml_generator.next_change_id
-                    self._xml_generator.next_change_id += 1
-
-                    ins_elem = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}ins")
-                    ins_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
-                    ins_elem.set(f"{{{WORD_NAMESPACE}}}author", author_name)
-                    ins_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
-
-                    run = etree.SubElement(ins_elem, f"{{{WORD_NAMESPACE}}}r")
-                    t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-                    t.text = cell_text
-                else:
-                    run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
-                    t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-                    t.text = cell_text
-
-            # Find insertion position in row
-            row_elem = row.element
-            tc_elements = row_elem.findall(f"{{{WORD_NAMESPACE}}}tc")
-
-            if insert_after_index == -1:
-                # Insert before first cell
-                if tc_elements:
-                    row_elem.insert(list(row_elem).index(tc_elements[0]), new_tc)
-                else:
-                    row_elem.append(new_tc)
-            elif insert_after_index < len(tc_elements):
-                # Insert after specified cell
-                target_tc = tc_elements[insert_after_index]
-                tc_position = list(row_elem).index(target_tc)
-                row_elem.insert(tc_position + 1, new_tc)
-            else:
-                # Append at end of row
-                row_elem.append(new_tc)
+        self._table_ops.insert_column(
+            after_column,
+            cells,
+            table_index=table_index,
+            header=header,
+            track=track,
+            author=author,
+        )
 
     def delete_table_column(
         self,
@@ -3551,92 +3375,9 @@ class Document:
             >>> doc = Document("contract.docx")
             >>> doc.delete_table_column(column=2, track=True)
         """
-        tables = self.tables
-        if table_index < 0 or table_index >= len(tables):
-            raise IndexError(f"Table index {table_index} out of range (0-{len(tables) - 1})")
-
-        table = tables[table_index]
-
-        # Find the column to delete
-        if isinstance(column, int):
-            if column < 0 or column >= table.col_count:
-                raise IndexError(f"Column index {column} out of range (0-{table.col_count - 1})")
-            delete_index = column
-        else:
-            # Find column containing text
-            matching_cols: list[int] = []
-            for row in table.rows:
-                for cell in row.cells:
-                    if cell.contains(column):
-                        if cell.col_index not in matching_cols:
-                            matching_cols.append(cell.col_index)
-
-            if not matching_cols:
-                raise ValueError(f"No column found containing text: {column}")
-            if len(matching_cols) > 1:
-                raise ValueError(
-                    f"Text '{column}' found in {len(matching_cols)} columns - "
-                    "please use a more specific search or column index"
-                )
-
-            delete_index = matching_cols[0]
-
-        # Prepare tracking info
-        if track:
-            from datetime import datetime, timezone
-
-            author_name = author if author is not None else self.author
-            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        # Remove gridCol from tblGrid (if not tracking)
-        if not track:
-            tbl_grid = table.element.find(f"{{{WORD_NAMESPACE}}}tblGrid")
-            if tbl_grid is not None:
-                grid_cols = tbl_grid.findall(f"{{{WORD_NAMESPACE}}}gridCol")
-                if delete_index < len(grid_cols):
-                    tbl_grid.remove(grid_cols[delete_index])
-
-        # Process each row
-        for row in table.rows:
-            row_elem = row.element
-            tc_elements = row_elem.findall(f"{{{WORD_NAMESPACE}}}tc")
-
-            if delete_index >= len(tc_elements):
-                # Row doesn't have this column (varying row lengths)
-                continue
-
-            cell_to_delete = tc_elements[delete_index]
-
-            if track:
-                # Mark cell content as deleted
-                change_id = self._xml_generator.next_change_id
-                self._xml_generator.next_change_id += 1
-
-                # Convert all w:t to w:delText within the cell
-                for t_elem in cell_to_delete.findall(f".//{{{WORD_NAMESPACE}}}t"):
-                    t_elem.tag = f"{{{WORD_NAMESPACE}}}delText"
-
-                # Wrap all runs in deletion markers
-                for para in cell_to_delete.findall(f"{{{WORD_NAMESPACE}}}p"):
-                    for run in list(para.findall(f"{{{WORD_NAMESPACE}}}r")):
-                        # Create deletion wrapper
-                        del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
-                        del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
-                        del_elem.set(f"{{{WORD_NAMESPACE}}}author", author_name)
-                        del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
-
-                        # Move run into deletion
-                        run_index = list(para).index(run)
-                        para.remove(run)
-                        del_elem.append(run)
-                        para.insert(run_index, del_elem)
-
-                        # Increment change ID for next run
-                        change_id = self._xml_generator.next_change_id
-                        self._xml_generator.next_change_id += 1
-            else:
-                # Remove cell without tracking
-                row_elem.remove(cell_to_delete)
+        self._table_ops.delete_column(
+            column, table_index=table_index, track=track, author=author
+        )
 
     def _get_detailed_context(self, match: Any, context_chars: int = 50) -> tuple[str, str, str]:
         """Extract detailed context around a match for preview.
