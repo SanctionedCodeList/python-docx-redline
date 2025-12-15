@@ -272,7 +272,7 @@ class TrackedChangeOperations:
 
     def _log_context_preview(self, match: TextSpan, replacement: str, context_chars: int) -> None:
         """Log context preview for debugging."""
-        before, matched, after = self._document._get_detailed_context(match, context_chars)
+        before, matched, after = self._get_detailed_context(match, context_chars)
         logger.debug(
             "Context preview:\n"
             "BEFORE (%d chars): %r\n"
@@ -303,8 +303,8 @@ class TrackedChangeOperations:
 
         from ..errors import ContinuityWarning
 
-        _, _, after_text = self._document._get_detailed_context(match, context_chars)
-        continuity_warnings = self._document._check_continuity(replacement_text, after_text)
+        _, _, after_text = self._get_detailed_context(match, context_chars)
+        continuity_warnings = self._check_continuity(replacement_text, after_text)
 
         for warning_msg in continuity_warnings:
             suggestions = [
@@ -316,6 +316,100 @@ class TrackedChangeOperations:
                 ContinuityWarning(warning_msg, after_text, suggestions),
                 stacklevel=3,
             )
+
+    def _get_detailed_context(
+        self, match: TextSpan, context_chars: int = 50
+    ) -> tuple[str, str, str]:
+        """Extract detailed context around a match for preview.
+
+        Args:
+            match: TextSpan object representing the matched text
+            context_chars: Number of characters to extract before/after (default: 50)
+
+        Returns:
+            Tuple of (before_text, matched_text, after_text)
+        """
+        # Extract text from the paragraph
+        text_elements = match.paragraph.findall(f".//{{{WORD_NAMESPACE}}}t")
+        para_text = "".join(elem.text or "" for elem in text_elements)
+        matched = match.text
+
+        # Find the match position in the full paragraph text
+        match_pos = para_text.find(matched)
+        if match_pos == -1:
+            # Fallback: couldn't find match in paragraph
+            return ("", matched, "")
+
+        # Extract context
+        before_start = max(0, match_pos - context_chars)
+        after_end = min(len(para_text), match_pos + len(matched) + context_chars)
+
+        before_text = para_text[before_start:match_pos]
+        after_text = para_text[match_pos + len(matched) : after_end]
+
+        # Add ellipsis if truncated
+        if before_start > 0:
+            before_text = "..." + before_text
+        if after_end < len(para_text):
+            after_text = after_text + "..."
+
+        return (before_text, matched, after_text)
+
+    def _check_continuity(self, replacement: str, next_text: str) -> list[str]:
+        """Check if replacement may create a sentence fragment.
+
+        Analyzes the text immediately following the replacement to detect
+        potential grammatical issues like sentence fragments or disconnected clauses.
+
+        Args:
+            replacement: The replacement text
+            next_text: Text immediately following where replacement will be inserted
+
+        Returns:
+            List of warning messages (empty if no issues detected)
+        """
+
+        warnings: list[str] = []
+
+        # Skip check if no following text or it's just whitespace
+        if not next_text or not next_text.strip():
+            return warnings
+
+        # Get the first ~30 chars of following text for analysis
+        next_preview = next_text.strip()[:30]
+
+        # Heuristic 1: Starts with lowercase letter (excluding special cases)
+        # Skip 'i' for Roman numerals
+        if next_preview and next_preview[0].islower() and next_preview[0] != "i":
+            warnings.append("Next text starts with lowercase letter - may be a sentence fragment")
+
+        # Heuristic 2: Starts with connecting phrase
+        connecting_phrases = [
+            "in question",
+            "of which",
+            "that is",
+            "to which",
+            "which is",
+            "who is",
+            "whose",
+            "wherein",
+            "whereby",
+        ]
+
+        next_lower = next_preview.lower()
+        for phrase in connecting_phrases:
+            if next_lower.startswith(phrase):
+                warnings.append(
+                    f"Next text starts with connecting phrase '{phrase}' - "
+                    f"may require preceding context"
+                )
+                break
+
+        # Heuristic 3: Starts with continuation punctuation
+        if next_preview and next_preview[0] in [",", ";", ":", "—", "–"]:
+            warnings.append("Next text starts with continuation punctuation - likely a fragment")
+
+        return warnings
 
     def move(
         self,
