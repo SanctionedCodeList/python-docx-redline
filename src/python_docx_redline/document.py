@@ -33,9 +33,11 @@ from .minimal_diff import (
     apply_minimal_edits_to_paragraph,
     should_use_minimal_editing,
 )
+from .operations.batch import BatchOperations
 from .operations.change_management import ChangeManagement
 from .operations.comments import CommentOperations
 from .operations.formatting import FormatOperations
+from .operations.header_footer import HeaderFooterOperations
 from .operations.notes import NoteOperations
 from .operations.tables import TableOperations
 from .operations.tracked_changes import TrackedChangeOperations
@@ -258,6 +260,20 @@ class Document:
         if not hasattr(self, "_note_ops_instance"):
             self._note_ops_instance = NoteOperations(self)
         return self._note_ops_instance
+
+    @property
+    def _header_footer_ops(self) -> HeaderFooterOperations:
+        """Get the HeaderFooterOperations instance (lazy initialization)."""
+        if not hasattr(self, "_header_footer_ops_instance"):
+            self._header_footer_ops_instance = HeaderFooterOperations(self)
+        return self._header_footer_ops_instance
+
+    @property
+    def _batch_ops(self) -> BatchOperations:
+        """Get the BatchOperations instance (lazy initialization)."""
+        if not hasattr(self, "_batch_ops_instance"):
+            self._batch_ops_instance = BatchOperations(self)
+        return self._batch_ops_instance
 
     # View capabilities (Phase 3)
 
@@ -2515,252 +2531,13 @@ class Document:
             reply_to=reply_to,
         )
 
-    def _resolve_comment_reference(self, ref: "Comment | str | int") -> "Comment":
-        """Resolve a comment reference to a Comment object.
-
-        Args:
-            ref: Comment object, comment ID string, or comment ID int
-
-        Returns:
-            The Comment object
-
-        Raises:
-            ValueError: If the comment is not found
-        """
-        from python_docx_redline.models.comment import Comment
-
-        if isinstance(ref, Comment):
-            return ref
-
-        # Convert to string ID
-        comment_id = str(ref)
-
-        # Find the comment in the document
-        for comment in self.comments:
-            if comment.id == comment_id:
-                return comment
-
-        raise ValueError(f"Comment with ID '{comment_id}' not found")
-
-    def _link_comment_reply(self, child_para_id: str, parent_para_id: str) -> None:
-        """Link a reply comment to its parent in commentsExtended.xml.
-
-        Creates or updates commentsExtended.xml to establish the parent-child
-        relationship.
-
-        Args:
-            child_para_id: The paraId of the reply comment
-            parent_para_id: The paraId of the parent comment
-        """
-        if not self._is_zip or not self._temp_dir:
-            raise ValueError("Cannot link comments in non-ZIP documents")
-
-        w15_namespace = "http://schemas.microsoft.com/office/word/2012/wordml"
-        comments_ex_path = self._temp_dir / "word" / "commentsExtended.xml"
-
-        # Load or create commentsExtended.xml
-        if comments_ex_path.exists():
-            tree = etree.parse(str(comments_ex_path))
-            root = tree.getroot()
-        else:
-            # Create new commentsExtended.xml
-            root = etree.Element(
-                f"{{{w15_namespace}}}commentsEx",
-                nsmap={"w15": w15_namespace},
-            )
-            tree = etree.ElementTree(root)
-
-            # Add relationship and content type
-            self._ensure_comments_extended_relationship()
-            self._ensure_comments_extended_content_type()
-
-        # Create commentEx element for the reply with paraIdParent
-        comment_ex = etree.SubElement(root, f"{{{w15_namespace}}}commentEx")
-        comment_ex.set(f"{{{w15_namespace}}}paraId", child_para_id)
-        comment_ex.set(f"{{{w15_namespace}}}paraIdParent", parent_para_id)
-
-        # Write back
-        tree.write(
-            str(comments_ex_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
-
-    def _get_next_comment_id(self) -> int:
-        """Get the next available comment ID.
-
-        Scans existing comments and returns max ID + 1.
-
-        Returns:
-            Next available comment ID (0 if no comments exist)
-        """
-        max_id = -1
-
-        # Check comments.xml
-        comments_xml = self._load_comments_xml()
-        if comments_xml is not None:
-            for comment in comments_xml.findall(f".//{{{WORD_NAMESPACE}}}comment"):
-                try:
-                    comment_id = int(comment.get(f"{{{WORD_NAMESPACE}}}id", "-1"))
-                    max_id = max(max_id, comment_id)
-                except ValueError:
-                    pass
-
-        # Also check document body for orphaned markers
-        for marker in self.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentRangeStart"):
-            try:
-                marker_id = int(marker.get(f"{{{WORD_NAMESPACE}}}id", "-1"))
-                max_id = max(max_id, marker_id)
-            except ValueError:
-                pass
-
-        return max_id + 1
-
-    def _insert_comment_markers(self, match: TextSpan, comment_id: int) -> None:
-        """Insert comment range markers around matched text.
-
-        Inserts commentRangeStart before the match, commentRangeEnd after,
-        and commentReference in a new run after the end marker.
-
-        Args:
-            match: TextSpan object representing the text to annotate
-            comment_id: The comment ID to use
-        """
-        paragraph = match.paragraph
-        comment_id_str = str(comment_id)
-
-        # Create the marker elements
-        range_start = etree.Element(f"{{{WORD_NAMESPACE}}}commentRangeStart")
-        range_start.set(f"{{{WORD_NAMESPACE}}}id", comment_id_str)
-
-        range_end = etree.Element(f"{{{WORD_NAMESPACE}}}commentRangeEnd")
-        range_end.set(f"{{{WORD_NAMESPACE}}}id", comment_id_str)
-
-        # Create run containing comment reference
-        ref_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
-        ref = etree.SubElement(ref_run, f"{{{WORD_NAMESPACE}}}commentReference")
-        ref.set(f"{{{WORD_NAMESPACE}}}id", comment_id_str)
-
-        # Find positions in paragraph
-        start_run = match.runs[match.start_run_index]
-        end_run = match.runs[match.end_run_index]
-
-        # Get indices
-        children = list(paragraph)
-        start_run_index = children.index(start_run)
-        end_run_index = children.index(end_run)
-
-        # Insert in reverse order to maintain correct indices
-        # 1. Insert reference run after end run
-        paragraph.insert(end_run_index + 1, ref_run)
-        # 2. Insert range end after end run (before reference)
-        paragraph.insert(end_run_index + 1, range_end)
-        # 3. Insert range start before start run
-        paragraph.insert(start_run_index, range_start)
-
-    def _add_comment_to_comments_xml(
-        self,
-        comment_id: int,
-        text: str,
-        author: str,
-        initials: str,
-        timestamp: str,
-    ) -> Any:
-        """Add a comment to comments.xml, creating the file if needed.
-
-        Args:
-            comment_id: The comment ID
-            text: Comment text content
-            author: Author name
-            initials: Author initials
-            timestamp: ISO format timestamp
-
-        Returns:
-            The created w:comment Element
-        """
-        if not self._is_zip or not self._temp_dir:
-            raise ValueError("Cannot add comments to non-ZIP documents")
-
-        comments_path = self._temp_dir / "word" / "comments.xml"
-
-        # Load or create comments.xml
-        if comments_path.exists():
-            comments_tree = etree.parse(str(comments_path))
-            comments_root = comments_tree.getroot()
-        else:
-            # Create new comments.xml
-            comments_root = etree.Element(
-                f"{{{WORD_NAMESPACE}}}comments",
-                nsmap={"w": WORD_NAMESPACE},
-            )
-            comments_tree = etree.ElementTree(comments_root)
-
-            # Need to add relationship and content type
-            self._ensure_comments_relationship()
-            self._ensure_comments_content_type()
-
-        # Create comment element
-        comment_elem = etree.SubElement(comments_root, f"{{{WORD_NAMESPACE}}}comment")
-        comment_elem.set(f"{{{WORD_NAMESPACE}}}id", str(comment_id))
-        comment_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
-        comment_elem.set(f"{{{WORD_NAMESPACE}}}initials", initials)
-        comment_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
-
-        # Add paragraph with text and w14:paraId for commentsExtended linking
-        w14_namespace = "http://schemas.microsoft.com/office/word/2010/wordml"
-        para_id = self._generate_para_id()
-
-        para = etree.SubElement(comment_elem, f"{{{WORD_NAMESPACE}}}p")
-        para.set(f"{{{w14_namespace}}}paraId", para_id)
-
-        run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
-        t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-        t.text = text
-
-        # Write comments.xml
-        comments_tree.write(
-            str(comments_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
-
-        return comment_elem
-
-    def _ensure_comments_relationship(self) -> None:
-        """Ensure comments.xml relationship exists in document.xml.rels."""
-        if not self._package:
-            return
-
-        rel_mgr = RelationshipManager(self._package, "word/document.xml")
-        rel_mgr.add_relationship(RelationshipTypes.COMMENTS, "comments.xml")
-        rel_mgr.save()
-
-    def _ensure_comments_content_type(self) -> None:
-        """Ensure comments.xml content type exists in [Content_Types].xml."""
-        if not self._package:
-            return
-
-        ct_mgr = ContentTypeManager(self._package)
-        ct_mgr.add_override("/word/comments.xml", ContentTypes.COMMENTS)
-        ct_mgr.save()
-
-    def _generate_para_id(self) -> str:
-        """Generate a unique paraId for comment paragraphs.
-
-        paraId is an 8-character hex string (ST_LongHexNumber).
-
-        Returns:
-            8-character uppercase hex string
-        """
-        import random
-
-        # Generate random 32-bit number and format as 8 hex chars
-        return f"{random.randint(0, 0xFFFFFFFF):08X}"
+    # Delegation methods for Comment model backward compatibility
+    # These methods delegate to CommentOperations to avoid code duplication
 
     def _get_comment_ex(self, para_id: str) -> etree._Element | None:
         """Get the commentEx element for a given paraId.
+
+        Delegates to CommentOperations.
 
         Args:
             para_id: The paraId to look up
@@ -2768,216 +2545,29 @@ class Document:
         Returns:
             The w15:commentEx element or None if not found
         """
-        if not self._is_zip or not self._temp_dir:
-            return None
-
-        comments_ex_path = self._temp_dir / "word" / "commentsExtended.xml"
-        if not comments_ex_path.exists():
-            return None
-
-        w15_namespace = "http://schemas.microsoft.com/office/word/2012/wordml"
-
-        tree = etree.parse(str(comments_ex_path))
-        root = tree.getroot()
-
-        for comment_ex in root.findall(f".//{{{w15_namespace}}}commentEx"):
-            if comment_ex.get(f"{{{w15_namespace}}}paraId") == para_id:
-                return comment_ex
-
-        return None
+        return self._comment_ops._get_comment_ex(para_id)
 
     def _set_comment_resolved(self, para_id: str, resolved: bool) -> None:
         """Set the resolved status for a comment.
 
-        Creates or updates commentsExtended.xml as needed.
+        Delegates to CommentOperations.
 
         Args:
             para_id: The paraId of the comment
             resolved: True to mark as resolved, False for unresolved
         """
-        if not self._is_zip or not self._temp_dir:
-            raise ValueError("Cannot set resolution on non-ZIP documents")
-
-        w15_namespace = "http://schemas.microsoft.com/office/word/2012/wordml"
-        comments_ex_path = self._temp_dir / "word" / "commentsExtended.xml"
-
-        # Load or create commentsExtended.xml
-        if comments_ex_path.exists():
-            tree = etree.parse(str(comments_ex_path))
-            root = tree.getroot()
-        else:
-            # Create new commentsExtended.xml
-            root = etree.Element(
-                f"{{{w15_namespace}}}commentsEx",
-                nsmap={"w15": w15_namespace},
-            )
-            tree = etree.ElementTree(root)
-
-            # Add relationship and content type
-            self._ensure_comments_extended_relationship()
-            self._ensure_comments_extended_content_type()
-
-        # Find or create commentEx element
-        comment_ex = None
-        for elem in root.findall(f".//{{{w15_namespace}}}commentEx"):
-            if elem.get(f"{{{w15_namespace}}}paraId") == para_id:
-                comment_ex = elem
-                break
-
-        if comment_ex is None:
-            # Create new commentEx
-            comment_ex = etree.SubElement(root, f"{{{w15_namespace}}}commentEx")
-            comment_ex.set(f"{{{w15_namespace}}}paraId", para_id)
-
-        # Set done status
-        comment_ex.set(f"{{{w15_namespace}}}done", "1" if resolved else "0")
-
-        # Write back
-        tree.write(
-            str(comments_ex_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
-
-    def _ensure_comments_extended_relationship(self) -> None:
-        """Ensure commentsExtended.xml relationship exists."""
-        if not self._package:
-            return
-
-        rel_mgr = RelationshipManager(self._package, "word/document.xml")
-        rel_mgr.add_relationship(RelationshipTypes.COMMENTS_EXTENDED, "commentsExtended.xml")
-        rel_mgr.save()
-
-    def _ensure_comments_extended_content_type(self) -> None:
-        """Ensure commentsExtended.xml content type exists."""
-        if not self._package:
-            return
-
-        ct_mgr = ContentTypeManager(self._package)
-        ct_mgr.add_override("/word/commentsExtended.xml", ContentTypes.COMMENTS_EXTENDED)
-        ct_mgr.save()
+        self._comment_ops._set_comment_resolved(para_id, resolved)
 
     def _delete_comment(self, comment_id: str, para_id: str | None) -> None:
         """Delete a comment by ID.
 
-        Removes the comment from comments.xml, the markers from the document
-        body, and any commentsExtended.xml entry.
+        Delegates to CommentOperations.
 
         Args:
             comment_id: The comment ID to delete
             para_id: The paraId of the comment (for commentsExtended cleanup)
         """
-        # 1. Remove comment markers from document body
-        self._remove_comment_markers(comment_id)
-
-        # 2. Remove comment from comments.xml
-        self._remove_from_comments_xml(comment_id)
-
-        # 3. Remove from commentsExtended.xml if para_id is set
-        if para_id:
-            self._remove_from_comments_extended(para_id)
-
-    def _remove_comment_markers(self, comment_id: str) -> None:
-        """Remove comment range markers from document body.
-
-        Args:
-            comment_id: The comment ID to remove markers for
-        """
-        # Remove commentRangeStart
-        for elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentRangeStart")):
-            if elem.get(f"{{{WORD_NAMESPACE}}}id") == comment_id:
-                parent = elem.getparent()
-                if parent is not None:
-                    parent.remove(elem)
-
-        # Remove commentRangeEnd
-        for elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentRangeEnd")):
-            if elem.get(f"{{{WORD_NAMESPACE}}}id") == comment_id:
-                parent = elem.getparent()
-                if parent is not None:
-                    parent.remove(elem)
-
-        # Remove commentReference (and its parent run if empty)
-        for elem in list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}commentReference")):
-            if elem.get(f"{{{WORD_NAMESPACE}}}id") == comment_id:
-                parent = elem.getparent()
-                if parent is not None:
-                    # If parent is a run, check if it only contains this reference
-                    if parent.tag == f"{{{WORD_NAMESPACE}}}r":
-                        # Remove the reference first
-                        parent.remove(elem)
-                        # If run is now empty, remove the run too
-                        if len(parent) == 0 or (
-                            len(parent) == 1 and parent[0].tag == f"{{{WORD_NAMESPACE}}}rPr"
-                        ):
-                            grandparent = parent.getparent()
-                            if grandparent is not None:
-                                grandparent.remove(parent)
-                    else:
-                        parent.remove(elem)
-
-    def _remove_from_comments_xml(self, comment_id: str) -> None:
-        """Remove a comment from comments.xml.
-
-        Args:
-            comment_id: The comment ID to remove
-        """
-        if not self._is_zip or not self._temp_dir:
-            return
-
-        comments_path = self._temp_dir / "word" / "comments.xml"
-        if not comments_path.exists():
-            return
-
-        tree = etree.parse(str(comments_path))
-        root = tree.getroot()
-
-        # Find and remove the comment element
-        for comment in list(root.findall(f".//{{{WORD_NAMESPACE}}}comment")):
-            if comment.get(f"{{{WORD_NAMESPACE}}}id") == comment_id:
-                root.remove(comment)
-                break
-
-        # Write back
-        tree.write(
-            str(comments_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
-
-    def _remove_from_comments_extended(self, para_id: str) -> None:
-        """Remove a commentEx entry from commentsExtended.xml.
-
-        Args:
-            para_id: The paraId of the comment to remove
-        """
-        if not self._is_zip or not self._temp_dir:
-            return
-
-        comments_ex_path = self._temp_dir / "word" / "commentsExtended.xml"
-        if not comments_ex_path.exists():
-            return
-
-        w15_namespace = "http://schemas.microsoft.com/office/word/2012/wordml"
-
-        tree = etree.parse(str(comments_ex_path))
-        root = tree.getroot()
-
-        # Find and remove the commentEx element
-        for comment_ex in list(root.findall(f".//{{{w15_namespace}}}commentEx")):
-            if comment_ex.get(f"{{{w15_namespace}}}paraId") == para_id:
-                root.remove(comment_ex)
-                break
-
-        # Write back
-        tree.write(
-            str(comments_ex_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
+        self._comment_ops._delete_comment(comment_id, para_id)
 
     # Table operations
 
@@ -3569,373 +3159,7 @@ class Document:
             >>> results = doc.apply_edits(edits)
             >>> print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")
         """
-        results = []
-
-        for i, edit in enumerate(edits):
-            edit_type = edit.get("type")
-            if not edit_type:
-                results.append(
-                    EditResult(
-                        success=False,
-                        edit_type="unknown",
-                        message=f"Edit {i}: Missing 'type' field",
-                        error=ValidationError("Missing 'type' field"),
-                    )
-                )
-                if stop_on_error:
-                    break
-                continue
-
-            try:
-                result = self._apply_single_edit(edit_type, edit)
-                results.append(result)
-
-                if not result.success and stop_on_error:
-                    break
-
-            except Exception as e:
-                results.append(
-                    EditResult(
-                        success=False,
-                        edit_type=edit_type,
-                        message=f"Error: {str(e)}",
-                        error=e,
-                    )
-                )
-                if stop_on_error:
-                    break
-
-        return results
-
-    def _apply_single_edit(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Apply a single edit operation.
-
-        Args:
-            edit_type: The type of edit to perform
-            edit: Dictionary with edit parameters
-
-        Returns:
-            EditResult indicating success or failure
-        """
-        # Dispatch table mapping edit types to handler methods
-        handlers = {
-            "insert_tracked": self._handle_insert_tracked,
-            "delete_tracked": self._handle_delete_tracked,
-            "replace_tracked": self._handle_replace_tracked,
-            "insert_paragraph": self._handle_insert_paragraph,
-            "insert_paragraphs": self._handle_insert_paragraphs,
-            "delete_section": self._handle_delete_section,
-            "format_tracked": self._handle_format_tracked,
-            "format_paragraph_tracked": self._handle_format_paragraph_tracked,
-        }
-
-        handler = handlers.get(edit_type)
-        if handler is None:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message=f"Unknown edit type: {edit_type}",
-                error=ValidationError(f"Unknown edit type: {edit_type}"),
-            )
-
-        try:
-            return handler(edit_type, edit)
-        except TextNotFoundError as e:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message=f"Text not found: {e}",
-                error=e,
-            )
-        except AmbiguousTextError as e:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message=f"Ambiguous text: {e}",
-                error=e,
-            )
-        except Exception as e:
-            return EditResult(
-                success=False, edit_type=edit_type, message=f"Error: {str(e)}", error=e
-            )
-
-    def _handle_insert_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle insert_tracked edit type."""
-        text = edit.get("text")
-        after = edit.get("after")
-        author = edit.get("author")
-        scope = edit.get("scope")
-        regex = edit.get("regex", False)
-
-        if not text or not after:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="Missing required parameter: 'text' or 'after'",
-                error=ValidationError("Missing required parameter"),
-            )
-
-        self.insert_tracked(text, after, author=author, scope=scope, regex=regex)
-        return EditResult(
-            success=True,
-            edit_type=edit_type,
-            message=f"Inserted '{text}' after '{after}'",
-        )
-
-    def _handle_delete_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle delete_tracked edit type."""
-        text = edit.get("text")
-        author = edit.get("author")
-        scope = edit.get("scope")
-        regex = edit.get("regex", False)
-
-        if not text:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="Missing required parameter: 'text'",
-                error=ValidationError("Missing required parameter"),
-            )
-
-        self.delete_tracked(text, author=author, scope=scope, regex=regex)
-        return EditResult(success=True, edit_type=edit_type, message=f"Deleted '{text}'")
-
-    def _handle_replace_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle replace_tracked edit type."""
-        find = edit.get("find")
-        replace = edit.get("replace")
-        author = edit.get("author")
-        scope = edit.get("scope")
-        regex = edit.get("regex", False)
-
-        if not find or replace is None:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="Missing required parameter: 'find' or 'replace'",
-                error=ValidationError("Missing required parameter"),
-            )
-
-        self.replace_tracked(find, replace, author=author, scope=scope, regex=regex)
-        return EditResult(
-            success=True,
-            edit_type=edit_type,
-            message=f"Replaced '{find}' with '{replace}'",
-        )
-
-    def _handle_insert_paragraph(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle insert_paragraph edit type."""
-        text = edit.get("text")
-        after = edit.get("after")
-        before = edit.get("before")
-        style = edit.get("style")
-        track = edit.get("track", True)
-        author = edit.get("author")
-        scope = edit.get("scope")
-
-        if not text:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="Missing required parameter: 'text'",
-                error=ValidationError("Missing required parameter"),
-            )
-
-        if not after and not before:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="Missing required parameter: 'after' or 'before'",
-                error=ValidationError("Missing required parameter"),
-            )
-
-        self.insert_paragraph(
-            text,
-            after=after,
-            before=before,
-            style=style,
-            track=track,
-            author=author,
-            scope=scope,
-        )
-        location = f"after '{after}'" if after else f"before '{before}'"
-        return EditResult(
-            success=True,
-            edit_type=edit_type,
-            message=f"Inserted paragraph '{text}' {location}",
-        )
-
-    def _handle_insert_paragraphs(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle insert_paragraphs edit type."""
-        texts = edit.get("texts")
-        after = edit.get("after")
-        before = edit.get("before")
-        style = edit.get("style")
-        track = edit.get("track", True)
-        author = edit.get("author")
-        scope = edit.get("scope")
-
-        if not texts:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="Missing required parameter: 'texts'",
-                error=ValidationError("Missing required parameter"),
-            )
-
-        if not after and not before:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="Missing required parameter: 'after' or 'before'",
-                error=ValidationError("Missing required parameter"),
-            )
-
-        self.insert_paragraphs(
-            texts,
-            after=after,
-            before=before,
-            style=style,
-            track=track,
-            author=author,
-            scope=scope,
-        )
-        location = f"after '{after}'" if after else f"before '{before}'"
-        return EditResult(
-            success=True,
-            edit_type=edit_type,
-            message=f"Inserted {len(texts)} paragraphs {location}",
-        )
-
-    def _handle_delete_section(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle delete_section edit type."""
-        heading = edit.get("heading")
-        track = edit.get("track", True)
-        update_toc = edit.get("update_toc", False)
-        author = edit.get("author")
-        scope = edit.get("scope")
-
-        if not heading:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="Missing required parameter: 'heading'",
-                error=ValidationError("Missing required parameter"),
-            )
-
-        self.delete_section(heading, track=track, update_toc=update_toc, author=author, scope=scope)
-        return EditResult(
-            success=True,
-            edit_type=edit_type,
-            message=f"Deleted section '{heading}'",
-        )
-
-    def _handle_format_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle format_tracked edit type."""
-        text = edit.get("text")
-        if not text:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="Missing required parameter: 'text'",
-                error=ValidationError("Missing required parameter"),
-            )
-
-        format_params = self._extract_character_format_params(edit)
-
-        if not format_params:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="At least one formatting parameter required",
-                error=ValidationError("Missing formatting parameter"),
-            )
-
-        result = self.format_tracked(
-            text,
-            scope=edit.get("scope"),
-            occurrence=edit.get("occurrence", "first"),
-            author=edit.get("author"),
-            **format_params,
-        )
-        return EditResult(
-            success=result.success,
-            edit_type=edit_type,
-            message=f"Formatted '{text}' with {format_params}",
-        )
-
-    def _handle_format_paragraph_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle format_paragraph_tracked edit type."""
-        containing = edit.get("containing")
-        starting_with = edit.get("starting_with")
-        ending_with = edit.get("ending_with")
-        index = edit.get("index")
-
-        if not any([containing, starting_with, ending_with, index is not None]):
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="At least one targeting parameter required",
-                error=ValidationError("Missing targeting parameter"),
-            )
-
-        format_params = self._extract_paragraph_format_params(edit)
-
-        if not format_params:
-            return EditResult(
-                success=False,
-                edit_type=edit_type,
-                message="At least one formatting parameter required",
-                error=ValidationError("Missing formatting parameter"),
-            )
-
-        result = self.format_paragraph_tracked(
-            containing=containing,
-            starting_with=starting_with,
-            ending_with=ending_with,
-            index=index,
-            scope=edit.get("scope"),
-            author=edit.get("author"),
-            **format_params,
-        )
-        target_desc = containing or starting_with or ending_with or f"index {index}"
-        return EditResult(
-            success=result.success,
-            edit_type=edit_type,
-            message=f"Formatted paragraph '{target_desc}' with {format_params}",
-        )
-
-    def _extract_character_format_params(self, edit: dict[str, Any]) -> dict[str, Any]:
-        """Extract character formatting parameters from an edit dict."""
-        format_keys = (
-            "bold",
-            "italic",
-            "underline",
-            "strikethrough",
-            "font_name",
-            "font_size",
-            "color",
-            "highlight",
-            "superscript",
-            "subscript",
-            "small_caps",
-            "all_caps",
-        )
-        return {k: v for k, v in edit.items() if k in format_keys and v is not None}
-
-    def _extract_paragraph_format_params(self, edit: dict[str, Any]) -> dict[str, Any]:
-        """Extract paragraph formatting parameters from an edit dict."""
-        format_keys = (
-            "alignment",
-            "spacing_before",
-            "spacing_after",
-            "line_spacing",
-            "indent_left",
-            "indent_right",
-            "indent_first_line",
-            "indent_hanging",
-        )
-        return {k: v for k, v in edit.items() if k in format_keys and v is not None}
+        return self._batch_ops.apply_edits(edits, stop_on_error=stop_on_error)
 
     def apply_edit_file(
         self, path: str | Path, format: str = "yaml", stop_on_error: bool = False
@@ -3972,41 +3196,7 @@ class Document:
             >>> results = doc.apply_edit_file("edits.yaml")
             >>> print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")
         """
-        file_path = Path(path)
-
-        if not file_path.exists():
-            raise FileNotFoundError(f"Edit file not found: {path}")
-
-        try:
-            with open(file_path, encoding="utf-8") as f:
-                if format == "yaml":
-                    data = yaml.safe_load(f)
-                elif format == "json":
-                    import json
-
-                    data = json.load(f)
-                else:
-                    raise ValidationError(f"Unsupported format: {format}")
-
-            if not isinstance(data, dict):
-                raise ValidationError("Edit file must contain a dictionary/object")
-
-            if "edits" not in data:
-                raise ValidationError("Edit file must contain an 'edits' key")
-
-            edits = data["edits"]
-            if not isinstance(edits, list):
-                raise ValidationError("'edits' must be a list")
-
-            # Apply the edits
-            return self.apply_edits(edits, stop_on_error=stop_on_error)
-
-        except yaml.YAMLError as e:
-            raise ValidationError(f"Failed to parse YAML file: {e}") from e
-        except Exception as e:
-            if isinstance(e, ValidationError | FileNotFoundError):
-                raise
-            raise ValidationError(f"Failed to load edit file: {e}") from e
+        return self._batch_ops.apply_edit_file(path, format=format, stop_on_error=stop_on_error)
 
     def compare_to(
         self,
