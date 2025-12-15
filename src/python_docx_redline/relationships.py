@@ -180,6 +180,37 @@ class RelationshipManager:
 
         return f"rId{next_id}"
 
+    def add_unique_relationship(self, rel_type: str, target: str) -> str:
+        """Add a new relationship, always creating a new ID.
+
+        Unlike add_relationship(), this method does not check for existing
+        relationships of the same type. Use this for relationship types
+        that can have multiple instances, like images.
+
+        Args:
+            rel_type: The relationship type URI
+            target: The target path (relative to the part's directory)
+
+        Returns:
+            The new relationship ID (e.g., "rId3")
+        """
+        self._ensure_loaded()
+        assert self._root is not None
+
+        # Find next available rId
+        next_id = self._next_available_id()
+
+        # Add the new relationship
+        rel_elem = etree.SubElement(self._root, f"{{{RELS_NAMESPACE}}}Relationship")
+        rel_elem.set("Id", f"rId{next_id}")
+        rel_elem.set("Type", rel_type)
+        rel_elem.set("Target", target)
+
+        self._modified = True
+        logger.debug(f"Added unique relationship rId{next_id}: {rel_type} -> {target}")
+
+        return f"rId{next_id}"
+
     def remove_relationship(self, rel_type: str) -> bool:
         """Remove a relationship by type.
 

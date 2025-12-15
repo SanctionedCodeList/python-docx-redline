@@ -29,6 +29,7 @@ from .operations.comments import CommentOperations
 from .operations.comparison import ComparisonOperations
 from .operations.formatting import FormatOperations
 from .operations.header_footer import HeaderFooterOperations
+from .operations.images import ImageOperations
 from .operations.notes import NoteOperations
 from .operations.patterns import PatternOperations
 from .operations.section import SectionOperations
@@ -324,6 +325,13 @@ class Document:
         return self._header_footer_ops_instance
 
     @property
+    def _image_ops(self) -> ImageOperations:
+        """Get the ImageOperations instance (lazy initialization)."""
+        if not hasattr(self, "_image_ops_instance"):
+            self._image_ops_instance = ImageOperations(self)
+        return self._image_ops_instance
+
+    @property
     def _batch_ops(self) -> BatchOperations:
         """Get the BatchOperations instance (lazy initialization)."""
         if not hasattr(self, "_batch_ops_instance"):
@@ -564,6 +572,131 @@ class Document:
             scope=scope,
             regex=regex,
             enable_quote_normalization=enable_quote_normalization,
+        )
+
+    def insert_image(
+        self,
+        image_path: str | Path,
+        after: str | None = None,
+        before: str | None = None,
+        width_inches: float | None = None,
+        height_inches: float | None = None,
+        width_cm: float | None = None,
+        height_cm: float | None = None,
+        name: str | None = None,
+        description: str = "",
+        scope: str | dict | Any | None = None,
+        regex: bool = False,
+    ) -> None:
+        """Insert an image into the document.
+
+        This method searches for the anchor text in the document and inserts
+        the image either immediately after it or immediately before it.
+
+        If neither width nor height is specified, the image's native dimensions
+        are used. If only one dimension is specified, the other is calculated
+        to maintain aspect ratio. If PIL/Pillow is not installed, default
+        dimensions of 2x2 inches are used.
+
+        Args:
+            image_path: Path to the image file (PNG, JPEG, GIF, etc.)
+            after: The text to insert after (optional)
+            before: The text to insert before (optional)
+            width_inches: Width in inches (auto-calculated if not provided)
+            height_inches: Height in inches (auto-calculated if not provided)
+            width_cm: Width in centimeters (alternative to inches)
+            height_cm: Height in centimeters (alternative to inches)
+            name: Display name for the image (defaults to filename)
+            description: Alt text description for accessibility
+            scope: Limit search scope
+            regex: Whether to treat anchor as regex pattern
+
+        Raises:
+            ValueError: If both 'after' and 'before' are specified, or neither
+            TextNotFoundError: If the anchor text is not found
+            AmbiguousTextError: If multiple occurrences of anchor are found
+            FileNotFoundError: If the image file doesn't exist
+
+        Example:
+            >>> doc.insert_image("logo.png", after="Company Name")
+            >>> doc.insert_image("chart.png", after="Figure 1:", width_inches=4.0)
+        """
+        self._image_ops.insert(
+            image_path,
+            after=after,
+            before=before,
+            width_inches=width_inches,
+            height_inches=height_inches,
+            width_cm=width_cm,
+            height_cm=height_cm,
+            name=name,
+            description=description,
+            scope=scope,
+            regex=regex,
+        )
+
+    def insert_image_tracked(
+        self,
+        image_path: str | Path,
+        after: str | None = None,
+        before: str | None = None,
+        width_inches: float | None = None,
+        height_inches: float | None = None,
+        width_cm: float | None = None,
+        height_cm: float | None = None,
+        name: str | None = None,
+        description: str = "",
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+        regex: bool = False,
+    ) -> None:
+        """Insert an image with tracked changes.
+
+        This method wraps the image insertion in a tracked change so it
+        appears as an insertion in Word's review pane.
+
+        If neither width nor height is specified, the image's native dimensions
+        are used. If only one dimension is specified, the other is calculated
+        to maintain aspect ratio. If PIL/Pillow is not installed, default
+        dimensions of 2x2 inches are used.
+
+        Args:
+            image_path: Path to the image file (PNG, JPEG, GIF, etc.)
+            after: The text to insert after (optional)
+            before: The text to insert before (optional)
+            width_inches: Width in inches (auto-calculated if not provided)
+            height_inches: Height in inches (auto-calculated if not provided)
+            width_cm: Width in centimeters (alternative to inches)
+            height_cm: Height in centimeters (alternative to inches)
+            name: Display name for the image (defaults to filename)
+            description: Alt text description for accessibility
+            author: Author for the tracked change (uses document author if None)
+            scope: Limit search scope
+            regex: Whether to treat anchor as regex pattern
+
+        Raises:
+            ValueError: If both 'after' and 'before' are specified, or neither
+            TextNotFoundError: If the anchor text is not found
+            AmbiguousTextError: If multiple occurrences of anchor are found
+            FileNotFoundError: If the image file doesn't exist
+
+        Example:
+            >>> doc.insert_image_tracked("signature.png", after="Authorized By:")
+            >>> doc.insert_image_tracked("stamp.png", after="Approved", author="Legal")
+        """
+        self._image_ops.insert_tracked(
+            image_path,
+            after=after,
+            before=before,
+            width_inches=width_inches,
+            height_inches=height_inches,
+            width_cm=width_cm,
+            height_cm=height_cm,
+            name=name,
+            description=description,
+            author=author,
+            scope=scope,
+            regex=regex,
         )
 
     def delete_tracked(

@@ -104,6 +104,77 @@ class ContentTypeManager:
         """
         return self.get_content_type(part_name) is not None
 
+    def get_default(self, extension: str) -> str | None:
+        """Get the content type for a file extension default.
+
+        Args:
+            extension: The file extension without dot (e.g., "png", "jpeg")
+
+        Returns:
+            The content type string if found, None otherwise
+        """
+        self._ensure_loaded()
+        assert self._root is not None
+
+        for default in self._root:
+            if default.tag == f"{{{CONTENT_TYPES_NAMESPACE}}}Default":
+                if default.get("Extension") == extension:
+                    return default.get("ContentType")
+
+        return None
+
+    def has_default(self, extension: str) -> bool:
+        """Check if a default exists for the given extension.
+
+        Args:
+            extension: The file extension without dot (e.g., "png", "jpeg")
+
+        Returns:
+            True if a default exists for this extension
+        """
+        return self.get_default(extension) is not None
+
+    def add_default(self, extension: str, content_type: str) -> bool:
+        """Add a default content type for a file extension.
+
+        If a default already exists for the extension, this is a no-op.
+
+        Args:
+            extension: The file extension without dot (e.g., "png", "jpeg")
+            content_type: The content type (e.g., "image/png")
+
+        Returns:
+            True if a new default was added, False if it already existed
+        """
+        self._ensure_loaded()
+        assert self._root is not None
+
+        # Check if default already exists
+        if self.has_default(extension):
+            logger.debug(f"Content type default already exists for {extension}")
+            return False
+
+        # Add the new default at the beginning (after existing Defaults)
+        default = etree.Element(f"{{{CONTENT_TYPES_NAMESPACE}}}Default")
+        default.set("Extension", extension)
+        default.set("ContentType", content_type)
+
+        # Insert before the first Override or at the end
+        inserted = False
+        for i, child in enumerate(self._root):
+            if child.tag == f"{{{CONTENT_TYPES_NAMESPACE}}}Override":
+                self._root.insert(i, default)
+                inserted = True
+                break
+
+        if not inserted:
+            self._root.append(default)
+
+        self._modified = True
+        logger.debug(f"Added content type default: {extension} -> {content_type}")
+
+        return True
+
     def add_override(self, part_name: str, content_type: str) -> bool:
         """Add a content type override for a part.
 
@@ -231,3 +302,23 @@ class ContentTypes:
     FONT_TABLE = "application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"
     HEADER = "application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"
     FOOTER = "application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"
+
+    # Image content types (for Default entries)
+    IMAGE_PNG = "image/png"
+    IMAGE_JPEG = "image/jpeg"
+    IMAGE_GIF = "image/gif"
+    IMAGE_BMP = "image/bmp"
+    IMAGE_TIFF = "image/tiff"
+    IMAGE_WEBP = "image/webp"
+
+    # Extension to content type mapping
+    IMAGE_EXTENSION_MAP = {
+        "png": IMAGE_PNG,
+        "jpg": IMAGE_JPEG,
+        "jpeg": IMAGE_JPEG,
+        "gif": IMAGE_GIF,
+        "bmp": IMAGE_BMP,
+        "tif": IMAGE_TIFF,
+        "tiff": IMAGE_TIFF,
+        "webp": IMAGE_WEBP,
+    }

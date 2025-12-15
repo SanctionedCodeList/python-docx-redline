@@ -113,13 +113,21 @@ doc.save("contract_edited.docx")
 - ✅ **LibreOffice backend** - high-fidelity rendering with full formatting support
 - ✅ **Configurable output** - custom DPI, prefix, and output directory
 
+**Phase 10 - Image Operations:**
+- ✅ **Insert images** - add images at specific locations in documents
+- ✅ **Tracked image insertion** - images appear as tracked insertions in Word's review pane
+- ✅ **Multiple formats** - supports PNG, JPEG, GIF, BMP, TIFF, WebP
+- ✅ **Dimension control** - specify width/height in inches or centimeters
+- ✅ **Auto-scaling** - maintains aspect ratio when only one dimension specified
+- ✅ **Alt text** - accessibility descriptions for images
+
 **General:**
 - ✅ **python-docx integration** - seamlessly convert between libraries
 - ✅ **In-memory workflows** - load from bytes/BytesIO, save to bytes
 - ✅ **Batch operations** - apply multiple edits efficiently
 - ✅ **YAML/JSON support** - define edits in configuration files
 - ✅ **Type hints** - full type annotation support
-- ✅ **Thoroughly tested** - 1050+ tests with 88% coverage
+- ✅ **Thoroughly tested** - 1080+ tests with 88% coverage
 
 ## Installation
 
@@ -609,6 +617,51 @@ images = render_document_to_images(
 )
 ```
 
+### Image Insertion (Phase 10)
+
+Insert images into documents with optional tracked changes:
+
+```python
+from python_docx_redline import Document
+
+doc = Document("contract.docx")
+
+# Basic image insertion
+doc.insert_image("logo.png", after="Company Name:")
+
+# With specific dimensions
+doc.insert_image(
+    "chart.png",
+    after="Figure 1:",
+    width_inches=4.0,
+    height_inches=3.0
+)
+
+# Tracked insertion (appears in Word's review pane)
+doc.insert_image_tracked(
+    "signature.png",
+    after="Authorized By:",
+    author="Legal Team"
+)
+
+# With alt text for accessibility
+doc.insert_image(
+    "diagram.png",
+    after="See diagram:",
+    description="Network architecture diagram",
+    width_cm=10.0  # Can use centimeters
+)
+
+doc.save("contract_with_images.docx")
+```
+
+**Supported formats:** PNG, JPEG, GIF, BMP, TIFF, WebP
+
+**Dimension behavior:**
+- If neither width nor height specified: uses native image dimensions
+- If only one specified: other calculated to maintain aspect ratio
+- If PIL/Pillow not installed: defaults to 2x2 inches
+
 ### Using Scopes
 
 Limit operations to specific sections or paragraphs:
@@ -757,6 +810,12 @@ Save the document to bytes (in-memory). Useful for passing documents between lib
 
 #### `render_to_images(output_dir=None, dpi=150, prefix="page", timeout=120)`
 Render document pages to PNG images using LibreOffice. Requires LibreOffice and poppler-utils. Returns `list[Path]`.
+
+#### `insert_image(image_path, after=None, before=None, width_inches=None, height_inches=None, width_cm=None, height_cm=None, name=None, description="", scope=None, regex=False)`
+Insert an image at a specific location. Supports PNG, JPEG, GIF, BMP, TIFF, WebP. Dimensions auto-calculated from image if not specified (requires PIL/Pillow).
+
+#### `insert_image_tracked(image_path, after=None, before=None, width_inches=None, height_inches=None, width_cm=None, height_cm=None, name=None, description="", author=None, scope=None, regex=False)`
+Insert an image with tracked changes. The image insertion appears in Word's review pane as a tracked insertion.
 
 ### Compatibility Functions
 

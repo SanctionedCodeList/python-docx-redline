@@ -20,6 +20,20 @@ W16DU_NAMESPACE = "http://schemas.microsoft.com/office/word/2023/wordml"  # Word
 
 
 # =============================================================================
+# DrawingML Namespaces
+# =============================================================================
+
+# DrawingML main namespace
+A_NAMESPACE = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+# Drawing picture namespace
+PIC_NAMESPACE = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+
+# Word Processing Drawing namespace (inline/anchor positioning)
+WP_NAMESPACE = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+
+
+# =============================================================================
 # Package and Relationship Namespaces
 # =============================================================================
 
@@ -80,6 +94,14 @@ NSMAP_FULL = {
     "w16du": W16DU_NAMESPACE,
     "r": OFFICE_RELATIONSHIPS_NAMESPACE,
     "mc": MC_NAMESPACE,
+}
+
+# DrawingML namespace map
+NSMAP_DRAWING = {
+    "a": A_NAMESPACE,
+    "pic": PIC_NAMESPACE,
+    "wp": WP_NAMESPACE,
+    "r": OFFICE_RELATIONSHIPS_NAMESPACE,
 }
 
 
@@ -152,3 +174,51 @@ def w16du(tag: str) -> str:
         Fully qualified tag with w16du namespace
     """
     return f"{{{W16DU_NAMESPACE}}}{tag}"
+
+
+def a(tag: str) -> str:
+    """Create a fully qualified DrawingML main namespace tag.
+
+    Args:
+        tag: Tag name without namespace prefix (e.g., "blip", "ext")
+
+    Returns:
+        Fully qualified tag with DrawingML main namespace
+    """
+    return f"{{{A_NAMESPACE}}}{tag}"
+
+
+def pic(tag: str) -> str:
+    """Create a fully qualified DrawingML picture namespace tag.
+
+    Args:
+        tag: Tag name without namespace prefix (e.g., "pic", "blipFill")
+
+    Returns:
+        Fully qualified tag with DrawingML picture namespace
+    """
+    return f"{{{PIC_NAMESPACE}}}{tag}"
+
+
+def wp(tag: str) -> str:
+    """Create a fully qualified Word Processing Drawing namespace tag.
+
+    Args:
+        tag: Tag name without namespace prefix (e.g., "inline", "extent")
+
+    Returns:
+        Fully qualified tag with WP drawing namespace
+    """
+    return f"{{{WP_NAMESPACE}}}{tag}"
+
+
+def r(tag: str) -> str:
+    """Create a fully qualified Office Relationships namespace tag.
+
+    Args:
+        tag: Tag name without namespace prefix (e.g., "embed")
+
+    Returns:
+        Fully qualified tag with relationship namespace
+    """
+    return f"{{{OFFICE_RELATIONSHIPS_NAMESPACE}}}{tag}"

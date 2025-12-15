@@ -11,6 +11,7 @@ from .comments import CommentOperations
 from .comparison import ComparisonOperations
 from .formatting import FormatOperations
 from .header_footer import HeaderFooterOperations
+from .images import ImageOperations
 from .notes import NoteOperations
 from .patterns import PatternOperations
 from .section import SectionOperations
@@ -24,6 +25,7 @@ __all__ = [
     "ComparisonOperations",
     "FormatOperations",
     "HeaderFooterOperations",
+    "ImageOperations",
     "NoteOperations",
     "PatternOperations",
     "SectionOperations",
