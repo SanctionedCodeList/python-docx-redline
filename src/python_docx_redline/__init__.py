@@ -20,6 +20,8 @@ __all__ = [
     "OOXMLPackage",
     "RelationshipManager",
     "RelationshipTypes",
+    "ContentTypeManager",
+    "ContentTypes",
     "AuthorIdentity",
     "from_python_docx",
     "to_python_docx",
@@ -64,6 +66,9 @@ from .author import AuthorIdentity
 
 # Import compatibility helpers (python-docx integration)
 from .compat import from_python_docx, to_python_docx
+
+# Import content type manager
+from .content_types import ContentTypeManager, ContentTypes
 
 # Import document class and standalone functions
 from .document import Document, compare_documents

@@ -27,6 +27,7 @@ from lxml import etree
 
 from .author import AuthorIdentity
 from .constants import WORD_NAMESPACE
+from .content_types import ContentTypeManager, ContentTypes
 from .errors import AmbiguousTextError, TextNotFoundError
 from .format_builder import ParagraphPropertyBuilder, RunPropertyBuilder
 from .minimal_diff import (
@@ -3644,35 +3645,16 @@ class Document:
                 rel_mgr.save()
 
             # Remove comment content types from [Content_Types].xml
-            content_types_path = self._temp_dir / "[Content_Types].xml"
-            if content_types_path.exists():
-                from lxml import etree as lxml_etree
-
-                ct_tree = lxml_etree.parse(str(content_types_path))
-                ct_root = ct_tree.getroot()
-
-                # Find and remove comment content type overrides
-                ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+            if self._package:
+                ct_mgr = ContentTypeManager(self._package)
                 comment_part_names = [
                     "/word/comments.xml",
                     "/word/commentsExtended.xml",
                     "/word/commentsIds.xml",
                     "/word/commentsExtensible.xml",
                 ]
-
-                for override in list(ct_root):
-                    if override.tag == f"{{{ct_ns}}}Override":
-                        part_name = override.get("PartName")
-                        if part_name in comment_part_names:
-                            ct_root.remove(override)
-
-                # Write back the modified content types
-                ct_tree.write(
-                    str(content_types_path),
-                    encoding="utf-8",
-                    xml_declaration=True,
-                    pretty_print=False,
-                )
+                ct_mgr.remove_overrides(comment_part_names)
+                ct_mgr.save()
 
     def add_comment(
         self,
@@ -4038,41 +4020,12 @@ class Document:
 
     def _ensure_comments_content_type(self) -> None:
         """Ensure comments.xml content type exists in [Content_Types].xml."""
-        if not self._temp_dir:
+        if not self._package:
             return
 
-        content_types_path = self._temp_dir / "[Content_Types].xml"
-        ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
-        comments_part_name = "/word/comments.xml"
-        comments_content_type = (
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
-        )
-
-        if content_types_path.exists():
-            ct_tree = etree.parse(str(content_types_path))
-            ct_root = ct_tree.getroot()
-
-            # Check if override already exists
-            for override in ct_root:
-                if override.tag == f"{{{ct_ns}}}Override":
-                    if override.get("PartName") == comments_part_name:
-                        return  # Already exists
-        else:
-            # This shouldn't happen for valid docx, but handle it
-            ct_root = etree.Element(f"{{{ct_ns}}}Types", nsmap={None: ct_ns})
-            ct_tree = etree.ElementTree(ct_root)
-
-        # Add override
-        override = etree.SubElement(ct_root, f"{{{ct_ns}}}Override")
-        override.set("PartName", comments_part_name)
-        override.set("ContentType", comments_content_type)
-
-        ct_tree.write(
-            str(content_types_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
+        ct_mgr = ContentTypeManager(self._package)
+        ct_mgr.add_override("/word/comments.xml", ContentTypes.COMMENTS)
+        ct_mgr.save()
 
     def _generate_para_id(self) -> str:
         """Generate a unique paraId for comment paragraphs.
@@ -4179,40 +4132,12 @@ class Document:
 
     def _ensure_comments_extended_content_type(self) -> None:
         """Ensure commentsExtended.xml content type exists."""
-        if not self._temp_dir:
+        if not self._package:
             return
 
-        content_types_path = self._temp_dir / "[Content_Types].xml"
-        ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
-        part_name = "/word/commentsExtended.xml"
-        content_type = (
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"
-        )
-
-        if content_types_path.exists():
-            ct_tree = etree.parse(str(content_types_path))
-            ct_root = ct_tree.getroot()
-
-            # Check if override already exists
-            for override in ct_root:
-                if override.tag == f"{{{ct_ns}}}Override":
-                    if override.get("PartName") == part_name:
-                        return
-        else:
-            ct_root = etree.Element(f"{{{ct_ns}}}Types", nsmap={None: ct_ns})
-            ct_tree = etree.ElementTree(ct_root)
-
-        # Add override
-        override = etree.SubElement(ct_root, f"{{{ct_ns}}}Override")
-        override.set("PartName", part_name)
-        override.set("ContentType", content_type)
-
-        ct_tree.write(
-            str(content_types_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
+        ct_mgr = ContentTypeManager(self._package)
+        ct_mgr.add_override("/word/commentsExtended.xml", ContentTypes.COMMENTS_EXTENDED)
+        ct_mgr.save()
 
     def _delete_comment(self, comment_id: str, para_id: str | None) -> None:
         """Delete a comment by ID.
@@ -6490,71 +6415,21 @@ class Document:
 
     def _ensure_footnotes_content_type(self) -> None:
         """Ensure footnotes.xml content type exists in [Content_Types].xml."""
-        if not self._temp_dir:
+        if not self._package:
             return
 
-        content_types_path = self._temp_dir / "[Content_Types].xml"
-        ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
-
-        footnotes_part_name = "/word/footnotes.xml"
-        footnotes_content_type = (
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"
-        )
-
-        tree = etree.parse(str(content_types_path))
-        root = tree.getroot()
-
-        # Check if already exists
-        for override in root.findall(f"{{{ct_ns}}}Override"):
-            if override.get("PartName") == footnotes_part_name:
-                return  # Already exists
-
-        # Add Override element
-        override_elem = etree.SubElement(root, f"{{{ct_ns}}}Override")
-        override_elem.set("PartName", footnotes_part_name)
-        override_elem.set("ContentType", footnotes_content_type)
-
-        # Write content types
-        tree.write(
-            str(content_types_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
+        ct_mgr = ContentTypeManager(self._package)
+        ct_mgr.add_override("/word/footnotes.xml", ContentTypes.FOOTNOTES)
+        ct_mgr.save()
 
     def _ensure_endnotes_content_type(self) -> None:
         """Ensure endnotes.xml content type exists in [Content_Types].xml."""
-        if not self._temp_dir:
+        if not self._package:
             return
 
-        content_types_path = self._temp_dir / "[Content_Types].xml"
-        ct_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
-
-        endnotes_part_name = "/word/endnotes.xml"
-        endnotes_content_type = (
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"
-        )
-
-        tree = etree.parse(str(content_types_path))
-        root = tree.getroot()
-
-        # Check if already exists
-        for override in root.findall(f"{{{ct_ns}}}Override"):
-            if override.get("PartName") == endnotes_part_name:
-                return  # Already exists
-
-        # Add Override element
-        override_elem = etree.SubElement(root, f"{{{ct_ns}}}Override")
-        override_elem.set("PartName", endnotes_part_name)
-        override_elem.set("ContentType", endnotes_content_type)
-
-        # Write content types
-        tree.write(
-            str(content_types_path),
-            encoding="utf-8",
-            xml_declaration=True,
-            pretty_print=True,
-        )
+        ct_mgr = ContentTypeManager(self._package)
+        ct_mgr.add_override("/word/endnotes.xml", ContentTypes.ENDNOTES)
+        ct_mgr.save()
 
     # ========================================================================
     # HEADER / FOOTER METHODS
