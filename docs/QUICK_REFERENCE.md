@@ -87,6 +87,19 @@ doc.delete_section(
 )
 ```
 
+### Insert Images
+
+```python
+# Basic image insertion
+doc.insert_image("logo.png", after="Company Name:")
+
+# With dimensions
+doc.insert_image("chart.png", after="Figure 1:", width_inches=4.0)
+
+# Tracked insertion (appears in Word's review pane)
+doc.insert_image_tracked("signature.png", after="Authorized By:")
+```
+
 ---
 
 ## Scope System
@@ -203,6 +216,25 @@ doc.reject_all_changes()
 
 # Delete comments
 doc.delete_all_comments()
+```
+
+### Comments
+
+```python
+# Add comment on text
+comment = doc.add_comment("Please review", on="target text")
+
+# Add comment on tracked insertion (text inside w:ins)
+doc.insert_tracked("new clause", after="Section 1")
+doc.add_comment("Review this addition", on="new clause")
+
+# Add comment on tracked deletion (text inside w:del)
+doc.delete_tracked("old term")
+doc.add_comment("Why removed?", on="old term")
+
+# Access comments
+for c in doc.comments:
+    print(f"{c.author}: {c.text} on '{c.marked_text}'")
 ```
 
 ### Validation

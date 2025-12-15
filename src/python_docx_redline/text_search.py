@@ -37,17 +37,24 @@ def _parse_tag(tag: str) -> str:
 def _get_run_text(run: Any) -> str:
     """Extract text from a run, avoiding XML structural whitespace.
 
-    Only extracts text from w:t elements to avoid inter-element whitespace.
+    Extracts text from both w:t and w:delText elements to support searching
+    in deleted text (tracked changes). This allows adding comments on text
+    that has been marked for deletion.
 
     Args:
         run: A w:r (run) Element
 
     Returns:
-        Text content of the run
+        Text content of the run (includes both normal and deleted text)
     """
     # Find all w:t elements within this run
     text_elements = run.findall(f".//{{{WORD_NAMESPACE}}}t")
-    return "".join(elem.text or "" for elem in text_elements)
+    # Also find w:delText elements (deleted text in tracked changes)
+    deltext_elements = run.findall(f".//{{{WORD_NAMESPACE}}}delText")
+
+    # Combine both types of text elements
+    all_text_elements = text_elements + deltext_elements
+    return "".join(elem.text or "" for elem in all_text_elements)
 
 
 @dataclass

@@ -514,6 +514,9 @@ class CommentOperations:
         Inserts commentRangeStart before the match, commentRangeEnd after,
         and commentReference in a new run after the end marker.
 
+        This handles runs that may be nested inside w:ins or w:del elements
+        by finding the direct paragraph child containing each run.
+
         Args:
             match: TextSpan object representing the text to annotate
             comment_id: The comment ID to use
@@ -533,22 +536,60 @@ class CommentOperations:
         ref = etree.SubElement(ref_run, f"{{{WORD_NAMESPACE}}}commentReference")
         ref.set(f"{{{WORD_NAMESPACE}}}id", comment_id_str)
 
-        # Find positions in paragraph
+        # Find positions in paragraph - handle nested runs (inside w:ins, w:del)
         start_run = match.runs[match.start_run_index]
         end_run = match.runs[match.end_run_index]
 
-        # Get indices
+        # Find the direct paragraph children that contain our runs
+        # (might be the run itself if not nested, or a w:ins/w:del wrapper)
+        start_para_child = self._find_paragraph_child_containing(paragraph, start_run)
+        end_para_child = self._find_paragraph_child_containing(paragraph, end_run)
+
+        # Get indices of the direct paragraph children
         children = list(paragraph)
-        start_run_index = children.index(start_run)
-        end_run_index = children.index(end_run)
+        start_child_index = children.index(start_para_child)
+        end_child_index = children.index(end_para_child)
 
         # Insert in reverse order to maintain correct indices
-        # 1. Insert reference run after end run
-        paragraph.insert(end_run_index + 1, ref_run)
-        # 2. Insert range end after end run (before reference)
-        paragraph.insert(end_run_index + 1, range_end)
-        # 3. Insert range start before start run
-        paragraph.insert(start_run_index, range_start)
+        # 1. Insert reference run after end child
+        paragraph.insert(end_child_index + 1, ref_run)
+        # 2. Insert range end after end child (before reference)
+        paragraph.insert(end_child_index + 1, range_end)
+        # 3. Insert range start before start child
+        paragraph.insert(start_child_index, range_start)
+
+    def _find_paragraph_child_containing(
+        self, paragraph: etree._Element, target: etree._Element
+    ) -> etree._Element:
+        """Find the direct child of paragraph that contains the target element.
+
+        If target is a direct child of paragraph, returns target.
+        Otherwise, walks up the tree from target until finding a direct child.
+
+        This handles cases where runs are nested inside w:ins or w:del elements.
+
+        Args:
+            paragraph: The paragraph element
+            target: The element to find (typically a run)
+
+        Returns:
+            The direct child of paragraph containing target
+        """
+        # Check if target is already a direct child
+        if target.getparent() is paragraph:
+            return target
+
+        # Walk up from target until we find a direct child of paragraph
+        current = target
+        while current is not None:
+            parent = current.getparent()
+            if parent is paragraph:
+                return current
+            current = parent
+
+        # Fallback: should not happen if target is actually in paragraph
+        # but return target to avoid breaking
+        return target
 
     def _add_comment_to_comments_xml(
         self,

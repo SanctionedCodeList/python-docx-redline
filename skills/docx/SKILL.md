@@ -234,6 +234,46 @@ for result in results:
 doc.save("contract_edited.docx")
 ```
 
+### Image Insertion
+
+Insert images into documents with optional tracked changes:
+
+```python
+from python_docx_redline import Document
+
+doc = Document("contract.docx")
+
+# Basic image insertion
+doc.insert_image("logo.png", after="Company Name:")
+
+# With custom dimensions
+doc.insert_image(
+    "chart.png",
+    after="Figure 1:",
+    width_inches=4.0,
+    height_inches=3.0
+)
+
+# With alt text for accessibility
+doc.insert_image(
+    "diagram.png",
+    after="See diagram:",
+    name="Process Diagram",
+    description="Workflow diagram showing approval process"
+)
+
+# Tracked image insertion (appears in Word's review pane)
+doc.insert_image_tracked(
+    "signature.png",
+    after="Authorized By:",
+    author="Legal Team"
+)
+
+doc.save("contract_with_images.docx")
+```
+
+Supported formats: PNG, JPEG, GIF, BMP, TIFF.
+
 ### MS365 Identity Integration
 
 Link changes to real MS365 users with full identity information:
@@ -289,10 +329,39 @@ doc.replace_tracked("old", "new")
 doc_bytes = doc.save_to_bytes()
 ```
 
+### Adding Comments
+
+Add comments to any text, including text inside tracked changes:
+
+```python
+from python_docx_redline import Document
+
+doc = Document("contract.docx")
+
+# Add comment on normal text
+comment = doc.add_comment("Please review this", on="Section 2.1")
+
+# Add comment on tracked insertion (text inside w:ins)
+doc.insert_tracked("new clause", after="Agreement")
+doc.add_comment("Review this addition", on="new clause")
+
+# Add comment on tracked deletion (text inside w:del)
+doc.delete_tracked("old term")
+doc.add_comment("Why was this removed?", on="old term")
+
+# Comments can span tracked/untracked boundaries
+doc.add_comment("Check this section", on="normal inserted")
+
+# Access existing comments
+for comment in doc.comments:
+    print(f"{comment.author}: {comment.text} on '{comment.marked_text}'")
+
+doc.save("contract_with_comments.docx")
+```
+
 ## Advanced: Raw OOXML editing
 
 Use raw OOXML manipulation only for scenarios not supported by python-docx-redline:
-- Adding comments with tracked changes
 - Modifying another author's tracked changes
 - Inserting images with tracked changes
 - Complex nested revision scenarios
@@ -511,9 +580,11 @@ Options:
 | Scoped edits | - | **Best** | Manual |
 | Batch from YAML | - | **Best** | Manual |
 | Render to images | - | **Best** | Manual |
-| Add comments | - | - | **Required** |
+| Add comments | - | **Best** | Possible |
+| Comments on tracked text | - | **Best** | Manual |
+| Insert images | - | **Best** | Manual |
+| Insert images w/ tracking | - | **Best** | Manual |
 | Modify other's changes | - | - | **Required** |
-| Insert images w/ tracking | - | - | **Required** |
 
 ## Code Style Guidelines
 

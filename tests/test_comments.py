@@ -1503,3 +1503,279 @@ class TestCommentReplies:
 
         finally:
             doc_path.unlink()
+
+
+class TestCommentOnTrackedChanges:
+    """Tests for adding comments on text inside tracked changes (w:ins, w:del)."""
+
+    def _create_document_with_tracked_insertion(self) -> Path:
+        """Create a test document with tracked insertion text."""
+        doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        # Document with w:ins containing text
+        document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:xml="http://www.w3.org/XML/1998/namespace">
+<w:body>
+<w:p>
+  <w:r><w:t xml:space="preserve">This is </w:t></w:r>
+  <w:ins w:id="0" w:author="Editor" w:date="2025-01-15T10:00:00Z">
+    <w:r><w:t>inserted text</w:t></w:r>
+  </w:ins>
+  <w:r><w:t xml:space="preserve"> in a paragraph.</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+        content_types_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+        root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+        with zipfile.ZipFile(doc_path, "w") as docx:
+            docx.writestr("[Content_Types].xml", content_types_xml)
+            docx.writestr("_rels/.rels", root_rels)
+            docx.writestr("word/document.xml", document_xml)
+
+        return doc_path
+
+    def _create_document_with_tracked_deletion(self) -> Path:
+        """Create a test document with tracked deletion text."""
+        doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        # Document with w:del containing text
+        document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:xml="http://www.w3.org/XML/1998/namespace">
+<w:body>
+<w:p>
+  <w:r><w:t xml:space="preserve">This is </w:t></w:r>
+  <w:del w:id="0" w:author="Editor" w:date="2025-01-15T10:00:00Z">
+    <w:r><w:delText>deleted text</w:delText></w:r>
+  </w:del>
+  <w:r><w:t xml:space="preserve"> in a paragraph.</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+        content_types_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+        root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+        with zipfile.ZipFile(doc_path, "w") as docx:
+            docx.writestr("[Content_Types].xml", content_types_xml)
+            docx.writestr("_rels/.rels", root_rels)
+            docx.writestr("word/document.xml", document_xml)
+
+        return doc_path
+
+    def _create_document_with_tracked_boundary(self) -> Path:
+        """Create a document with text spanning tracked/untracked boundary."""
+        doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        # Document with normal text followed by tracked insertion
+        document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:xml="http://www.w3.org/XML/1998/namespace">
+<w:body>
+<w:p>
+  <w:r><w:t xml:space="preserve">normal </w:t></w:r>
+  <w:ins w:id="0" w:author="Editor" w:date="2025-01-15T10:00:00Z">
+    <w:r><w:t>inserted</w:t></w:r>
+  </w:ins>
+  <w:r><w:t xml:space="preserve"> text</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+        content_types_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+        root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+        with zipfile.ZipFile(doc_path, "w") as docx:
+            docx.writestr("[Content_Types].xml", content_types_xml)
+            docx.writestr("_rels/.rels", root_rels)
+            docx.writestr("word/document.xml", document_xml)
+
+        return doc_path
+
+    def test_add_comment_on_tracked_insertion(self) -> None:
+        """Test adding a comment on text inside a w:ins element."""
+        doc_path = self._create_document_with_tracked_insertion()
+        try:
+            doc = Document(doc_path)
+
+            # The text "inserted text" is inside a w:ins element
+            comment = doc.add_comment(
+                "Please review this addition",
+                on="inserted text",
+                author="Reviewer",
+            )
+
+            # Verify comment was created
+            assert comment.text == "Please review this addition"
+            assert comment.marked_text == "inserted text"
+
+            # Verify comment appears in doc.comments
+            comments = doc.comments
+            assert len(comments) == 1
+            assert comments[0].marked_text == "inserted text"
+
+        finally:
+            doc_path.unlink()
+
+    def test_add_comment_on_tracked_insertion_with_normal_text(self) -> None:
+        """Test adding a comment on normal text in a document with tracked insertions."""
+        doc_path = self._create_document_with_tracked_insertion()
+        try:
+            doc = Document(doc_path)
+
+            # Add comment on the normal text (not the tracked insertion)
+            comment = doc.add_comment(
+                "Review paragraph start",
+                on="This is",
+                author="Reviewer",
+            )
+
+            # Verify comment was created on normal text
+            assert comment.text == "Review paragraph start"
+            assert comment.marked_text == "This is"
+
+        finally:
+            doc_path.unlink()
+
+    def test_add_comment_on_tracked_deletion(self) -> None:
+        """Test adding a comment on text inside a w:del element."""
+        doc_path = self._create_document_with_tracked_deletion()
+        try:
+            doc = Document(doc_path)
+
+            # The text "deleted text" is inside a w:del element
+            # Note: w:del uses w:delText instead of w:t
+            comment = doc.add_comment(
+                "Why was this removed?",
+                on="deleted text",
+                author="Reviewer",
+            )
+
+            # Verify comment was created
+            assert comment.text == "Why was this removed?"
+            assert comment.marked_text == "deleted text"
+
+        finally:
+            doc_path.unlink()
+
+    def test_add_comment_spanning_tracked_boundary(self) -> None:
+        """Test adding a comment on text that spans tracked/untracked boundary."""
+        doc_path = self._create_document_with_tracked_boundary()
+        try:
+            doc = Document(doc_path)
+
+            # Text "normal inserted" spans from normal text into w:ins
+            comment = doc.add_comment(
+                "Review this section",
+                on="normal inserted",
+                author="Reviewer",
+            )
+
+            # Verify comment was created
+            assert comment.text == "Review this section"
+            assert comment.marked_text == "normal inserted"
+
+        finally:
+            doc_path.unlink()
+
+    def test_add_comment_persists_after_save_reload_with_tracked_changes(self) -> None:
+        """Test that comments on tracked text persist after save and reload."""
+        doc_path = self._create_document_with_tracked_insertion()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            # Create and save
+            doc = Document(doc_path)
+            doc.add_comment(
+                "Review insertion",
+                on="inserted text",
+                author="Reviewer",
+            )
+            doc.save(output_path)
+
+            # Reload and verify
+            doc2 = Document(output_path)
+            comments = doc2.comments
+            assert len(comments) == 1
+            assert comments[0].text == "Review insertion"
+            assert comments[0].marked_text == "inserted text"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_add_comment_after_insert_tracked(self) -> None:
+        """Test adding a comment on text that was just inserted via insert_tracked."""
+        doc_path = create_document_without_comments()
+        try:
+            doc = Document(doc_path, author="Editor")
+
+            # Insert some text with tracking
+            doc.insert_tracked("new clause", after="Simple")
+
+            # Now add a comment on the inserted text
+            comment = doc.add_comment(
+                "Please review this addition",
+                on="new clause",
+                author="Reviewer",
+            )
+
+            assert comment.text == "Please review this addition"
+            assert comment.marked_text == "new clause"
+
+        finally:
+            doc_path.unlink()
+
+    def test_add_comment_after_delete_tracked(self) -> None:
+        """Test adding a comment on text that was just marked for deletion."""
+        doc_path = create_document_without_comments()
+        try:
+            doc = Document(doc_path, author="Editor")
+
+            # Delete some text with tracking
+            doc.delete_tracked("without")
+
+            # Now try to add a comment on the deleted text
+            # This should work since the deleted text is still visible with strikethrough
+            comment = doc.add_comment(
+                "Why was this removed?",
+                on="without",
+                author="Reviewer",
+            )
+
+            assert comment.text == "Why was this removed?"
+            assert comment.marked_text == "without"
+
+        finally:
+            doc_path.unlink()
