@@ -154,13 +154,14 @@ class TextSearch:
         case_sensitive: bool = True,
         regex: bool = False,
         normalize_quotes_for_matching: bool = False,
+        fuzzy: dict[str, Any] | None = None,
     ) -> list[TextSpan]:
         """Find all occurrences of text in the given paragraphs.
 
         This is the core algorithm that handles text fragmentation:
         1. Build a character map that tracks which run each character belongs to
         2. Concatenate all text from all runs
-        3. Search in the concatenated text (literal or regex)
+        3. Search in the concatenated text (literal, regex, or fuzzy)
         4. Map the results back to the original runs
 
         Args:
@@ -170,19 +171,35 @@ class TextSearch:
             regex: Whether to treat text as a regex pattern (default: False)
             normalize_quotes_for_matching: Normalize quotes to straight quotes for matching
                 (default: False)
+            fuzzy: Fuzzy matching configuration dict with keys:
+                - threshold: Similarity threshold (0.0 to 1.0)
+                - algorithm: Matching algorithm (ratio, partial_ratio, etc.)
+                - normalize_whitespace: Whether to normalize whitespace
+                (default: None for exact matching)
 
         Returns:
             List of TextSpan objects representing each match
 
         Raises:
             re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
         """
         from .quote_normalization import normalize_quotes as normalize_quotes_func
 
         results = []
 
+        # Fuzzy and regex are mutually exclusive
+        if fuzzy and regex:
+            raise ValueError("Cannot use both fuzzy matching and regex")
+
         # Prepare search pattern
-        if regex:
+        if fuzzy:
+            # Fuzzy matching mode - import fuzzy functions
+            from .fuzzy import fuzzy_find_all
+
+            search_text = text  # Keep original for fuzzy matching
+            pattern = None
+        elif regex:
             # Compile regex pattern with case sensitivity flag
             flags = 0 if case_sensitive else re.IGNORECASE
             try:
@@ -220,13 +237,39 @@ class TextSearch:
 
             # Normalize document text for matching if requested
             search_full_text = full_text
-            if normalize_quotes_for_matching and not regex:
+            if normalize_quotes_for_matching and not regex and not fuzzy:
                 search_full_text = normalize_quotes_func(search_full_text)
-            if not case_sensitive and not regex:
+            if not case_sensitive and not regex and not fuzzy:
                 search_full_text = search_full_text.lower()
 
             # Find all occurrences
-            if regex:
+            if fuzzy:
+                # Use fuzzy search
+                assert search_text is not None  # Type guard: search_text is set when fuzzy=True
+                fuzzy_matches = fuzzy_find_all(
+                    full_text,
+                    search_text,
+                    threshold=fuzzy["threshold"],
+                    algorithm=fuzzy["algorithm"],
+                    normalize_ws=fuzzy["normalize_whitespace"],
+                )
+
+                for start_pos, end_pos, similarity in fuzzy_matches:
+                    # Map the found position back to runs
+                    start_run_idx, start_offset = char_map[start_pos]
+                    end_run_idx, end_offset = char_map[end_pos - 1]
+
+                    # Create TextSpan for this match
+                    span = TextSpan(
+                        runs=runs,
+                        start_run_index=start_run_idx,
+                        end_run_index=end_run_idx,
+                        start_offset=start_offset,
+                        end_offset=end_offset + 1,  # Make end_offset exclusive
+                        paragraph=para,
+                    )
+                    results.append(span)
+            elif regex:
                 # Use regex search
                 assert pattern is not None  # Type guard: pattern is set when regex=True
                 for match in pattern.finditer(full_text):

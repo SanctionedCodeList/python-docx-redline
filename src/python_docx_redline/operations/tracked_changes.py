@@ -163,6 +163,7 @@ class TrackedChangeOperations:
         occurrence: int | list[int] | str = "first",
         regex: bool = False,
         enable_quote_normalization: bool = True,
+        fuzzy: float | dict[str, Any] | None = None,
     ) -> None:
         """Insert text with tracked changes after or before a specific location.
 
@@ -181,6 +182,10 @@ class TrackedChangeOperations:
             regex: Whether to treat anchor as a regex pattern (default: False)
             enable_quote_normalization: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
+            fuzzy: Fuzzy matching configuration:
+                - None: Exact matching (default)
+                - float: Similarity threshold (e.g., 0.9 for 90% similar)
+                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
 
         Raises:
             ValueError: If both 'after' and 'before' are specified, or if neither is specified
@@ -188,6 +193,7 @@ class TrackedChangeOperations:
             AmbiguousTextError: If multiple occurrences of anchor text are found and
                 occurrence not specified
             re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
         """
         # Validate parameters
         if after is not None and before is not None:
@@ -202,11 +208,20 @@ class TrackedChangeOperations:
         # Find all matches
         all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        # Parse fuzzy configuration if provided
+        from ..fuzzy import parse_fuzzy_config
+
+        fuzzy_config = parse_fuzzy_config(fuzzy)
+
         matches = self._document._text_search.find_text(
             anchor,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            normalize_quotes_for_matching=enable_quote_normalization
+            and not regex
+            and not fuzzy_config,
+            fuzzy=fuzzy_config,
         )
 
         if not matches:
@@ -237,6 +252,7 @@ class TrackedChangeOperations:
         occurrence: int | list[int] | str = "first",
         regex: bool = False,
         enable_quote_normalization: bool = True,
+        fuzzy: float | dict[str, Any] | None = None,
     ) -> None:
         """Delete text with tracked changes.
 
@@ -252,21 +268,35 @@ class TrackedChangeOperations:
             regex: Whether to treat 'text' as a regex pattern (default: False)
             enable_quote_normalization: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
+            fuzzy: Fuzzy matching configuration:
+                - None: Exact matching (default)
+                - float: Similarity threshold (e.g., 0.9 for 90% similar)
+                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
 
         Raises:
             TextNotFoundError: If the text is not found
             AmbiguousTextError: If multiple occurrences of text are found and
                 occurrence not specified
             re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
         """
         # Find all matches
         all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        # Parse fuzzy configuration if provided
+        from ..fuzzy import parse_fuzzy_config
+
+        fuzzy_config = parse_fuzzy_config(fuzzy)
+
         matches = self._document._text_search.find_text(
             text,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            normalize_quotes_for_matching=enable_quote_normalization
+            and not regex
+            and not fuzzy_config,
+            fuzzy=fuzzy_config,
         )
 
         if not matches:
@@ -298,6 +328,7 @@ class TrackedChangeOperations:
         show_context: bool = False,
         check_continuity: bool = False,
         context_chars: int = 50,
+        fuzzy: float | dict[str, Any] | None = None,
     ) -> None:
         """Find and replace text with tracked changes.
 
@@ -323,12 +354,17 @@ class TrackedChangeOperations:
             check_continuity: Check if replacement may create sentence fragments (default: False)
             context_chars: Number of characters to show before/after when show_context=True
                 (default: 50)
+            fuzzy: Fuzzy matching configuration:
+                - None: Exact matching (default)
+                - float: Similarity threshold (e.g., 0.9 for 90% similar)
+                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
 
         Raises:
             TextNotFoundError: If the 'find' text is not found
             AmbiguousTextError: If multiple occurrences of 'find' text are found and
                 occurrence not specified
             re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
 
         Warnings:
             ContinuityWarning: If check_continuity=True and potential sentence fragment detected
@@ -336,11 +372,20 @@ class TrackedChangeOperations:
         # Find all matches
         all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        # Parse fuzzy configuration if provided
+        from ..fuzzy import parse_fuzzy_config
+
+        fuzzy_config = parse_fuzzy_config(fuzzy)
+
         matches = self._document._text_search.find_text(
             find,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            normalize_quotes_for_matching=enable_quote_normalization
+            and not regex
+            and not fuzzy_config,
+            fuzzy=fuzzy_config,
         )
 
         if not matches:

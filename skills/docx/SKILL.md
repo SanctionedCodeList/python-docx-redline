@@ -92,6 +92,231 @@ unzip document.docx -d unpacked/
 * `word/media/` - Embedded images and media files
 * Tracked changes use `<w:ins>` (insertions) and `<w:del>` (deletions) tags
 
+## Viewing and Finding Content
+
+Before making edits, you often need to discover where to make changes. The python-docx-redline library provides comprehensive APIs for inspecting document structure, finding text locations, and viewing existing tracked changes.
+
+### Finding Text Locations
+
+The `find_all()` method helps you discover all occurrences of text before making edits. It returns rich `Match` objects with context information:
+
+```python
+from python_docx_redline import Document
+
+doc = Document("contract.docx")
+
+# Find all occurrences of text
+matches = doc.find_all("payment terms")
+
+# Examine each match
+for match in matches:
+    print(f"Match {match.index}: '{match.text}'")
+    print(f"  Context: ...{match.context}...")
+    print(f"  Paragraph {match.paragraph_index}: {match.paragraph_text[:50]}...")
+    print(f"  Location: {match.location}")
+    print(f"  Span: characters {match.span[0]}-{match.span[1]}")
+    print()
+
+# Case-insensitive search
+matches = doc.find_all("IMPORTANT", case_sensitive=False)
+
+# Regex search
+matches = doc.find_all(r"\d+ days", regex=True)
+
+# Scoped search
+matches = doc.find_all("Client", scope="section:Payment Terms")
+```
+
+**Match object properties:**
+- `index` - Zero-based occurrence number (0 for first match, 1 for second, etc.)
+- `text` - The matched text
+- `context` - Surrounding text for context (configurable window)
+- `paragraph_index` - Which paragraph contains this match
+- `paragraph_text` - Full text of the containing paragraph
+- `location` - Human-readable location description
+- `span` - Tuple of (start, end) character positions
+
+**Common workflow:**
+1. Find all occurrences with `find_all()`
+2. Examine match context to identify the correct one
+3. Use `occurrence=N` in edit operations to target specific matches
+
+```python
+# Find and review all matches
+matches = doc.find_all("30 days")
+for m in matches:
+    print(f"Match {m.index}: {m.context}")
+
+# After reviewing, target specific occurrence
+doc.replace_tracked("30 days", "45 days", occurrence=2)  # Replace 3rd match
+```
+
+### Inspecting Document Structure
+
+Access document structure programmatically:
+
+```python
+from python_docx_redline import Document
+
+doc = Document("contract.docx")
+
+# Iterate through all paragraphs
+for i, para in enumerate(doc.paragraphs):
+    if para.is_heading():
+        print(f"Paragraph {i}: HEADING - {para.text}")
+        print(f"  Style: {para.style_name}")
+    else:
+        print(f"Paragraph {i}: {para.text[:50]}...")
+
+# Access sections (hierarchical structure based on headings)
+for section in doc.sections:
+    print(f"Section: {section.heading_text}")
+    if section.contains("payment"):
+        print("  Contains payment terms")
+```
+
+### Working with Tables
+
+Discover and access tables in the document:
+
+```python
+# List all tables
+print(f"Document contains {len(doc.tables)} tables")
+
+for i, table in enumerate(doc.tables):
+    print(f"Table {i}: {len(table.rows)} rows x {len(table.columns)} columns")
+    # Access first row
+    for j, cell in enumerate(table.rows[0].cells):
+        print(f"  Header {j}: {cell.text}")
+
+# Find specific table by content
+table = doc.find_table(containing="Price")
+if table:
+    print(f"Found pricing table with {len(table.rows)} rows")
+    # Edit the table
+    table.rows[1].cells[2].text = "$50.00"
+else:
+    print("No table containing 'Price' found")
+
+# Find table by partial content
+invoice_table = doc.find_table(containing="Invoice")
+schedule_table = doc.find_table(containing="Schedule")
+```
+
+### Viewing Existing Tracked Changes
+
+Inspect existing tracked changes before adding new ones:
+
+```python
+from python_docx_redline import Document
+
+doc = Document("contract_redlined.docx")
+
+# Check if document has any tracked changes
+if doc.has_tracked_changes():
+    print("Document contains tracked changes")
+
+    # Get all tracked changes
+    changes = doc.get_tracked_changes()
+
+    for change in changes:
+        print(f"{change.type}: '{change.text}' by {change.author}")
+        print(f"  Date: {change.date}")
+        print()
+
+    # Filter by change type
+    insertions = doc.get_tracked_changes(change_type="insert")
+    print(f"Found {len(insertions)} insertions")
+
+    deletions = doc.get_tracked_changes(change_type="delete")
+    print(f"Found {len(deletions)} deletions")
+
+    # Filter by author
+    legal_changes = doc.get_tracked_changes(author="Legal Team")
+    print(f"Legal Team made {len(legal_changes)} changes")
+else:
+    print("No tracked changes found")
+```
+
+**TrackedChange object properties:**
+- `type` - "insert" or "delete"
+- `text` - The text that was inserted or deleted
+- `author` - Who made the change
+- `date` - When the change was made
+
+### Best Practices for Agents
+
+**1. Always discover before editing:**
+```python
+# Bad: Blindly edit without checking
+doc.replace_tracked("payment", "Payment")  # Might fail if ambiguous
+
+# Good: Discover first, then edit with context
+matches = doc.find_all("payment")
+if len(matches) == 1:
+    doc.replace_tracked("payment", "Payment")
+elif len(matches) > 1:
+    # Use scope or occurrence to be specific
+    doc.replace_tracked("payment", "Payment", scope="section:Terms")
+```
+
+**2. Check for existing changes:**
+```python
+# Check what's already been edited
+if doc.has_tracked_changes():
+    existing = doc.get_tracked_changes()
+    print(f"Warning: Document has {len(existing)} existing changes")
+    for change in existing:
+        print(f"  {change.author}: {change.type} '{change.text}'")
+```
+
+**3. Use structural information:**
+```python
+# Find the right section first
+for section in doc.sections:
+    if "payment" in section.heading_text.lower():
+        print(f"Found payment section: {section.heading_text}")
+        # Now edit within that section
+        doc.replace_tracked(
+            "30 days",
+            "45 days",
+            scope=f"section:{section.heading_text}"
+        )
+        break
+```
+
+**4. Combine finding with table editing:**
+```python
+# Find the pricing table
+pricing_table = doc.find_table(containing="Price")
+if pricing_table:
+    # Inspect it
+    print(f"Pricing table has {len(pricing_table.rows)} rows")
+
+    # Make targeted edits
+    for row in pricing_table.rows[1:]:  # Skip header
+        old_price = row.cells[1].text
+        print(f"Current price: {old_price}")
+        # Edit if needed
+```
+
+**5. Use find_all() to avoid ambiguity errors:**
+```python
+# When you get "AmbiguousTextError", use find_all to investigate
+try:
+    doc.replace_tracked("Section", "Article")
+except Exception as e:
+    if "ambiguous" in str(e).lower():
+        # Find all occurrences to see what we're dealing with
+        matches = doc.find_all("Section")
+        print(f"Found {len(matches)} occurrences:")
+        for m in matches:
+            print(f"  {m.index}: {m.context}")
+
+        # Now use occurrence or scope to be specific
+        doc.replace_tracked("Section", "Article", occurrence=0)
+```
+
 ## Creating a new Word document
 
 When creating a new Word document from scratch, use **python-docx**:
@@ -529,6 +754,10 @@ Options:
 | Create new document | **Best** | - | Possible |
 | Add paragraphs/headings | **Best** | - | Possible |
 | Add tables | **Best** | - | Possible |
+| Find all text occurrences | - | **Best** | Manual |
+| Get tracked changes | - | **Best** | Manual |
+| Inspect document structure | - | **Best** | Manual |
+| Find tables by content | - | **Best** | Manual |
 | Insert tracked text | - | **Best** | Possible |
 | Delete tracked text | - | **Best** | Possible |
 | Replace tracked text | - | **Best** | Possible |

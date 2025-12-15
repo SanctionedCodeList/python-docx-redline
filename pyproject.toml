@@ -44,6 +44,9 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
 ]
+fuzzy = [
+    "rapidfuzz>=3.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/parkerhancock/python-docx-redline"

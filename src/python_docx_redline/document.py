@@ -541,6 +541,7 @@ class Document:
         case_sensitive: bool = True,
         scope: str | dict | Any | None = None,
         context_chars: int = 40,
+        fuzzy: float | dict[str, Any] | None = None,
     ) -> list[Match]:
         """Find all occurrences of text in the document with location metadata.
 
@@ -554,12 +555,18 @@ class Document:
             case_sensitive: Whether to perform case-sensitive search (default: True)
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
             context_chars: Number of characters to show before/after match (default: 40)
+            fuzzy: Fuzzy matching configuration:
+                - None: Exact matching (default)
+                - float: Similarity threshold (e.g., 0.9 for 90% similar)
+                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
 
         Returns:
             List of Match objects with text, context, location, and metadata
 
         Raises:
             re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
+            ValueError: If both fuzzy and regex are specified
 
         Example:
             >>> # Find all occurrences of a phrase
@@ -579,14 +586,25 @@ class Document:
             >>>
             >>> # Search only in tables
             >>> matches = doc.find_all("text", scope={"location": "tables"})
+            >>>
+            >>> # Fuzzy matching with threshold
+            >>> matches = doc.find_all("production products", fuzzy=0.85)
+            >>>
+            >>> # Fuzzy with custom algorithm
+            >>> matches = doc.find_all("text", fuzzy={'threshold': 0.9, 'algorithm': 'levenshtein'})
         """
         # Get all paragraphs, then filter by scope
         all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
+        # Parse fuzzy configuration if provided
+        from .fuzzy import parse_fuzzy_config
+
+        fuzzy_config = parse_fuzzy_config(fuzzy)
+
         # Find all text spans using TextSearch
         spans = self._text_search.find_text(
-            text, paragraphs, case_sensitive=case_sensitive, regex=regex
+            text, paragraphs, case_sensitive=case_sensitive, regex=regex, fuzzy=fuzzy_config
         )
 
         # Convert TextSpans to Match objects with rich metadata
@@ -745,6 +763,7 @@ class Document:
         occurrence: int | list[int] | str = "first",
         regex: bool = False,
         enable_quote_normalization: bool = True,
+        fuzzy: float | dict[str, Any] | None = None,
     ) -> None:
         """Insert text with tracked changes after or before a specific location.
 
@@ -763,6 +782,10 @@ class Document:
             regex: Whether to treat anchor as a regex pattern (default: False)
             enable_quote_normalization: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
+            fuzzy: Fuzzy matching configuration:
+                - None: Exact matching (default)
+                - float: Similarity threshold (e.g., 0.9 for 90% similar)
+                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
 
         Raises:
             ValueError: If both 'after' and 'before' are specified, or if neither is specified
@@ -770,6 +793,7 @@ class Document:
             AmbiguousTextError: If multiple occurrences of anchor text are found and
                 occurrence not specified
             re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
 
         Example:
             >>> # Insert after first occurrence
@@ -780,6 +804,9 @@ class Document:
             >>>
             >>> # Insert after specific occurrences (1-indexed)
             >>> doc.insert_tracked("text", after="marker", occurrence=[1, 3])
+            >>>
+            >>> # Insert with fuzzy matching
+            >>> doc.insert_tracked("new text", after="producti0n pr0ducts", fuzzy=0.85)
         """
         self._tracked_ops.insert(
             text,
@@ -790,6 +817,7 @@ class Document:
             occurrence=occurrence,
             regex=regex,
             enable_quote_normalization=enable_quote_normalization,
+            fuzzy=fuzzy,
         )
 
     def insert_image(
@@ -925,6 +953,7 @@ class Document:
         occurrence: int | list[int] | str = "first",
         regex: bool = False,
         enable_quote_normalization: bool = True,
+        fuzzy: float | dict[str, Any] | None = None,
     ) -> None:
         """Delete text with tracked changes.
 
@@ -940,12 +969,17 @@ class Document:
             regex: Whether to treat 'text' as a regex pattern (default: False)
             enable_quote_normalization: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
+            fuzzy: Fuzzy matching configuration:
+                - None: Exact matching (default)
+                - float: Similarity threshold (e.g., 0.9 for 90% similar)
+                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
 
         Raises:
             TextNotFoundError: If the text is not found
             AmbiguousTextError: If multiple occurrences of text are found and
                 occurrence not specified
             re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
 
         Example:
             >>> # Delete first occurrence
@@ -956,6 +990,9 @@ class Document:
             >>>
             >>> # Delete specific occurrences (1-indexed)
             >>> doc.delete_tracked("text", occurrence=[1, 3])
+            >>>
+            >>> # Delete with fuzzy matching
+            >>> doc.delete_tracked("producti0n pr0ducts", fuzzy=0.85)
         """
         self._tracked_ops.delete(
             text,
@@ -964,6 +1001,7 @@ class Document:
             occurrence=occurrence,
             regex=regex,
             enable_quote_normalization=enable_quote_normalization,
+            fuzzy=fuzzy,
         )
 
     def replace_tracked(
@@ -978,6 +1016,7 @@ class Document:
         show_context: bool = False,
         check_continuity: bool = False,
         context_chars: int = 50,
+        fuzzy: float | dict[str, Any] | None = None,
     ) -> None:
         """Find and replace text with tracked changes.
 
@@ -1003,12 +1042,17 @@ class Document:
             check_continuity: Check if replacement may create sentence fragments (default: False)
             context_chars: Number of characters to show before/after when show_context=True
                 (default: 50)
+            fuzzy: Fuzzy matching configuration:
+                - None: Exact matching (default)
+                - float: Similarity threshold (e.g., 0.9 for 90% similar)
+                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
 
         Raises:
             TextNotFoundError: If the 'find' text is not found
             AmbiguousTextError: If multiple occurrences of 'find' text are found and
                 occurrence not specified
             re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
 
         Warnings:
             ContinuityWarning: If check_continuity=True and potential sentence fragment detected
@@ -1038,6 +1082,9 @@ class Document:
             ...     "sentence one.", "replacement.",
             ...     check_continuity=True
             ... )
+            >>>
+            >>> # With fuzzy matching
+            >>> doc.replace_tracked("producti0n pr0ducts", "production products", fuzzy=0.85)
         """
         self._tracked_ops.replace(
             find,
@@ -1050,6 +1097,7 @@ class Document:
             show_context=show_context,
             check_continuity=check_continuity,
             context_chars=context_chars,
+            fuzzy=fuzzy,
         )
 
     def move_tracked(
