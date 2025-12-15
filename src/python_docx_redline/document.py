@@ -2469,6 +2469,77 @@ class Document:
                 raise
             raise ValidationError(f"Failed to save document to bytes: {e}") from e
 
+    def render_to_images(
+        self,
+        output_dir: str | Path | None = None,
+        dpi: int = 150,
+        prefix: str = "page",
+        timeout: int = 120,
+    ) -> list[Path]:
+        """Render document pages to PNG images.
+
+        Uses LibreOffice to render the document with full formatting,
+        including tracked changes shown visually (strikethrough, underlines).
+
+        This is useful for AI agents to visually inspect document layout
+        and see how tracked changes appear in the rendered document.
+
+        Args:
+            output_dir: Directory for output images. If None, uses a temp directory.
+            dpi: Resolution in dots per inch (default: 150)
+            prefix: Filename prefix for images (default: "page")
+            timeout: Timeout in seconds for each conversion step (default: 120)
+
+        Returns:
+            List of Path objects for generated PNG files (page-1.png, page-2.png, ...)
+
+        Raises:
+            RuntimeError: If LibreOffice or pdftoppm is not available
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> images = doc.render_to_images(dpi=200)
+            >>> for img in images:
+            ...     print(f"Page: {img}")
+
+        Note:
+            Requires LibreOffice and poppler-utils to be installed:
+            - macOS: brew install --cask libreoffice && brew install poppler
+            - Linux: sudo apt install libreoffice poppler-utils
+        """
+        from .rendering import render_document_to_images
+
+        # If we have a source path, use it directly
+        # (Save first to capture any unsaved changes)
+        if self.path is not None:
+            # Save any pending changes
+            self.save(self.path)
+            return render_document_to_images(
+                self.path,
+                output_dir=output_dir,
+                dpi=dpi,
+                prefix=prefix,
+                timeout=timeout,
+            )
+
+        # Otherwise, save to a temp file first
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+
+        try:
+            self.save(tmp_path)
+            return render_document_to_images(
+                tmp_path,
+                output_dir=output_dir,
+                dpi=dpi,
+                prefix=prefix,
+                timeout=timeout,
+            )
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
     def apply_edits(
         self, edits: list[dict[str, Any]], stop_on_error: bool = False
     ) -> list[EditResult]:

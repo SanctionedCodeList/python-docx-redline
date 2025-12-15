@@ -63,6 +63,11 @@ __all__ = [
     "is_ooxml_validator_available",
     "validate_with_ooxml_validator",
     "OOXMLValidationError",
+    # Rendering
+    "is_libreoffice_available",
+    "is_pdftoppm_available",
+    "is_rendering_available",
+    "render_document_to_images",
 ]
 
 # Import author identity
@@ -115,6 +120,14 @@ from .package import OOXMLPackage
 
 # Import relationship manager
 from .relationships import RelationshipManager, RelationshipTypes
+
+# Import rendering functionality
+from .rendering import (
+    is_libreoffice_available,
+    is_pdftoppm_available,
+    is_rendering_available,
+    render_document_to_images,
+)
 
 # Import result types
 from .results import AcceptResult, ComparisonStats, EditResult, FormatResult, RejectResult
