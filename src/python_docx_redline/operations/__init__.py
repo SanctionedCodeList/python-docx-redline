@@ -12,6 +12,7 @@ from .comparison import ComparisonOperations
 from .formatting import FormatOperations
 from .header_footer import HeaderFooterOperations
 from .notes import NoteOperations
+from .patterns import PatternOperations
 from .section import SectionOperations
 from .tables import TableOperations
 from .tracked_changes import TrackedChangeOperations
@@ -24,6 +25,7 @@ __all__ = [
     "FormatOperations",
     "HeaderFooterOperations",
     "NoteOperations",
+    "PatternOperations",
     "SectionOperations",
     "TableOperations",
     "TrackedChangeOperations",

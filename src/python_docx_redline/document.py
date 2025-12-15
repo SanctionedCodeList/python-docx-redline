@@ -30,6 +30,7 @@ from .operations.comparison import ComparisonOperations
 from .operations.formatting import FormatOperations
 from .operations.header_footer import HeaderFooterOperations
 from .operations.notes import NoteOperations
+from .operations.patterns import PatternOperations
 from .operations.section import SectionOperations
 from .operations.tables import TableOperations
 from .operations.tracked_changes import TrackedChangeOperations
@@ -270,6 +271,13 @@ class Document:
         if not hasattr(self, "_section_ops_instance"):
             self._section_ops_instance = SectionOperations(self)
         return self._section_ops_instance
+
+    @property
+    def _pattern_ops(self) -> PatternOperations:
+        """Get the PatternOperations instance (lazy initialization)."""
+        if not hasattr(self, "_pattern_ops_instance"):
+            self._pattern_ops_instance = PatternOperations(self)
+        return self._pattern_ops_instance
 
     @property
     def _comparison_ops(self) -> ComparisonOperations:
@@ -702,7 +710,7 @@ class Document:
             >>> # Normalize to £X.XX without thousands separator
             >>> count = doc.normalize_currency("£", thousands_separator=False)
         """
-        return self._section_ops.normalize_currency(
+        return self._pattern_ops.normalize_currency(
             currency_symbol=currency_symbol,
             decimal_places=decimal_places,
             thousands_separator=thousands_separator,
@@ -743,7 +751,7 @@ class Document:
             >>> # Convert all dates to ISO format
             >>> count = doc.normalize_dates("%Y-%m-%d")
         """
-        return self._section_ops.normalize_dates(
+        return self._pattern_ops.normalize_dates(
             to_format=to_format,
             author=author,
             scope=scope,
@@ -781,7 +789,7 @@ class Document:
             >>> # Update article references
             >>> count = doc.update_section_references("5", "6", section_word="Article")
         """
-        return self._section_ops.update_section_references(
+        return self._pattern_ops.update_section_references(
             old_number=old_number,
             new_number=new_number,
             section_word=section_word,
