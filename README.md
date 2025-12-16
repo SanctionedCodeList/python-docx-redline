@@ -133,7 +133,7 @@ for m in matches:
 
 ## Documentation
 
-- **[User Guide](docs/user-guide/)** — Detailed usage documentation
+- **[Documentation Index](docs/index.md)** — All documentation
 - **[API Reference](docs/PROPOSED_API.md)** — Complete API documentation
 - **[Quick Reference](docs/QUICK_REFERENCE.md)** — Cheat sheet
 - **[OOXML Internals](docs/ERIC_WHITE_ALGORITHM.md)** — How text search works
