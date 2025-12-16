@@ -55,7 +55,7 @@ docs = [
 [project.urls]
 Homepage = "https://github.com/parkerhancock/python-docx-redline"
 Repository = "https://github.com/parkerhancock/python-docx-redline"
-Documentation = "https://parkerhancock.github.io/python-docx-redline/"
+Documentation = "https://github.com/parkerhancock/python-docx-redline/tree/main/docs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/python_docx_redline"]

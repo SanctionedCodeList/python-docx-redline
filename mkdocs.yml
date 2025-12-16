@@ -1,6 +1,5 @@
 site_name: python-docx-redline
 site_description: High-level Python API for editing Word documents with tracked changes
-site_url: https://parkerhancock.github.io/python-docx-redline/
 repo_url: https://github.com/parkerhancock/python-docx-redline
 repo_name: parkerhancock/python-docx-redline
 
