@@ -47,11 +47,15 @@ dev = [
 fuzzy = [
     "rapidfuzz>=3.0.0",
 ]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.5.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/parkerhancock/python-docx-redline"
 Repository = "https://github.com/parkerhancock/python-docx-redline"
-Documentation = "https://github.com/parkerhancock/python-docx-redline/tree/main/docs"
+Documentation = "https://parkerhancock.github.io/python-docx-redline/"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/python_docx_redline"]

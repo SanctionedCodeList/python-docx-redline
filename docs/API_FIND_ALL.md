@@ -327,5 +327,4 @@ The key difference is that `find_all()` is **read-only** and returns **all match
 ## See Also
 
 - [Text Search Algorithm](ERIC_WHITE_ALGORITHM.md)
-- [Scope Evaluation](SCOPE.md)
 - [Replace Tracked API](PROPOSED_API.md#replace_tracked)

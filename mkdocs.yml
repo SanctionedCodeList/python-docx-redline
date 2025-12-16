@@ -1,0 +1,66 @@
+site_name: python-docx-redline
+site_description: High-level Python API for editing Word documents with tracked changes
+site_url: https://parkerhancock.github.io/python-docx-redline/
+repo_url: https://github.com/parkerhancock/python-docx-redline
+repo_name: parkerhancock/python-docx-redline
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.highlight
+    - search.share
+
+plugins:
+  - search
+
+exclude_docs: |
+  internal/
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - User Guide:
+    - Quick Reference: QUICK_REFERENCE.md
+    - Context Awareness: CONTEXT_AWARENESS_GUIDE.md
+    - find_all() API: API_FIND_ALL.md
+  - API Reference: PROPOSED_API.md
+  - Technical Reference:
+    - Text Search Algorithm: ERIC_WHITE_ALGORITHM.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/parkerhancock/python-docx-redline
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/python-docx-redline/

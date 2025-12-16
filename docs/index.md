@@ -26,4 +26,4 @@ doc.replace_tracked("old text", "new text")
 doc.save("contract_edited.docx")
 ```
 
-See the [README](../README.md) for installation and more examples.
+See the [GitHub README](https://github.com/parkerhancock/python-docx-redline) for installation and more examples.

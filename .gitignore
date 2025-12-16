@@ -48,3 +48,4 @@ htmlcov/
 # Distribution
 *.whl
 *.tar.gz
+site/
