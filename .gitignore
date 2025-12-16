@@ -49,3 +49,4 @@ htmlcov/
 *.whl
 *.tar.gz
 site/
+logs/
