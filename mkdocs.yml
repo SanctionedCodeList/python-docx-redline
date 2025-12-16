@@ -50,12 +50,19 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Getting Started: getting-started.md
   - User Guide:
+    - Basic Operations: user-guide/basic-operations.md
+    - Structural Operations: user-guide/structural-ops.md
+    - Viewing Content: user-guide/viewing-content.md
+    - Batch Operations: user-guide/batch-operations.md
+    - Formatting: user-guide/formatting.md
+    - Advanced Features: user-guide/advanced.md
+  - Reference:
     - Quick Reference: QUICK_REFERENCE.md
-    - Context Awareness: CONTEXT_AWARENESS_GUIDE.md
+    - API Reference: PROPOSED_API.md
     - find_all() API: API_FIND_ALL.md
-  - API Reference: PROPOSED_API.md
-  - Technical Reference:
+    - Context Awareness: CONTEXT_AWARENESS_GUIDE.md
     - Text Search Algorithm: ERIC_WHITE_ALGORITHM.md
 
 extra:
