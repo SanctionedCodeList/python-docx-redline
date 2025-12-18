@@ -1644,6 +1644,68 @@ class Document:
             scope=scope,
         )
 
+    def delete_paragraph_tracked(
+        self,
+        containing: str | None = None,
+        paragraph: "Paragraph | None" = None,
+        paragraph_index: int | None = None,
+        remove_element: bool = True,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+    ) -> "Paragraph":
+        """Delete an entire paragraph with tracked changes.
+
+        Unlike delete_tracked() which only marks text as deleted (leaving empty
+        paragraphs behind), this method completely removes the paragraph element
+        after marking its content as deleted.
+
+        Args:
+            containing: Text to search for to identify the paragraph
+            paragraph: Paragraph object to delete directly
+            paragraph_index: Index of paragraph to delete (0-based)
+            remove_element: If True (default), remove the <w:p> element after
+                marking content as deleted. If False, keep the element for
+                review (content will show strikethrough but empty para remains
+                after accepting changes).
+            author: Author name for tracked changes
+            scope: Limit search scope for 'containing' parameter
+
+        Returns:
+            The deleted Paragraph object
+
+        Raises:
+            ValueError: If none of containing/paragraph/paragraph_index provided,
+                or if multiple are provided
+            TextNotFoundError: If containing text not found
+            AmbiguousTextError: If containing text matches multiple paragraphs
+            IndexError: If paragraph_index is out of range
+
+        Examples:
+            >>> # Delete paragraph containing specific text
+            >>> doc.delete_paragraph_tracked(containing="Some citation text")
+
+            >>> # Delete by index
+            >>> doc.delete_paragraph_tracked(paragraph_index=5)
+
+            >>> # Delete paragraph object directly
+            >>> para = doc.paragraphs[5]
+            >>> doc.delete_paragraph_tracked(paragraph=para)
+
+            >>> # Keep for review (strikethrough only, no removal)
+            >>> doc.delete_paragraph_tracked(
+            ...     containing="text",
+            ...     remove_element=False
+            ... )
+        """
+        return self._section_ops.delete_paragraph_tracked(
+            containing=containing,
+            paragraph=paragraph,
+            paragraph_index=paragraph_index,
+            remove_element=remove_element,
+            author=author,
+            scope=scope,
+        )
+
     def _insert_after_match(self, match: TextSpan, insertion_element: etree._Element) -> None:
         """Insert XML element(s) after a matched text span.
         Delegates to TrackedChangeOperations.

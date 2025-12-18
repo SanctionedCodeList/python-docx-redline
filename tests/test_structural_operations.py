@@ -852,4 +852,354 @@ def test_delete_section_returns_section_object():
         doc_path.unlink()
 
 
+# ============================================================================
+# delete_paragraph_tracked tests
+# ============================================================================
+
+
+def test_delete_paragraph_tracked_by_containing():
+    """Test deleting a paragraph by containing text."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>First paragraph</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Second paragraph to delete</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Third paragraph</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+        initial_count = len(doc.paragraphs)
+
+        deleted = doc.delete_paragraph_tracked(containing="Second paragraph")
+
+        # Paragraph should be removed from document
+        assert len(doc.paragraphs) == initial_count - 1
+
+        # Remaining text should not include deleted paragraph
+        text = doc.get_text()
+        assert "Second paragraph" not in text
+        assert "First paragraph" in text
+        assert "Third paragraph" in text
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_by_index():
+    """Test deleting a paragraph by index."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Paragraph 0</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Paragraph 1</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Paragraph 2</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        deleted = doc.delete_paragraph_tracked(paragraph_index=1)
+
+        assert deleted.text == "Paragraph 1"
+        assert len(doc.paragraphs) == 2
+
+        text = doc.get_text()
+        assert "Paragraph 0" in text
+        assert "Paragraph 1" not in text
+        assert "Paragraph 2" in text
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_by_object():
+    """Test deleting a paragraph by passing the paragraph object."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Keep this</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Delete this</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Keep this too</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+        para_to_delete = doc.paragraphs[1]
+
+        doc.delete_paragraph_tracked(paragraph=para_to_delete)
+
+        assert len(doc.paragraphs) == 2
+        text = doc.get_text()
+        assert "Delete this" not in text
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_remove_element_false():
+    """Test delete with remove_element=False keeps empty paragraph."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>First</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Second</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+        initial_count = len(doc.paragraphs)
+
+        doc.delete_paragraph_tracked(containing="Second", remove_element=False)
+
+        # Paragraph element should still exist
+        assert len(doc.paragraphs) == initial_count
+
+        # But content should be marked as deleted (in w:del element)
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "w:del" in xml_str or "<w:del" in xml_str
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_no_selector():
+    """Test error when no selector provided."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        with pytest.raises(ValueError, match="Must specify one of"):
+            doc.delete_paragraph_tracked()
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_multiple_selectors():
+    """Test error when multiple selectors provided."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        with pytest.raises(ValueError, match="Only one of"):
+            doc.delete_paragraph_tracked(containing="text", paragraph_index=1)
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_text_not_found():
+    """Test error when containing text not found."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        with pytest.raises(TextNotFoundError):
+            doc.delete_paragraph_tracked(containing="nonexistent text xyz")
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_ambiguous():
+    """Test error when multiple paragraphs contain the text."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Common text here</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Common text there</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        with pytest.raises(AmbiguousTextError):
+            doc.delete_paragraph_tracked(containing="Common text")
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_index_out_of_range():
+    """Test error when paragraph index is out of range."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+        para_count = len(doc.paragraphs)
+
+        with pytest.raises(IndexError, match="out of range"):
+            doc.delete_paragraph_tracked(paragraph_index=para_count + 10)
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_in_table():
+    """Test deleting a paragraph within a table cell."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:tbl>
+      <w:tr>
+        <w:tc>
+          <w:p>
+            <w:r>
+              <w:t>Cell paragraph 1</w:t>
+            </w:r>
+          </w:p>
+          <w:p>
+            <w:r>
+              <w:t>Cell paragraph to delete</w:t>
+            </w:r>
+          </w:p>
+          <w:p>
+            <w:r>
+              <w:t>Cell paragraph 3</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+        initial_count = len(doc.paragraphs)
+
+        doc.delete_paragraph_tracked(containing="Cell paragraph to delete")
+
+        # Paragraph should be removed
+        assert len(doc.paragraphs) == initial_count - 1
+
+        text = doc.get_text()
+        assert "Cell paragraph to delete" not in text
+        assert "Cell paragraph 1" in text
+        assert "Cell paragraph 3" in text
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_with_author():
+    """Test that author is recorded in tracked deletion."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Keep</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Delete me</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        # With remove_element=False we can check the deletion markup
+        doc.delete_paragraph_tracked(
+            containing="Delete me",
+            remove_element=False,
+            author="Test Author"
+        )
+
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "Test Author" in xml_str
+
+    finally:
+        doc_path.unlink()
+
+
 # Run tests with: pytest tests/test_structural_operations.py -v

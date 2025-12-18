@@ -426,3 +426,154 @@ class SectionOperations:
             parent = para.element.getparent()
             if parent is not None:
                 parent.remove(para.element)
+
+    def delete_paragraph_tracked(
+        self,
+        containing: str | None = None,
+        paragraph: Paragraph | None = None,
+        paragraph_index: int | None = None,
+        remove_element: bool = True,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+    ) -> Paragraph:
+        """Delete an entire paragraph with tracked changes.
+
+        Unlike delete_tracked() which only marks text as deleted (leaving empty
+        paragraphs behind), this method can completely remove the paragraph
+        element after marking its content as deleted.
+
+        Args:
+            containing: Text to search for to identify the paragraph
+            paragraph: Paragraph object to delete directly
+            paragraph_index: Index of paragraph to delete (0-based)
+            remove_element: If True (default), remove the <w:p> element after
+                marking content as deleted. If False, keep the element for
+                review (content will show strikethrough but empty para remains
+                after accepting changes).
+            author: Author name for tracked changes
+            scope: Limit search scope for 'containing' parameter
+
+        Returns:
+            The deleted Paragraph object
+
+        Raises:
+            ValueError: If none of containing/paragraph/paragraph_index provided,
+                or if multiple are provided
+            TextNotFoundError: If containing text not found
+            AmbiguousTextError: If containing text matches multiple paragraphs
+            IndexError: If paragraph_index is out of range
+
+        Examples:
+            >>> # Delete paragraph containing specific text
+            >>> doc.delete_paragraph_tracked(containing="Some citation text")
+
+            >>> # Delete by index
+            >>> doc.delete_paragraph_tracked(paragraph_index=5)
+
+            >>> # Delete paragraph object directly
+            >>> para = doc.paragraphs[5]
+            >>> doc.delete_paragraph_tracked(paragraph=para)
+
+            >>> # Keep for review (strikethrough only, no removal)
+            >>> doc.delete_paragraph_tracked(
+            ...     containing="text",
+            ...     remove_element=False
+            ... )
+        """
+        from datetime import timezone
+
+        from ..models.paragraph import Paragraph as ParagraphModel
+
+        # Validate arguments - exactly one selector must be provided
+        selectors = [containing, paragraph, paragraph_index]
+        provided = sum(1 for s in selectors if s is not None)
+        if provided == 0:
+            raise ValueError(
+                "Must specify one of: containing, paragraph, or paragraph_index"
+            )
+        if provided > 1:
+            raise ValueError(
+                "Only one of containing, paragraph, or paragraph_index can be specified"
+            )
+
+        # Find the target paragraph
+        target_para: ParagraphModel | None = None
+
+        if paragraph is not None:
+            target_para = paragraph
+
+        elif paragraph_index is not None:
+            all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+            if paragraph_index < 0 or paragraph_index >= len(all_paragraphs):
+                raise IndexError(
+                    f"Paragraph index {paragraph_index} out of range "
+                    f"(document has {len(all_paragraphs)} paragraphs)"
+                )
+            target_para = ParagraphModel(all_paragraphs[paragraph_index])
+
+        elif containing is not None:
+            # Search for paragraph containing the text
+            all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+            paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+            matching_paras = []
+            for p_elem in paragraphs:
+                para_text = "".join(
+                    t.text or ""
+                    for t in p_elem.iter(f"{{{WORD_NAMESPACE}}}t")
+                )
+                if containing in para_text:
+                    matching_paras.append(p_elem)
+
+            if not matching_paras:
+                suggestions = SuggestionGenerator.generate_suggestions(
+                    containing, paragraphs
+                )
+                raise TextNotFoundError(containing, suggestions=suggestions)
+
+            if len(matching_paras) > 1:
+                # Build TextSpan objects for error message
+                from ..text_search import TextSpan
+
+                spans = []
+                for p_elem in matching_paras:
+                    runs = list(p_elem.iter(f"{{{WORD_NAMESPACE}}}r"))
+                    para_text = "".join(
+                        t.text or ""
+                        for t in p_elem.iter(f"{{{WORD_NAMESPACE}}}t")
+                    )
+                    if runs:
+                        spans.append(
+                            TextSpan(
+                                runs=runs,
+                                start_run_index=0,
+                                end_run_index=len(runs) - 1,
+                                start_offset=0,
+                                end_offset=len(para_text),
+                                paragraph=p_elem,
+                            )
+                        )
+                raise AmbiguousTextError(containing, spans)
+
+            target_para = ParagraphModel(matching_paras[0])
+
+        # Should not happen due to validation above, but satisfy type checker
+        if target_para is None:
+            raise ValueError("Could not identify target paragraph")
+
+        # Mark content as deleted
+        author_name = author if author is not None else self._document.author
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        runs = list(target_para.element.iter(f"{{{WORD_NAMESPACE}}}r"))
+        if runs:
+            del_elem = self._create_deletion_element(author_name, timestamp)
+            self._wrap_runs_in_deletion(target_para.element, runs, del_elem)
+
+        # Remove the paragraph element if requested
+        if remove_element:
+            parent = target_para.element.getparent()
+            if parent is not None:
+                parent.remove(target_para.element)
+
+        return target_para
