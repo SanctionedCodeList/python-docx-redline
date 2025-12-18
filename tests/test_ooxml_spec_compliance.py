@@ -779,9 +779,11 @@ class TestComplexDocuments:
             doc.replace_tracked("New York", "Delaware")
             doc.insert_tracked(" (AMENDED)", after="Terms and Conditions")
             doc.delete_tracked("arbitration")
+            # Note: After replace_tracked, "Delaware" is inside <w:ins> markup,
+            # so we use the original paragraph text as anchor (before tracked change)
             doc.insert_paragraph(
                 "4. Confidentiality provisions apply to all parties.",
-                after="governed by Delaware law",
+                after="This agreement is governed by",
                 track=True,
             )
 

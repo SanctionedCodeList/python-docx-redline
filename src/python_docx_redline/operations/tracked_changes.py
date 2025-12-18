@@ -766,9 +766,18 @@ class TrackedChangeOperations:
                     paragraph, run, match.start_offset, match.end_offset, replacement_element
                 )
         else:
-            # Match spans multiple runs - remove all matched runs and insert replacement
+            # Match spans multiple runs - need to preserve text before/after match
             start_run = match.runs[match.start_run_index]
+            end_run = match.runs[match.end_run_index]
             start_run_index = list(paragraph).index(start_run)
+
+            # Get text before match in the first run (only from w:t elements)
+            first_run_text = self._get_run_text_content(start_run)
+            before_text = first_run_text[: match.start_offset]
+
+            # Get text after match in the last run (only from w:t elements)
+            last_run_text = self._get_run_text_content(end_run)
+            after_text = last_run_text[match.end_offset :]
 
             # Remove all runs in the match
             for i in range(match.start_run_index, match.end_run_index + 1):
@@ -776,8 +785,14 @@ class TrackedChangeOperations:
                 if run in paragraph:
                     paragraph.remove(run)
 
-            # Insert replacement at the position of the first removed run
-            paragraph.insert(start_run_index, replacement_element)
+            # Build replacement elements: [before_run] + replacement + [after_run]
+            new_elements = self._build_split_elements(
+                start_run, before_text, after_text, [replacement_element]
+            )
+
+            # Insert all elements at the position of the first removed run
+            for i, elem in enumerate(new_elements):
+                paragraph.insert(start_run_index + i, elem)
 
     def _replace_match_with_elements(
         self, match: TextSpan, replacement_elements: list[Any]
@@ -814,9 +829,18 @@ class TrackedChangeOperations:
                     replacement_elements,
                 )
         else:
-            # Match spans multiple runs
+            # Match spans multiple runs - need to preserve text before/after match
             start_run = match.runs[match.start_run_index]
+            end_run = match.runs[match.end_run_index]
             start_run_index = list(paragraph).index(start_run)
+
+            # Get text before match in the first run (only from w:t elements)
+            first_run_text = self._get_run_text_content(start_run)
+            before_text = first_run_text[: match.start_offset]
+
+            # Get text after match in the last run (only from w:t elements)
+            last_run_text = self._get_run_text_content(end_run)
+            after_text = last_run_text[match.end_offset :]
 
             # Remove all runs in the match
             for i in range(match.start_run_index, match.end_run_index + 1):
@@ -824,9 +848,31 @@ class TrackedChangeOperations:
                 if run in paragraph:
                     paragraph.remove(run)
 
-            # Insert all replacement elements at the position of the first removed run
-            for i, elem in enumerate(replacement_elements):
+            # Build replacement elements: [before_run] + replacements + [after_run]
+            new_elements = self._build_split_elements(
+                start_run, before_text, after_text, replacement_elements
+            )
+
+            # Insert all elements at the position of the first removed run
+            for i, elem in enumerate(new_elements):
                 paragraph.insert(start_run_index + i, elem)
+
+    def _get_run_text_content(self, run: Any) -> str:
+        """Extract text content from a run, avoiding XML structural whitespace.
+
+        Only extracts text from w:t and w:delText elements, not from XML
+        formatting whitespace between tags.
+
+        Args:
+            run: A w:r (run) Element
+
+        Returns:
+            Text content of the run
+        """
+        text_elements = run.findall(f".//{{{WORD_NAMESPACE}}}t")
+        deltext_elements = run.findall(f".//{{{WORD_NAMESPACE}}}delText")
+        all_text_elements = text_elements + deltext_elements
+        return "".join(elem.text or "" for elem in all_text_elements)
 
     def _create_text_run(self, text: str, source_run: Any) -> Any:
         """Create a new text run with optional properties from source run.
