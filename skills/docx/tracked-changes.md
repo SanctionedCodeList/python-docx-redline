@@ -19,6 +19,30 @@ doc.delete_tracked("subject to approval")
 doc.save("contract_redlined.docx")
 ```
 
+## Paragraph-Level Deletion
+
+Use `delete_paragraph_tracked()` to remove entire paragraphs cleanly. Unlike `delete_tracked()` which only marks text as deleted (leaving empty paragraphs behind), this removes the paragraph element entirely:
+
+```python
+# Delete paragraph containing specific text
+doc.delete_paragraph_tracked(containing="Some citation text")
+
+# Delete by index (0-based)
+doc.delete_paragraph_tracked(paragraph_index=5)
+
+# Delete paragraph object directly
+para = doc.paragraphs[5]
+doc.delete_paragraph_tracked(paragraph=para)
+
+# Keep for review (strikethrough only, empty para remains after accept)
+doc.delete_paragraph_tracked(containing="text", remove_element=False)
+```
+
+This is especially useful for:
+- Removing bullet points from lists
+- Deleting citations from claim charts
+- Cleaning up table cell content without leaving empty lines
+
 ## Handling Multiple Occurrences
 
 When text appears multiple times, use the `occurrence` parameter:
