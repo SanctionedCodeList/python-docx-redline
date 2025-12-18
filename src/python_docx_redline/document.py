@@ -2267,7 +2267,8 @@ class Document:
         regex: bool = False,
         initials: str | None = None,
         reply_to: "Comment | str | int | None" = None,
-    ) -> "Comment":
+        occurrence: int | list[int] | str | None = None,
+    ) -> "Comment | list[Comment]":
         """Add a comment to the document on specified text or as a reply.
 
         This method can either add a new top-level comment on text in the
@@ -2282,15 +2283,23 @@ class Document:
             regex: Whether to treat 'on' as a regex pattern (default: False)
             initials: Author initials (auto-generated from author if None)
             reply_to: Comment to reply to (Comment object, comment ID str/int, or None)
+            occurrence: Which occurrence(s) to target when multiple matches exist:
+                - None (default): Error if multiple matches (current behavior)
+                - "first" or 1: Target first match only
+                - "last": Target last match only
+                - "all": Add comment to all matches (returns list of Comments)
+                - int (e.g., 2, 3): Target nth match (1-indexed)
+                - list[int] (e.g., [1, 3]): Target specific matches (1-indexed)
 
         Returns:
-            The created Comment object
+            The created Comment object, or list of Comment objects if occurrence="all"
+            or a list of indices is provided
 
         Raises:
             TextNotFoundError: If the target text is not found (new comments only)
-            AmbiguousTextError: If multiple occurrences of target text are found
-            ValueError: If neither 'on' nor 'reply_to' is provided, or if
-                        reply_to references a non-existent comment
+            AmbiguousTextError: If multiple occurrences found and occurrence not specified
+            ValueError: If neither 'on' nor 'reply_to' is provided, if occurrence
+                        is out of range, or if reply_to references a non-existent comment
             re.error: If regex=True and the pattern is invalid
 
         Example:
@@ -2307,6 +2316,18 @@ class Document:
             ...     reply_to=comment,
             ...     author="Author"
             ... )
+            >>> # Target a specific occurrence when text appears multiple times
+            >>> doc.add_comment(
+            ...     "Check this instance",
+            ...     on="Evidence Gaps:",
+            ...     occurrence=1  # First occurrence
+            ... )
+            >>> # Add comment to all occurrences
+            >>> comments = doc.add_comment(
+            ...     "Review needed",
+            ...     on="TODO",
+            ...     occurrence="all"
+            ... )
             >>> doc.save("contract_reviewed.docx")
         """
         return self._comment_ops.add(
@@ -2317,6 +2338,7 @@ class Document:
             regex=regex,
             initials=initials,
             reply_to=reply_to,
+            occurrence=occurrence,
         )
 
     # Delegation methods for Comment model backward compatibility

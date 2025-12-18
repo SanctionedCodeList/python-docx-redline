@@ -207,8 +207,10 @@ class ScopeEvaluator:
     def _is_heading(para: Any) -> bool:
         """Check if a paragraph is a heading.
 
-        A paragraph is considered a heading if it has a paragraph style
-        that starts with "Heading".
+        A paragraph is considered a heading if it has:
+        - A paragraph style that starts with "Heading", or
+        - An explicit outline level (outlineLvl), or
+        - A style containing "Title" or "TOC"
 
         Args:
             para: The paragraph Element
@@ -221,17 +223,29 @@ class ScopeEvaluator:
         if p_pr is None:
             return False
 
+        # Check for explicit outline level (alternative heading indicator)
+        outline_lvl = p_pr.find(f"{{{WORD_NAMESPACE}}}outlineLvl")
+        if outline_lvl is not None:
+            return True
+
         # Look for style
         p_style = p_pr.find(f"{{{WORD_NAMESPACE}}}pStyle")
         if p_style is None:
             return False
 
-        # Check if style value starts with "Heading"
+        # Check if style value indicates a heading
         style_val = p_style.get(f"{{{WORD_NAMESPACE}}}val")
         if style_val is None or not isinstance(style_val, str):
             return False
 
-        return bool(style_val.startswith("Heading"))
+        # Match various heading style patterns
+        style_lower = style_val.lower()
+        return (
+            style_val.startswith("Heading")
+            or "heading" in style_lower
+            or style_val == "Title"
+            or style_lower.startswith("toc")
+        )
 
     @staticmethod
     def filter_paragraphs(
@@ -260,3 +274,43 @@ class ScopeEvaluator:
 
         evaluator = ScopeEvaluator.parse(scope_spec)
         return [p for p in paragraphs if evaluator(p)]
+
+    @staticmethod
+    def debug_scope(
+        paragraphs: list[Any], scope_spec: str | dict | Callable | None
+    ) -> dict[str, list[str]]:
+        """Debug which paragraphs match a scope specification.
+
+        Useful for understanding why text might not be found within a scope.
+
+        Args:
+            paragraphs: List of paragraph Elements to evaluate
+            scope_spec: The scope specification to test
+
+        Returns:
+            Dictionary with 'matched' and 'excluded' keys, each containing
+            a list of paragraph text snippets (first 100 chars)
+
+        Example:
+            >>> debug_info = ScopeEvaluator.debug_scope(paragraphs, "section:Summary")
+            >>> print(f"Matched: {len(debug_info['matched'])} paragraphs")
+            >>> print(f"Excluded: {len(debug_info['excluded'])} paragraphs")
+        """
+        if scope_spec is None:
+            return {
+                "matched": ["".join(p.itertext())[:100] for p in paragraphs],
+                "excluded": [],
+            }
+
+        evaluator = ScopeEvaluator.parse(scope_spec)
+        matched = []
+        excluded = []
+
+        for p in paragraphs:
+            text = "".join(p.itertext())[:100]
+            if evaluator(p):
+                matched.append(text)
+            else:
+                excluded.append(text)
+
+        return {"matched": matched, "excluded": excluded}

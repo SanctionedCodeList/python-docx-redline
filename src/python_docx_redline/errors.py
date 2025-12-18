@@ -21,14 +21,20 @@ class TextNotFoundError(DocxRedlineError):
         text: The text that was being searched for
         scope: The scope where the search was performed (None if document-wide)
         suggestions: List of helpful suggestions for resolving the issue
+        hint: Additional context about why the text wasn't found (e.g., scope filtering)
     """
 
     def __init__(
-        self, text: str, scope: str | None = None, suggestions: list[str] | None = None
+        self,
+        text: str,
+        scope: str | None = None,
+        suggestions: list[str] | None = None,
+        hint: str | None = None,
     ) -> None:
         self.text = text
         self.scope = scope
         self.suggestions = suggestions or []
+        self.hint = hint
         super().__init__(self._format_message())
 
     def _format_message(self) -> str:
@@ -36,6 +42,9 @@ class TextNotFoundError(DocxRedlineError):
         msg = f"Could not find '{self.text}'"
         if self.scope:
             msg += f" in scope '{self.scope}'"
+
+        if self.hint:
+            msg += f"\n\nNote: {self.hint}"
 
         if self.suggestions:
             msg += "\n\nSuggestions:\n"
@@ -73,7 +82,11 @@ class AmbiguousTextError(DocxRedlineError):
                 msg += "\n"
             msg += "\n"
 
-        msg += "Provide a more specific scope to disambiguate."
+        msg += "To disambiguate, either:\n"
+        msg += "  • Use occurrence=N to target the Nth match (1-indexed)\n"
+        msg += "  • Use occurrence='first' or occurrence='last'\n"
+        msg += "  • Use occurrence='all' to target all matches\n"
+        msg += "  • Provide a more specific scope parameter"
         return msg
 
 

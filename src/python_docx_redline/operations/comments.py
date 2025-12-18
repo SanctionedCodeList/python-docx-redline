@@ -127,7 +127,8 @@ class CommentOperations:
         regex: bool = False,
         initials: str | None = None,
         reply_to: Comment | str | int | None = None,
-    ) -> Comment:
+        occurrence: int | list[int] | str | None = None,
+    ) -> "Comment | list[Comment]":
         """Add a comment to the document on specified text or as a reply.
 
         This method can either add a new top-level comment on text in the
@@ -142,15 +143,23 @@ class CommentOperations:
             regex: Whether to treat 'on' as a regex pattern (default: False)
             initials: Author initials (auto-generated from author if None)
             reply_to: Comment to reply to (Comment object, comment ID str/int, or None)
+            occurrence: Which occurrence(s) to target when multiple matches exist:
+                - None (default): Error if multiple matches (current behavior)
+                - "first" or 1: Target first match only
+                - "last": Target last match only
+                - "all": Add comment to all matches (returns list of Comments)
+                - int (e.g., 2, 3): Target nth match (1-indexed)
+                - list[int] (e.g., [1, 3]): Target specific matches (1-indexed)
 
         Returns:
-            The created Comment object
+            The created Comment object, or list of Comment objects if occurrence="all"
+            or a list of indices is provided
 
         Raises:
             TextNotFoundError: If the target text is not found (new comments only)
-            AmbiguousTextError: If multiple occurrences of target text are found
-            ValueError: If neither 'on' nor 'reply_to' is provided, or if
-                        reply_to references a non-existent comment
+            AmbiguousTextError: If multiple occurrences found and occurrence not specified
+            ValueError: If neither 'on' nor 'reply_to' is provided, if occurrence
+                        is out of range, or if reply_to references a non-existent comment
             re.error: If regex=True and the pattern is invalid
         """
         if reply_to is None and on is None:
@@ -168,7 +177,15 @@ class CommentOperations:
             # on cannot be None here due to the check above
             assert on is not None  # For type checker
             return self._add_top_level_comment(
-                text, on, scope, regex, comment_id, effective_author, effective_initials, timestamp
+                text,
+                on,
+                scope,
+                regex,
+                comment_id,
+                effective_author,
+                effective_initials,
+                timestamp,
+                occurrence,
             )
 
     def _prepare_author_info(self, author: str | None, initials: str | None) -> tuple[str, str]:
@@ -219,7 +236,8 @@ class CommentOperations:
         author: str,
         initials: str,
         timestamp: str,
-    ) -> Comment:
+        occurrence: int | list[int] | str | None = None,
+    ) -> "Comment | list[Comment]":
         """Add a new top-level comment on text in the document."""
         from ..models.comment import Comment, CommentRange
         from ..models.paragraph import Paragraph
@@ -229,25 +247,93 @@ class CommentOperations:
 
         matches = self._document._text_search.find_text(on, paragraphs, regex=regex)
         if not matches:
+            # Check if text exists anywhere (ignoring scope) for better error message
+            hint = None
+            if scope is not None:
+                all_matches = self._document._text_search.find_text(on, all_paragraphs, regex=regex)
+                if all_matches:
+                    hint = (
+                        f"Found {len(all_matches)} occurrence(s) in the document, "
+                        f"but none within scope '{scope}'. "
+                        "Try removing or adjusting the scope parameter."
+                    )
             suggestions = SuggestionGenerator.generate_suggestions(on, paragraphs)
-            raise TextNotFoundError(on, suggestions=suggestions)
-        if len(matches) > 1:
+            raise TextNotFoundError(on, suggestions=suggestions, hint=hint)
+
+        # Select matches based on occurrence parameter
+        if occurrence is not None:
+            selected_matches = self._select_matches(matches, occurrence, on)
+        elif len(matches) > 1:
             raise AmbiguousTextError(on, matches)
+        else:
+            selected_matches = matches
 
-        match = matches[0]
-        self._insert_comment_markers(match, comment_id)
+        # Create comments for selected matches
+        comments = []
+        for i, match in enumerate(selected_matches):
+            # Get a unique comment_id for each comment (first one uses the pre-allocated id)
+            current_comment_id = comment_id if i == 0 else self._get_next_comment_id()
 
-        comment_elem = self._add_comment_to_comments_xml(
-            comment_id, text, author, initials, timestamp
-        )
+            self._insert_comment_markers(match, current_comment_id)
 
-        start_para = Paragraph(match.paragraph)
-        comment_range = CommentRange(
-            start_paragraph=start_para,
-            end_paragraph=start_para,
-            marked_text=match.text,
-        )
-        return Comment(comment_elem, comment_range, document=self._document)
+            comment_elem = self._add_comment_to_comments_xml(
+                current_comment_id, text, author, initials, timestamp
+            )
+
+            start_para = Paragraph(match.paragraph)
+            comment_range = CommentRange(
+                start_paragraph=start_para,
+                end_paragraph=start_para,
+                marked_text=match.text,
+            )
+            comments.append(Comment(comment_elem, comment_range, document=self._document))
+
+        # Return single comment or list based on what was requested
+        if len(comments) == 1:
+            return comments[0]
+        return comments
+
+    def _select_matches(
+        self, matches: list["TextSpan"], occurrence: int | list[int] | str, text: str
+    ) -> list["TextSpan"]:
+        """Select target matches based on occurrence parameter.
+
+        Args:
+            matches: List of all matches found
+            occurrence: Which occurrence(s) to select - int (1-indexed), list of ints, or string
+            text: Original search text (for error messages)
+
+        Returns:
+            List of selected TextSpan matches
+
+        Raises:
+            AmbiguousTextError: If multiple matches and occurrence not specified
+            ValueError: If occurrence is out of range
+        """
+        if occurrence == "first" or occurrence == 1:
+            return [matches[0]]
+        elif occurrence == "last":
+            return [matches[-1]]
+        elif occurrence == "all":
+            return matches
+        elif isinstance(occurrence, list):
+            # Handle list of indices (1-indexed)
+            selected = []
+            for idx in occurrence:
+                if not isinstance(idx, int):
+                    raise ValueError(f"List elements must be integers, got {type(idx)}")
+                if not (1 <= idx <= len(matches)):
+                    raise ValueError(f"Occurrence {idx} out of range (1-{len(matches)})")
+                selected.append(matches[idx - 1])
+            return selected
+        elif isinstance(occurrence, int) and 1 <= occurrence <= len(matches):
+            return [matches[occurrence - 1]]
+        elif isinstance(occurrence, int):
+            raise ValueError(f"Occurrence {occurrence} out of range (1-{len(matches)})")
+        elif len(matches) > 1:
+            raise AmbiguousTextError(text, matches)
+        else:
+            return matches
 
     def delete(self, comment: Comment | str | int) -> None:
         """Delete a specific comment.
