@@ -153,7 +153,7 @@ class TextSearch:
         paragraphs: list[Any],
         case_sensitive: bool = True,
         regex: bool = False,
-        normalize_quotes_for_matching: bool = False,
+        normalize_special_chars: bool = False,
         fuzzy: dict[str, Any] | None = None,
     ) -> list[TextSpan]:
         """Find all occurrences of text in the given paragraphs.
@@ -169,8 +169,8 @@ class TextSearch:
             paragraphs: List of paragraph Elements to search in
             case_sensitive: Whether to perform case-sensitive search (default: True)
             regex: Whether to treat text as a regex pattern (default: False)
-            normalize_quotes_for_matching: Normalize quotes to straight quotes for matching
-                (default: False)
+            normalize_special_chars: Normalize special characters (quotes, bullets,
+                dashes) for flexible matching (default: False)
             fuzzy: Fuzzy matching configuration dict with keys:
                 - threshold: Similarity threshold (0.0 to 1.0)
                 - algorithm: Matching algorithm (ratio, partial_ratio, etc.)
@@ -184,7 +184,7 @@ class TextSearch:
             re.error: If regex=True and the pattern is invalid
             ImportError: If fuzzy matching requested but rapidfuzz not installed
         """
-        from .quote_normalization import normalize_quotes as normalize_quotes_func
+        from .quote_normalization import normalize_special_chars as normalize_func
 
         results = []
 
@@ -210,9 +210,9 @@ class TextSearch:
         else:
             # Prepare literal search text based on case sensitivity
             search_text = text if case_sensitive else text.lower()
-            # Apply quote normalization if requested
-            if normalize_quotes_for_matching:
-                search_text = normalize_quotes_func(search_text)
+            # Apply special character normalization if requested
+            if normalize_special_chars:
+                search_text = normalize_func(search_text)
             pattern = None  # Not used for literal search
 
         for para in paragraphs:
@@ -237,8 +237,8 @@ class TextSearch:
 
             # Normalize document text for matching if requested
             search_full_text = full_text
-            if normalize_quotes_for_matching and not regex and not fuzzy:
-                search_full_text = normalize_quotes_func(search_full_text)
+            if normalize_special_chars and not regex and not fuzzy:
+                search_full_text = normalize_func(search_full_text)
             if not case_sensitive and not regex and not fuzzy:
                 search_full_text = search_full_text.lower()
 

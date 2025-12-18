@@ -101,7 +101,7 @@ class ImageOperations:
         text: str,
         scope: str | dict | Any | None,
         regex: bool,
-        enable_quote_normalization: bool,
+        normalize_special_chars: bool,
     ) -> TextSpan:
         """Find a unique text match in the document.
 
@@ -109,7 +109,7 @@ class ImageOperations:
             text: The text or regex pattern to find
             scope: Limit search scope
             regex: Whether to treat text as regex
-            enable_quote_normalization: Whether to normalize quotes
+            normalize_special_chars: Whether to normalize quotes
 
         Returns:
             The single TextSpan match
@@ -125,7 +125,7 @@ class ImageOperations:
             text,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            normalize_special_chars=normalize_special_chars and not regex,
         )
 
         if not matches:

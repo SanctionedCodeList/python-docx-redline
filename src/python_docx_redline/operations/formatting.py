@@ -88,7 +88,7 @@ class FormatOperations:
             find,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=not regex,
+            normalize_special_chars=not regex,
         )
 
         if not matches:
@@ -143,7 +143,7 @@ class FormatOperations:
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
         matches = self._document._text_search.find_text(
-            find, paragraphs, regex=regex, normalize_quotes_for_matching=not regex
+            find, paragraphs, regex=regex, normalize_special_chars=not regex
         )
         if not matches:
             return 0
@@ -216,7 +216,7 @@ class FormatOperations:
         scope: str | dict | Any | None = None,
         occurrence: int | str = "first",
         author: str | None = None,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> FormatResult:
         """Apply character formatting to text with tracked changes.
 
@@ -242,7 +242,7 @@ class FormatOperations:
             scope: Limit search to specific paragraphs/sections
             occurrence: Which occurrence to format: 1, 2, "first", "last", or "all"
             author: Override default author for this change
-            enable_quote_normalization: Auto-convert straight quotes to smart quotes
+            normalize_special_chars: Auto-convert straight quotes to smart quotes
                 for matching (default: True)
 
         Returns:
@@ -284,7 +284,7 @@ class FormatOperations:
             text,
             paragraphs,
             regex=False,
-            normalize_quotes_for_matching=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
         if not matches:
@@ -737,7 +737,7 @@ class FormatOperations:
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
         source_matches = self._document._text_search.find_text(
-            from_text, paragraphs, regex=False, normalize_quotes_for_matching=True
+            from_text, paragraphs, regex=False, normalize_special_chars=True
         )
         if not source_matches:
             raise TextNotFoundError(from_text)

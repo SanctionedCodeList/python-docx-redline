@@ -175,6 +175,26 @@ class TrackedChange:
         self._document.reject_change(self.id)
 
     @property
+    def type(self) -> str:
+        """Get the change type as a simple string.
+
+        Returns:
+            "insert" for insertions, "delete" for deletions,
+            "move_from"/"move_to" for moves, "format" for formatting changes.
+        """
+        if self.change_type == ChangeType.INSERTION:
+            return "insert"
+        elif self.change_type == ChangeType.DELETION:
+            return "delete"
+        elif self.change_type == ChangeType.MOVE_FROM:
+            return "move_from"
+        elif self.change_type == ChangeType.MOVE_TO:
+            return "move_to"
+        elif self.change_type in (ChangeType.FORMAT_RUN, ChangeType.FORMAT_PARAGRAPH):
+            return "format"
+        return self.change_type.value
+
+    @property
     def is_insertion(self) -> bool:
         """Check if this is an insertion change."""
         return self.change_type == ChangeType.INSERTION

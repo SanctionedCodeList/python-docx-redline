@@ -95,7 +95,7 @@ class PatternOperations:
             pattern,
             paragraphs,
             regex=True,
-            normalize_quotes_for_matching=False,
+            normalize_special_chars=False,
         )
 
         # Helper to format amount
@@ -125,7 +125,7 @@ class PatternOperations:
                 pattern,
                 paragraphs,
                 regex=True,
-                normalize_quotes_for_matching=False,
+                normalize_special_chars=False,
             )
 
             if not matches:
@@ -155,7 +155,7 @@ class PatternOperations:
                     author=author,
                     scope=scope,
                     regex=True,
-                    enable_quote_normalization=False,
+                    normalize_special_chars=False,
                 )
                 replacement_count += 1
             except (TextNotFoundError, AmbiguousTextError):
@@ -237,7 +237,7 @@ class PatternOperations:
                 pattern,
                 paragraphs,
                 regex=True,
-                normalize_quotes_for_matching=False,
+                normalize_special_chars=False,
             )
             # Store matches with their format
             for match in matches:
@@ -348,7 +348,7 @@ class PatternOperations:
                 author=author,
                 scope=scope,
                 regex=True,
-                enable_quote_normalization=False,
+                normalize_special_chars=False,
             )
             return 1
         except TextNotFoundError:
@@ -365,7 +365,7 @@ class PatternOperations:
                 pattern,
                 paragraphs,
                 regex=True,
-                normalize_quotes_for_matching=False,
+                normalize_special_chars=False,
             )
 
             if not matches:

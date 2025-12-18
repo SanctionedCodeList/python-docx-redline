@@ -762,7 +762,7 @@ class Document:
         scope: str | dict | Any | None = None,
         occurrence: int | list[int] | str = "first",
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
         fuzzy: float | dict[str, Any] | None = None,
     ) -> None:
         """Insert text with tracked changes after or before a specific location.
@@ -780,7 +780,7 @@ class Document:
             occurrence: Which occurrence(s) to use: 1 (first), 2 (second), "first", "last",
                 "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat anchor as a regex pattern (default: False)
-            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+            normalize_special_chars: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
             fuzzy: Fuzzy matching configuration:
                 - None: Exact matching (default)
@@ -816,7 +816,7 @@ class Document:
             scope=scope,
             occurrence=occurrence,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
             fuzzy=fuzzy,
         )
 
@@ -952,7 +952,7 @@ class Document:
         scope: str | dict | Any | None = None,
         occurrence: int | list[int] | str = "first",
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
         fuzzy: float | dict[str, Any] | None = None,
     ) -> None:
         """Delete text with tracked changes.
@@ -967,7 +967,7 @@ class Document:
             occurrence: Which occurrence(s) to delete: 1 (first), 2 (second), "first", "last",
                 "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat 'text' as a regex pattern (default: False)
-            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+            normalize_special_chars: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
             fuzzy: Fuzzy matching configuration:
                 - None: Exact matching (default)
@@ -1000,7 +1000,7 @@ class Document:
             scope=scope,
             occurrence=occurrence,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
             fuzzy=fuzzy,
         )
 
@@ -1012,7 +1012,7 @@ class Document:
         scope: str | dict | Any | None = None,
         occurrence: int | list[int] | str = "first",
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
         show_context: bool = False,
         check_continuity: bool = False,
         context_chars: int = 50,
@@ -1036,7 +1036,7 @@ class Document:
             occurrence: Which occurrence(s) to replace: 1 (first), 2 (second), "first",
                 "last", "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat 'find' as a regex pattern (default: False)
-            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+            normalize_special_chars: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
             show_context: Show text before/after the match for preview (default: False)
             check_continuity: Check if replacement may create sentence fragments (default: False)
@@ -1093,7 +1093,7 @@ class Document:
             scope=scope,
             occurrence=occurrence,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
             show_context=show_context,
             check_continuity=check_continuity,
             context_chars=context_chars,
@@ -1109,7 +1109,7 @@ class Document:
         source_scope: str | dict | Any | None = None,
         dest_scope: str | dict | Any | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> None:
         """Move text to a new location with proper move tracking.
 
@@ -1130,7 +1130,7 @@ class Document:
             source_scope: Limit source text search scope
             dest_scope: Limit destination anchor search scope
             regex: Whether to treat 'text' and anchor as regex patterns (default: False)
-            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+            normalize_special_chars: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
 
         Raises:
@@ -1162,7 +1162,7 @@ class Document:
             source_scope=source_scope,
             dest_scope=dest_scope,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
     def normalize_currency(
@@ -1372,7 +1372,7 @@ class Document:
         scope: str | dict | Any | None = None,
         occurrence: int | str = "first",
         author: str | None = None,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> FormatResult:
         """Apply character formatting to text with tracked changes.
 
@@ -1398,7 +1398,7 @@ class Document:
             scope: Limit search to specific paragraphs/sections
             occurrence: Which occurrence to format: 1, 2, "first", "last", or "all"
             author: Override default author for this change
-            enable_quote_normalization: Auto-convert straight quotes to smart quotes
+            normalize_special_chars: Auto-convert straight quotes to smart quotes
                 for matching (default: True)
 
         Returns:
@@ -1430,7 +1430,7 @@ class Document:
             scope=scope,
             occurrence=occurrence,
             author=author,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
     def format_paragraph_tracked(
@@ -3230,7 +3230,7 @@ class Document:
         header_type: str = "default",
         author: str | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> None:
         """Replace text in a header with tracked changes.
 
@@ -3240,7 +3240,7 @@ class Document:
             header_type: Type of header ("default", "first", or "even")
             author: Optional author override
             regex: Whether to treat 'find' as a regex pattern
-            enable_quote_normalization: Auto-convert quotes for matching
+            normalize_special_chars: Auto-convert quotes for matching
 
         Raises:
             TextNotFoundError: If 'find' text is not found
@@ -3256,7 +3256,7 @@ class Document:
             header_type=header_type,
             author=author,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
     def replace_in_footer(
@@ -3266,7 +3266,7 @@ class Document:
         footer_type: str = "default",
         author: str | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> None:
         """Replace text in a footer with tracked changes.
 
@@ -3276,7 +3276,7 @@ class Document:
             footer_type: Type of footer ("default", "first", or "even")
             author: Optional author override
             regex: Whether to treat 'find' as a regex pattern
-            enable_quote_normalization: Auto-convert quotes for matching
+            normalize_special_chars: Auto-convert quotes for matching
 
         Raises:
             TextNotFoundError: If 'find' text is not found
@@ -3292,7 +3292,7 @@ class Document:
             footer_type=footer_type,
             author=author,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
     def insert_in_header(
@@ -3303,7 +3303,7 @@ class Document:
         header_type: str = "default",
         author: str | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> None:
         """Insert text in a header with tracked changes.
 
@@ -3314,7 +3314,7 @@ class Document:
             header_type: Type of header ("default", "first", or "even")
             author: Optional author override
             regex: Whether to treat anchor as a regex pattern
-            enable_quote_normalization: Auto-convert quotes for matching
+            normalize_special_chars: Auto-convert quotes for matching
 
         Raises:
             TextNotFoundError: If anchor text is not found
@@ -3332,7 +3332,7 @@ class Document:
             header_type=header_type,
             author=author,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
     def insert_in_footer(
@@ -3343,7 +3343,7 @@ class Document:
         footer_type: str = "default",
         author: str | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> None:
         """Insert text in a footer with tracked changes.
 
@@ -3354,7 +3354,7 @@ class Document:
             footer_type: Type of footer ("default", "first", or "even")
             author: Optional author override
             regex: Whether to treat anchor as a regex pattern
-            enable_quote_normalization: Auto-convert quotes for matching
+            normalize_special_chars: Auto-convert quotes for matching
 
         Raises:
             TextNotFoundError: If anchor text is not found
@@ -3372,7 +3372,7 @@ class Document:
             footer_type=footer_type,
             author=author,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
     def __del__(self) -> None:

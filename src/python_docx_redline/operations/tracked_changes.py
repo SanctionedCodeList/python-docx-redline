@@ -99,7 +99,7 @@ class TrackedChangeOperations:
         text: str,
         scope: str | dict | Any | None,
         regex: bool,
-        enable_quote_normalization: bool,
+        normalize_special_chars: bool,
     ) -> TextSpan:
         """Find a unique text match in the document.
 
@@ -107,7 +107,7 @@ class TrackedChangeOperations:
             text: The text or regex pattern to find
             scope: Limit search scope
             regex: Whether to treat text as regex
-            enable_quote_normalization: Whether to normalize quotes
+            normalize_special_chars: Whether to normalize quotes
 
         Returns:
             The single TextSpan match
@@ -123,7 +123,7 @@ class TrackedChangeOperations:
             text,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            normalize_special_chars=normalize_special_chars and not regex,
         )
 
         if not matches:
@@ -162,7 +162,7 @@ class TrackedChangeOperations:
         scope: str | dict | Any | None = None,
         occurrence: int | list[int] | str = "first",
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
         fuzzy: float | dict[str, Any] | None = None,
     ) -> None:
         """Insert text with tracked changes after or before a specific location.
@@ -180,7 +180,7 @@ class TrackedChangeOperations:
             occurrence: Which occurrence(s) to insert at: 1 (first), 2 (second), "first",
                 "last", "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat anchor as a regex pattern (default: False)
-            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+            normalize_special_chars: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
             fuzzy: Fuzzy matching configuration:
                 - None: Exact matching (default)
@@ -218,7 +218,7 @@ class TrackedChangeOperations:
             anchor,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization
+            normalize_special_chars=normalize_special_chars
             and not regex
             and not fuzzy_config,
             fuzzy=fuzzy_config,
@@ -251,7 +251,7 @@ class TrackedChangeOperations:
         scope: str | dict | Any | None = None,
         occurrence: int | list[int] | str = "first",
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
         fuzzy: float | dict[str, Any] | None = None,
     ) -> None:
         """Delete text with tracked changes.
@@ -266,7 +266,7 @@ class TrackedChangeOperations:
             occurrence: Which occurrence(s) to delete: 1 (first), 2 (second), "first", "last",
                 "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat 'text' as a regex pattern (default: False)
-            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+            normalize_special_chars: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
             fuzzy: Fuzzy matching configuration:
                 - None: Exact matching (default)
@@ -293,7 +293,7 @@ class TrackedChangeOperations:
             text,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization
+            normalize_special_chars=normalize_special_chars
             and not regex
             and not fuzzy_config,
             fuzzy=fuzzy_config,
@@ -324,7 +324,7 @@ class TrackedChangeOperations:
         scope: str | dict | Any | None = None,
         occurrence: int | list[int] | str = "first",
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
         show_context: bool = False,
         check_continuity: bool = False,
         context_chars: int = 50,
@@ -348,7 +348,7 @@ class TrackedChangeOperations:
             occurrence: Which occurrence(s) to replace: 1 (first), 2 (second), "first", "last",
                 "all", or list of indices [1, 3, 5] (default: "first")
             regex: Whether to treat 'find' as a regex pattern (default: False)
-            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+            normalize_special_chars: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
             show_context: Show text before/after the match for preview (default: False)
             check_continuity: Check if replacement may create sentence fragments (default: False)
@@ -382,7 +382,7 @@ class TrackedChangeOperations:
             find,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization
+            normalize_special_chars=normalize_special_chars
             and not regex
             and not fuzzy_config,
             fuzzy=fuzzy_config,
@@ -568,7 +568,7 @@ class TrackedChangeOperations:
         source_scope: str | dict | Any | None = None,
         dest_scope: str | dict | Any | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> None:
         """Move text to a new location with proper move tracking.
 
@@ -589,7 +589,7 @@ class TrackedChangeOperations:
             source_scope: Limit source text search scope
             dest_scope: Limit destination anchor search scope
             regex: Whether to treat 'text' and anchor as regex patterns (default: False)
-            enable_quote_normalization: Auto-convert straight quotes to smart quotes for
+            normalize_special_chars: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
 
         Raises:
@@ -610,10 +610,10 @@ class TrackedChangeOperations:
 
         # Find source text and destination anchor
         source_match = self._find_unique_match(
-            text, source_scope, regex, enable_quote_normalization
+            text, source_scope, regex, normalize_special_chars
         )
         dest_match = self._find_unique_match(
-            dest_anchor, dest_scope, regex, enable_quote_normalization
+            dest_anchor, dest_scope, regex, normalize_special_chars
         )
 
         source_text = source_match.text

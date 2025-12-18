@@ -176,14 +176,14 @@ def test_insert_tracked_with_smart_quotes_double() -> None:
 
 
 def test_insert_tracked_disable_normalization() -> None:
-    """insert_tracked with enable_quote_normalization=False requires exact match."""
+    """insert_tracked with normalize_special_chars=False requires exact match."""
     doc_path = create_test_document("The plaintiff\u2019s claim is strong.")
     try:
         doc = Document(doc_path)
 
         # With normalization disabled, straight quote won't match curly quote
         with pytest.raises(TextNotFoundError):
-            doc.insert_tracked("valid ", after="plaintiff's", enable_quote_normalization=False)
+            doc.insert_tracked("valid ", after="plaintiff's", normalize_special_chars=False)
 
     finally:
         doc_path.unlink()
@@ -244,14 +244,14 @@ def test_delete_tracked_with_smart_quotes_double() -> None:
 
 
 def test_delete_tracked_disable_normalization() -> None:
-    """delete_tracked with enable_quote_normalization=False requires exact match."""
+    """delete_tracked with normalize_special_chars=False requires exact match."""
     doc_path = create_test_document("The plaintiff\u2019s claim is strong.")
     try:
         doc = Document(doc_path)
 
         # With normalization disabled, straight quote won't match curly quote
         with pytest.raises(TextNotFoundError):
-            doc.delete_tracked("plaintiff's", enable_quote_normalization=False)
+            doc.delete_tracked("plaintiff's", normalize_special_chars=False)
 
     finally:
         doc_path.unlink()
@@ -296,14 +296,14 @@ def test_replace_tracked_with_smart_quotes_double() -> None:
 
 
 def test_replace_tracked_disable_normalization() -> None:
-    """replace_tracked with enable_quote_normalization=False requires exact match."""
+    """replace_tracked with normalize_special_chars=False requires exact match."""
     doc_path = create_test_document("The plaintiff\u2019s claim is strong.")
     try:
         doc = Document(doc_path)
 
         # With normalization disabled, straight quote won't match curly quote
         with pytest.raises(TextNotFoundError):
-            doc.replace_tracked("plaintiff's", "defendant's", enable_quote_normalization=False)
+            doc.replace_tracked("plaintiff's", "defendant's", normalize_special_chars=False)
 
     finally:
         doc_path.unlink()

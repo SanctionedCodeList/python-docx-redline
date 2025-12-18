@@ -34,20 +34,23 @@ doc.replace_tracked("Section", "Article", occurrence="all")  # All
 doc.replace_tracked("Section", "Article", occurrence=[1, 3, 5])
 ```
 
-## Smart Quote Handling
+## Special Character Normalization
 
-Word documents use curly quotes. The library normalizes automatically:
+Word documents use typographic characters (curly quotes, special bullets, en/em dashes). The library normalizes these automatically:
 
 ```python
-# Document contains: "Defendant's motion" (curly apostrophe U+2019)
-# Just type straight quotes - it works!
-doc.replace_tracked("Defendant's motion", "party's motion")
+# Curly quotes → straight quotes (automatic)
+doc.replace_tracked("Defendant's motion", "party's motion")  # Works with curly apostrophe
+doc.replace_tracked('"free trial"', '"subscription"')        # Works with curly double quotes
 
-# Also works with double quotes
-doc.replace_tracked('"free trial"', '"subscription"')
+# Bullets (•, ·, ◦, ▪, etc.) → standard bullet
+doc.delete_tracked("• First item")  # Matches any bullet variant
+
+# Dashes (–, —) → hyphen
+doc.replace_tracked("2020-2024", "2020-2025")  # Matches en/em dashes too
 
 # Disable if you need exact matching
-doc.replace_tracked("exact's", "match", enable_quote_normalization=False)
+doc.replace_tracked("exact's", "match", normalize_special_chars=False)
 ```
 
 ## Regex Support

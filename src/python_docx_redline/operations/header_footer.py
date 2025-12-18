@@ -291,7 +291,7 @@ class HeaderFooterOperations:
         header_type: str = "default",
         author: str | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> None:
         """Replace text in a header with tracked changes.
 
@@ -301,7 +301,7 @@ class HeaderFooterOperations:
             header_type: Type of header ("default", "first", or "even")
             author: Optional author override
             regex: Whether to treat 'find' as a regex pattern
-            enable_quote_normalization: Auto-convert quotes for matching
+            normalize_special_chars: Auto-convert quotes for matching
 
         Raises:
             TextNotFoundError: If 'find' text is not found
@@ -322,7 +322,7 @@ class HeaderFooterOperations:
             replace=replace,
             author=author,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
     def replace_in_footer(
@@ -332,7 +332,7 @@ class HeaderFooterOperations:
         footer_type: str = "default",
         author: str | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> None:
         """Replace text in a footer with tracked changes.
 
@@ -342,7 +342,7 @@ class HeaderFooterOperations:
             footer_type: Type of footer ("default", "first", or "even")
             author: Optional author override
             regex: Whether to treat 'find' as a regex pattern
-            enable_quote_normalization: Auto-convert quotes for matching
+            normalize_special_chars: Auto-convert quotes for matching
 
         Raises:
             TextNotFoundError: If 'find' text is not found
@@ -363,7 +363,7 @@ class HeaderFooterOperations:
             replace=replace,
             author=author,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
     def insert_in_header(
@@ -374,7 +374,7 @@ class HeaderFooterOperations:
         header_type: str = "default",
         author: str | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> None:
         """Insert text in a header with tracked changes.
 
@@ -385,7 +385,7 @@ class HeaderFooterOperations:
             header_type: Type of header ("default", "first", or "even")
             author: Optional author override
             regex: Whether to treat anchor as a regex pattern
-            enable_quote_normalization: Auto-convert quotes for matching
+            normalize_special_chars: Auto-convert quotes for matching
 
         Raises:
             TextNotFoundError: If anchor text is not found
@@ -416,7 +416,7 @@ class HeaderFooterOperations:
             insert_after=insert_after,
             author=author,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
     def insert_in_footer(
@@ -427,7 +427,7 @@ class HeaderFooterOperations:
         footer_type: str = "default",
         author: str | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
     ) -> None:
         """Insert text in a footer with tracked changes.
 
@@ -438,7 +438,7 @@ class HeaderFooterOperations:
             footer_type: Type of footer ("default", "first", or "even")
             author: Optional author override
             regex: Whether to treat anchor as a regex pattern
-            enable_quote_normalization: Auto-convert quotes for matching
+            normalize_special_chars: Auto-convert quotes for matching
 
         Raises:
             TextNotFoundError: If anchor text is not found
@@ -469,7 +469,7 @@ class HeaderFooterOperations:
             insert_after=insert_after,
             author=author,
             regex=regex,
-            enable_quote_normalization=enable_quote_normalization,
+            normalize_special_chars=normalize_special_chars,
         )
 
     def _replace_in_header_footer(
@@ -478,7 +478,7 @@ class HeaderFooterOperations:
         replace: str,
         author: str | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
         header: Header | None = None,
         footer: Footer | None = None,
     ) -> None:
@@ -489,7 +489,7 @@ class HeaderFooterOperations:
             replace: Replacement text
             author: Optional author override
             regex: Whether to treat 'find' as a regex pattern
-            enable_quote_normalization: Auto-convert quotes for matching
+            normalize_special_chars: Auto-convert quotes for matching
             header: Header object (if replacing in header)
             footer: Footer object (if replacing in footer)
         """
@@ -511,7 +511,7 @@ class HeaderFooterOperations:
             find,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            normalize_special_chars=normalize_special_chars and not regex,
         )
 
         if not matches:
@@ -551,7 +551,7 @@ class HeaderFooterOperations:
         insert_after: bool,
         author: str | None = None,
         regex: bool = False,
-        enable_quote_normalization: bool = True,
+        normalize_special_chars: bool = True,
         header: Header | None = None,
         footer: Footer | None = None,
     ) -> None:
@@ -563,7 +563,7 @@ class HeaderFooterOperations:
             insert_after: Whether to insert after (True) or before (False) anchor
             author: Optional author override
             regex: Whether to treat anchor as a regex pattern
-            enable_quote_normalization: Auto-convert quotes for matching
+            normalize_special_chars: Auto-convert quotes for matching
             header: Header object (if inserting in header)
             footer: Footer object (if inserting in footer)
         """
@@ -585,7 +585,7 @@ class HeaderFooterOperations:
             anchor,
             paragraphs,
             regex=regex,
-            normalize_quotes_for_matching=enable_quote_normalization and not regex,
+            normalize_special_chars=normalize_special_chars and not regex,
         )
 
         if not matches:
