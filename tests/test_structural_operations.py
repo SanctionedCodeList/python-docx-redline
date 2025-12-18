@@ -1202,4 +1202,241 @@ def test_delete_paragraph_tracked_with_author():
         doc_path.unlink()
 
 
+def test_delete_paragraph_tracked_occurrence_first():
+    """Test deleting first occurrence when multiple paragraphs match."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Citation: Patent A</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Citation: Patent B</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Citation: Patent C</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        # Delete first occurrence
+        deleted = doc.delete_paragraph_tracked(containing="Citation:", occurrence=1)
+
+        assert deleted.text == "Citation: Patent A"
+        assert len(doc.paragraphs) == 2
+
+        text = doc.get_text()
+        assert "Patent A" not in text
+        assert "Patent B" in text
+        assert "Patent C" in text
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_occurrence_last():
+    """Test deleting last occurrence when multiple paragraphs match."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Citation: Patent A</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Citation: Patent B</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Citation: Patent C</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        # Delete last occurrence
+        deleted = doc.delete_paragraph_tracked(containing="Citation:", occurrence="last")
+
+        assert deleted.text == "Citation: Patent C"
+        assert len(doc.paragraphs) == 2
+
+        text = doc.get_text()
+        assert "Patent A" in text
+        assert "Patent B" in text
+        assert "Patent C" not in text
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_occurrence_all():
+    """Test deleting all matching paragraphs."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Keep this</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>TODO: Fix this</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>TODO: And this</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Keep this too</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        # Delete all paragraphs containing "TODO"
+        deleted = doc.delete_paragraph_tracked(containing="TODO", occurrence="all")
+
+        assert isinstance(deleted, list)
+        assert len(deleted) == 2
+        assert len(doc.paragraphs) == 2
+
+        text = doc.get_text()
+        assert "TODO" not in text
+        assert "Keep this" in text
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_occurrence_list():
+    """Test deleting specific occurrences by list."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Item 1</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Item 2</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Item 3</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Item 4</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        # Delete 1st and 3rd occurrences
+        deleted = doc.delete_paragraph_tracked(containing="Item", occurrence=[1, 3])
+
+        assert isinstance(deleted, list)
+        assert len(deleted) == 2
+        assert len(doc.paragraphs) == 2
+
+        text = doc.get_text()
+        assert "Item 1" not in text
+        assert "Item 2" in text
+        assert "Item 3" not in text
+        assert "Item 4" in text
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_occurrence_out_of_range():
+    """Test error when occurrence index is out of range."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    xml_content = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Match 1</w:t>
+      </w:r>
+    </w:p>
+    <w:p>
+      <w:r>
+        <w:t>Match 2</w:t>
+      </w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+    doc_path.write_text(xml_content, encoding="utf-8")
+
+    try:
+        doc = Document(doc_path)
+
+        with pytest.raises(ValueError, match="out of range"):
+            doc.delete_paragraph_tracked(containing="Match", occurrence=5)
+
+    finally:
+        doc_path.unlink()
+
+
+def test_delete_paragraph_tracked_occurrence_with_non_containing():
+    """Test error when occurrence used with paragraph_index."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        with pytest.raises(ValueError, match="can only be used with 'containing'"):
+            doc.delete_paragraph_tracked(paragraph_index=0, occurrence=1)
+
+    finally:
+        doc_path.unlink()
+
+
 # Run tests with: pytest tests/test_structural_operations.py -v

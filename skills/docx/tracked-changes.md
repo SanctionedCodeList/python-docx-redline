@@ -38,6 +38,20 @@ doc.delete_paragraph_tracked(paragraph=para)
 doc.delete_paragraph_tracked(containing="text", remove_element=False)
 ```
 
+### Handling Multiple Matching Paragraphs
+
+When text appears in multiple paragraphs, use `occurrence`:
+
+```python
+# Delete specific occurrence (1-indexed)
+doc.delete_paragraph_tracked(containing="Citation", occurrence=1)      # First
+doc.delete_paragraph_tracked(containing="Citation", occurrence="last") # Last
+doc.delete_paragraph_tracked(containing="Citation", occurrence="all")  # All
+
+# Delete multiple specific occurrences
+doc.delete_paragraph_tracked(containing="Citation", occurrence=[1, 3])
+```
+
 This is especially useful for:
 - Removing bullet points from lists
 - Deleting citations from claim charts

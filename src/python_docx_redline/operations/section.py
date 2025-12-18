@@ -432,10 +432,11 @@ class SectionOperations:
         containing: str | None = None,
         paragraph: Paragraph | None = None,
         paragraph_index: int | None = None,
+        occurrence: int | list[int] | str | None = None,
         remove_element: bool = True,
         author: str | None = None,
         scope: str | dict | Any | None = None,
-    ) -> Paragraph:
+    ) -> "Paragraph | list[Paragraph]":
         """Delete an entire paragraph with tracked changes.
 
         Unlike delete_tracked() which only marks text as deleted (leaving empty
@@ -446,6 +447,9 @@ class SectionOperations:
             containing: Text to search for to identify the paragraph
             paragraph: Paragraph object to delete directly
             paragraph_index: Index of paragraph to delete (0-based)
+            occurrence: Which occurrence(s) to delete when multiple paragraphs
+                match. Options: int (1-indexed), "first", "last", "all", or
+                list of ints like [1, 3]. Only applies with 'containing' param.
             remove_element: If True (default), remove the <w:p> element after
                 marking content as deleted. If False, keep the element for
                 review (content will show strikethrough but empty para remains
@@ -454,13 +458,15 @@ class SectionOperations:
             scope: Limit search scope for 'containing' parameter
 
         Returns:
-            The deleted Paragraph object
+            The deleted Paragraph object, or list of Paragraphs if occurrence
+            was "all" or a list
 
         Raises:
             ValueError: If none of containing/paragraph/paragraph_index provided,
-                or if multiple are provided
+                or if multiple are provided, or if occurrence is out of range
             TextNotFoundError: If containing text not found
             AmbiguousTextError: If containing text matches multiple paragraphs
+                and occurrence not specified
             IndexError: If paragraph_index is out of range
 
         Examples:
@@ -473,6 +479,14 @@ class SectionOperations:
             >>> # Delete paragraph object directly
             >>> para = doc.paragraphs[5]
             >>> doc.delete_paragraph_tracked(paragraph=para)
+
+            >>> # Delete specific occurrence when text matches multiple paragraphs
+            >>> doc.delete_paragraph_tracked(containing="citation", occurrence=1)
+            >>> doc.delete_paragraph_tracked(containing="citation", occurrence="last")
+
+            >>> # Delete all matching paragraphs
+            >>> deleted = doc.delete_paragraph_tracked(containing="TODO", occurrence="all")
+            >>> print(f"Deleted {len(deleted)} paragraphs")
 
             >>> # Keep for review (strikethrough only, no removal)
             >>> doc.delete_paragraph_tracked(
@@ -496,11 +510,17 @@ class SectionOperations:
                 "Only one of containing, paragraph, or paragraph_index can be specified"
             )
 
-        # Find the target paragraph
-        target_para: ParagraphModel | None = None
+        # occurrence only applies to 'containing' mode
+        if occurrence is not None and containing is None:
+            raise ValueError(
+                "The 'occurrence' parameter can only be used with 'containing'"
+            )
+
+        # Find the target paragraph(s)
+        target_paras: list[ParagraphModel] = []
 
         if paragraph is not None:
-            target_para = paragraph
+            target_paras = [paragraph]
 
         elif paragraph_index is not None:
             all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
@@ -509,10 +529,10 @@ class SectionOperations:
                     f"Paragraph index {paragraph_index} out of range "
                     f"(document has {len(all_paragraphs)} paragraphs)"
                 )
-            target_para = ParagraphModel(all_paragraphs[paragraph_index])
+            target_paras = [ParagraphModel(all_paragraphs[paragraph_index])]
 
         elif containing is not None:
-            # Search for paragraph containing the text
+            # Search for paragraph(s) containing the text
             all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
             paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
@@ -531,49 +551,99 @@ class SectionOperations:
                 )
                 raise TextNotFoundError(containing, suggestions=suggestions)
 
-            if len(matching_paras) > 1:
-                # Build TextSpan objects for error message
-                from ..text_search import TextSpan
-
-                spans = []
-                for p_elem in matching_paras:
-                    runs = list(p_elem.iter(f"{{{WORD_NAMESPACE}}}r"))
-                    para_text = "".join(
-                        t.text or ""
-                        for t in p_elem.iter(f"{{{WORD_NAMESPACE}}}t")
-                    )
-                    if runs:
-                        spans.append(
-                            TextSpan(
-                                runs=runs,
-                                start_run_index=0,
-                                end_run_index=len(runs) - 1,
-                                start_offset=0,
-                                end_offset=len(para_text),
-                                paragraph=p_elem,
-                            )
-                        )
-                raise AmbiguousTextError(containing, spans)
-
-            target_para = ParagraphModel(matching_paras[0])
+            # Select paragraphs based on occurrence parameter
+            selected_paras = self._select_paragraph_matches(
+                matching_paras, occurrence, containing
+            )
+            target_paras = [ParagraphModel(p) for p in selected_paras]
 
         # Should not happen due to validation above, but satisfy type checker
-        if target_para is None:
+        if not target_paras:
             raise ValueError("Could not identify target paragraph")
 
-        # Mark content as deleted
+        # Process deletions in reverse order to avoid index invalidation
         author_name = author if author is not None else self._document.author
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        runs = list(target_para.element.iter(f"{{{WORD_NAMESPACE}}}r"))
-        if runs:
-            del_elem = self._create_deletion_element(author_name, timestamp)
-            self._wrap_runs_in_deletion(target_para.element, runs, del_elem)
+        for target_para in reversed(target_paras):
+            runs = list(target_para.element.iter(f"{{{WORD_NAMESPACE}}}r"))
+            if runs:
+                del_elem = self._create_deletion_element(author_name, timestamp)
+                self._wrap_runs_in_deletion(target_para.element, runs, del_elem)
 
-        # Remove the paragraph element if requested
-        if remove_element:
-            parent = target_para.element.getparent()
-            if parent is not None:
-                parent.remove(target_para.element)
+            # Remove the paragraph element if requested
+            if remove_element:
+                parent = target_para.element.getparent()
+                if parent is not None:
+                    parent.remove(target_para.element)
 
-        return target_para
+        # Return single Paragraph or list depending on what was requested
+        if occurrence == "all" or isinstance(occurrence, list):
+            return target_paras
+        return target_paras[0]
+
+    def _select_paragraph_matches(
+        self,
+        matches: list[Any],
+        occurrence: int | list[int] | str | None,
+        text: str,
+    ) -> list[Any]:
+        """Select target paragraph matches based on occurrence parameter.
+
+        Args:
+            matches: List of matching paragraph elements
+            occurrence: Which occurrence(s) to select
+            text: Original search text (for error messages)
+
+        Returns:
+            List of selected paragraph elements
+
+        Raises:
+            AmbiguousTextError: If multiple matches and occurrence not specified
+            ValueError: If occurrence is out of range
+        """
+        from ..text_search import TextSpan
+
+        if occurrence == "first" or occurrence == 1:
+            return [matches[0]]
+        elif occurrence == "last":
+            return [matches[-1]]
+        elif occurrence == "all":
+            return matches
+        elif isinstance(occurrence, list):
+            # Handle list of indices (1-indexed)
+            selected = []
+            for idx in occurrence:
+                if not isinstance(idx, int):
+                    raise ValueError(f"List elements must be integers, got {type(idx)}")
+                if not (1 <= idx <= len(matches)):
+                    raise ValueError(f"Occurrence {idx} out of range (1-{len(matches)})")
+                selected.append(matches[idx - 1])
+            return selected
+        elif isinstance(occurrence, int) and 1 <= occurrence <= len(matches):
+            return [matches[occurrence - 1]]
+        elif isinstance(occurrence, int):
+            raise ValueError(f"Occurrence {occurrence} out of range (1-{len(matches)})")
+        elif len(matches) > 1:
+            # Build TextSpan objects for error message
+            spans = []
+            for p_elem in matches:
+                runs = list(p_elem.iter(f"{{{WORD_NAMESPACE}}}r"))
+                para_text = "".join(
+                    t.text or ""
+                    for t in p_elem.iter(f"{{{WORD_NAMESPACE}}}t")
+                )
+                if runs:
+                    spans.append(
+                        TextSpan(
+                            runs=runs,
+                            start_run_index=0,
+                            end_run_index=len(runs) - 1,
+                            start_offset=0,
+                            end_offset=len(para_text),
+                            paragraph=p_elem,
+                        )
+                    )
+            raise AmbiguousTextError(text, spans)
+        else:
+            return matches

@@ -1649,10 +1649,11 @@ class Document:
         containing: str | None = None,
         paragraph: "Paragraph | None" = None,
         paragraph_index: int | None = None,
+        occurrence: int | list[int] | str | None = None,
         remove_element: bool = True,
         author: str | None = None,
         scope: str | dict | Any | None = None,
-    ) -> "Paragraph":
+    ) -> "Paragraph | list[Paragraph]":
         """Delete an entire paragraph with tracked changes.
 
         Unlike delete_tracked() which only marks text as deleted (leaving empty
@@ -1663,6 +1664,9 @@ class Document:
             containing: Text to search for to identify the paragraph
             paragraph: Paragraph object to delete directly
             paragraph_index: Index of paragraph to delete (0-based)
+            occurrence: Which occurrence(s) to delete when multiple paragraphs
+                match. Options: int (1-indexed), "first", "last", "all", or
+                list of ints like [1, 3]. Only applies with 'containing' param.
             remove_element: If True (default), remove the <w:p> element after
                 marking content as deleted. If False, keep the element for
                 review (content will show strikethrough but empty para remains
@@ -1671,13 +1675,15 @@ class Document:
             scope: Limit search scope for 'containing' parameter
 
         Returns:
-            The deleted Paragraph object
+            The deleted Paragraph object, or list of Paragraphs if occurrence
+            was "all" or a list
 
         Raises:
             ValueError: If none of containing/paragraph/paragraph_index provided,
-                or if multiple are provided
+                or if multiple are provided, or if occurrence is out of range
             TextNotFoundError: If containing text not found
             AmbiguousTextError: If containing text matches multiple paragraphs
+                and occurrence not specified
             IndexError: If paragraph_index is out of range
 
         Examples:
@@ -1691,6 +1697,14 @@ class Document:
             >>> para = doc.paragraphs[5]
             >>> doc.delete_paragraph_tracked(paragraph=para)
 
+            >>> # Delete specific occurrence when text matches multiple paragraphs
+            >>> doc.delete_paragraph_tracked(containing="citation", occurrence=1)
+            >>> doc.delete_paragraph_tracked(containing="citation", occurrence="last")
+
+            >>> # Delete all matching paragraphs
+            >>> deleted = doc.delete_paragraph_tracked(containing="TODO", occurrence="all")
+            >>> print(f"Deleted {len(deleted)} paragraphs")
+
             >>> # Keep for review (strikethrough only, no removal)
             >>> doc.delete_paragraph_tracked(
             ...     containing="text",
@@ -1701,6 +1715,7 @@ class Document:
             containing=containing,
             paragraph=paragraph,
             paragraph_index=paragraph_index,
+            occurrence=occurrence,
             remove_element=remove_element,
             author=author,
             scope=scope,
