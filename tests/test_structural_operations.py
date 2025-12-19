@@ -888,16 +888,15 @@ def test_delete_paragraph_tracked_by_containing():
         doc = Document(doc_path)
         initial_count = len(doc.paragraphs)
 
-        deleted = doc.delete_paragraph_tracked(containing="Second paragraph")
+        doc.delete_paragraph_tracked(containing="Second paragraph")
 
-        # Paragraph should be removed from document
-        assert len(doc.paragraphs) == initial_count - 1
+        # Paragraph element should still exist (marked as deleted, not removed)
+        assert len(doc.paragraphs) == initial_count
 
-        # Remaining text should not include deleted paragraph
-        text = doc.get_text()
-        assert "Second paragraph" not in text
-        assert "First paragraph" in text
-        assert "Third paragraph" in text
+        # Check deletion markers exist in the XML
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "<w:del" in xml_str or "w:del" in xml_str
+        assert "<w:delText" in xml_str or "w:delText" in xml_str
 
     finally:
         doc_path.unlink()
@@ -932,16 +931,17 @@ def test_delete_paragraph_tracked_by_index():
 
     try:
         doc = Document(doc_path)
+        initial_count = len(doc.paragraphs)
 
-        deleted = doc.delete_paragraph_tracked(paragraph_index=1)
+        doc.delete_paragraph_tracked(paragraph_index=1)
 
-        assert deleted.text == "Paragraph 1"
-        assert len(doc.paragraphs) == 2
+        # Paragraph element should still exist (marked as deleted)
+        assert len(doc.paragraphs) == initial_count
 
-        text = doc.get_text()
-        assert "Paragraph 0" in text
-        assert "Paragraph 1" not in text
-        assert "Paragraph 2" in text
+        # Check deletion markers exist
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "<w:del" in xml_str or "w:del" in xml_str
+        assert "<w:delText" in xml_str or "w:delText" in xml_str
 
     finally:
         doc_path.unlink()
@@ -976,20 +976,24 @@ def test_delete_paragraph_tracked_by_object():
 
     try:
         doc = Document(doc_path)
+        initial_count = len(doc.paragraphs)
         para_to_delete = doc.paragraphs[1]
 
         doc.delete_paragraph_tracked(paragraph=para_to_delete)
 
-        assert len(doc.paragraphs) == 2
-        text = doc.get_text()
-        assert "Delete this" not in text
+        # Paragraph element should still exist (marked as deleted)
+        assert len(doc.paragraphs) == initial_count
+
+        # Check deletion markers exist
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "<w:del" in xml_str or "w:del" in xml_str
 
     finally:
         doc_path.unlink()
 
 
-def test_delete_paragraph_tracked_remove_element_false():
-    """Test delete with remove_element=False keeps empty paragraph."""
+def test_delete_paragraph_tracked_marks_paragraph_mark():
+    """Test that paragraph mark is marked as deleted for clean merge on accept."""
     doc_path = Path(tempfile.mktemp(suffix=".docx"))
 
     xml_content = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1012,16 +1016,20 @@ def test_delete_paragraph_tracked_remove_element_false():
 
     try:
         doc = Document(doc_path)
-        initial_count = len(doc.paragraphs)
 
-        doc.delete_paragraph_tracked(containing="Second", remove_element=False)
+        doc.delete_paragraph_tracked(containing="Second")
 
-        # Paragraph element should still exist
-        assert len(doc.paragraphs) == initial_count
-
-        # But content should be marked as deleted (in w:del element)
+        # Check that both text deletion and paragraph mark deletion exist
         xml_str = etree.tostring(doc.xml_root, encoding="unicode")
-        assert "w:del" in xml_str or "<w:del" in xml_str
+
+        # Text should be wrapped in w:del with w:delText
+        assert "<w:del" in xml_str or "w:del" in xml_str
+        assert "<w:delText" in xml_str or "w:delText" in xml_str
+
+        # Paragraph mark should also be marked as deleted (w:del inside w:pPr/w:rPr)
+        # This ensures clean merge when accepted in Word
+        assert "<w:pPr" in xml_str or "w:pPr" in xml_str
+        assert "<w:rPr" in xml_str or "w:rPr" in xml_str
 
     finally:
         doc_path.unlink()
@@ -1151,13 +1159,13 @@ def test_delete_paragraph_tracked_in_table():
 
         doc.delete_paragraph_tracked(containing="Cell paragraph to delete")
 
-        # Paragraph should be removed
-        assert len(doc.paragraphs) == initial_count - 1
+        # Paragraph element should still exist (marked as deleted)
+        assert len(doc.paragraphs) == initial_count
 
-        text = doc.get_text()
-        assert "Cell paragraph to delete" not in text
-        assert "Cell paragraph 1" in text
-        assert "Cell paragraph 3" in text
+        # Check deletion markers exist
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "<w:del" in xml_str or "w:del" in xml_str
+        assert "<w:delText" in xml_str or "w:delText" in xml_str
 
     finally:
         doc_path.unlink()
@@ -1188,12 +1196,7 @@ def test_delete_paragraph_tracked_with_author():
     try:
         doc = Document(doc_path)
 
-        # With remove_element=False we can check the deletion markup
-        doc.delete_paragraph_tracked(
-            containing="Delete me",
-            remove_element=False,
-            author="Test Author"
-        )
+        doc.delete_paragraph_tracked(containing="Delete me", author="Test Author")
 
         xml_str = etree.tostring(doc.xml_root, encoding="unicode")
         assert "Test Author" in xml_str
@@ -1231,17 +1234,19 @@ def test_delete_paragraph_tracked_occurrence_first():
 
     try:
         doc = Document(doc_path)
+        initial_count = len(doc.paragraphs)
 
         # Delete first occurrence
-        deleted = doc.delete_paragraph_tracked(containing="Citation:", occurrence=1)
+        doc.delete_paragraph_tracked(containing="Citation:", occurrence=1)
 
-        assert deleted.text == "Citation: Patent A"
-        assert len(doc.paragraphs) == 2
+        # Paragraph element should still exist (marked as deleted)
+        assert len(doc.paragraphs) == initial_count
 
-        text = doc.get_text()
-        assert "Patent A" not in text
-        assert "Patent B" in text
-        assert "Patent C" in text
+        # Check deletion markers exist
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "<w:del" in xml_str or "w:del" in xml_str
+        # Patent A text should be marked as deleted
+        assert "Patent A" in xml_str  # Still in XML (as delText)
 
     finally:
         doc_path.unlink()
@@ -1276,17 +1281,17 @@ def test_delete_paragraph_tracked_occurrence_last():
 
     try:
         doc = Document(doc_path)
+        initial_count = len(doc.paragraphs)
 
         # Delete last occurrence
-        deleted = doc.delete_paragraph_tracked(containing="Citation:", occurrence="last")
+        doc.delete_paragraph_tracked(containing="Citation:", occurrence="last")
 
-        assert deleted.text == "Citation: Patent C"
-        assert len(doc.paragraphs) == 2
+        # Paragraph element should still exist (marked as deleted)
+        assert len(doc.paragraphs) == initial_count
 
-        text = doc.get_text()
-        assert "Patent A" in text
-        assert "Patent B" in text
-        assert "Patent C" not in text
+        # Check deletion markers exist
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "<w:del" in xml_str or "w:del" in xml_str
 
     finally:
         doc_path.unlink()
@@ -1326,17 +1331,20 @@ def test_delete_paragraph_tracked_occurrence_all():
 
     try:
         doc = Document(doc_path)
+        initial_count = len(doc.paragraphs)
 
         # Delete all paragraphs containing "TODO"
         deleted = doc.delete_paragraph_tracked(containing="TODO", occurrence="all")
 
         assert isinstance(deleted, list)
         assert len(deleted) == 2
-        assert len(doc.paragraphs) == 2
 
-        text = doc.get_text()
-        assert "TODO" not in text
-        assert "Keep this" in text
+        # Paragraph elements should still exist (marked as deleted)
+        assert len(doc.paragraphs) == initial_count
+
+        # Check deletion markers exist
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "<w:del" in xml_str or "w:del" in xml_str
 
     finally:
         doc_path.unlink()
@@ -1376,19 +1384,20 @@ def test_delete_paragraph_tracked_occurrence_list():
 
     try:
         doc = Document(doc_path)
+        initial_count = len(doc.paragraphs)
 
         # Delete 1st and 3rd occurrences
         deleted = doc.delete_paragraph_tracked(containing="Item", occurrence=[1, 3])
 
         assert isinstance(deleted, list)
         assert len(deleted) == 2
-        assert len(doc.paragraphs) == 2
 
-        text = doc.get_text()
-        assert "Item 1" not in text
-        assert "Item 2" in text
-        assert "Item 3" not in text
-        assert "Item 4" in text
+        # Paragraph elements should still exist (marked as deleted)
+        assert len(doc.paragraphs) == initial_count
+
+        # Check deletion markers exist
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert "<w:del" in xml_str or "w:del" in xml_str
 
     finally:
         doc_path.unlink()

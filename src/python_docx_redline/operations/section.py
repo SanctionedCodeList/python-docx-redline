@@ -420,6 +420,42 @@ class SectionOperations:
             t_parent.remove(t_elem)
             t_parent.insert(t_index, deltext)
 
+    def _mark_paragraph_mark_deleted(self, para_element: Any, author: str, timestamp: str) -> None:
+        """Mark the paragraph mark as deleted for tracked changes.
+
+        Adds a <w:del> element inside <w:pPr>/<w:rPr> to mark the paragraph
+        mark (¶) as deleted. When this tracked change is accepted in Word,
+        the paragraph merges with the following paragraph instead of leaving
+        an empty line behind.
+
+        Per OOXML spec (ISO/IEC 29500): "This element specifies that the
+        paragraph mark delimiting the end of a paragraph shall be treated
+        as deleted... the contents of this paragraph are combined with the
+        following paragraph."
+        """
+        # Get or create paragraph properties <w:pPr>
+        p_pr = para_element.find(f"{{{WORD_NAMESPACE}}}pPr")
+        if p_pr is None:
+            p_pr = etree.Element(f"{{{WORD_NAMESPACE}}}pPr")
+            para_element.insert(0, p_pr)
+
+        # Get or create run properties for paragraph mark <w:rPr>
+        r_pr = p_pr.find(f"{{{WORD_NAMESPACE}}}rPr")
+        if r_pr is None:
+            r_pr = etree.Element(f"{{{WORD_NAMESPACE}}}rPr")
+            p_pr.append(r_pr)
+
+        # Create the deletion marker for the paragraph mark
+        change_id = self._document._xml_generator.next_change_id
+        self._document._xml_generator.next_change_id += 1
+
+        del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
+        del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+        del_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
+        del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+
+        r_pr.append(del_elem)
+
     def _delete_section_untracked(self, section: Section) -> None:
         """Delete section paragraphs without tracking changes."""
         for para in section.paragraphs:
@@ -433,15 +469,15 @@ class SectionOperations:
         paragraph: Paragraph | None = None,
         paragraph_index: int | None = None,
         occurrence: int | list[int] | str | None = None,
-        remove_element: bool = True,
         author: str | None = None,
         scope: str | dict | Any | None = None,
-    ) -> "Paragraph | list[Paragraph]":
+    ) -> Paragraph | list[Paragraph]:
         """Delete an entire paragraph with tracked changes.
 
-        Unlike delete_tracked() which only marks text as deleted (leaving empty
-        paragraphs behind), this method can completely remove the paragraph
-        element after marking its content as deleted.
+        Marks the paragraph content as deleted (strikethrough) and also marks
+        the paragraph mark as deleted. When the tracked change is accepted in
+        Word, the paragraph cleanly merges with the following paragraph,
+        leaving no empty lines behind.
 
         Args:
             containing: Text to search for to identify the paragraph
@@ -450,10 +486,6 @@ class SectionOperations:
             occurrence: Which occurrence(s) to delete when multiple paragraphs
                 match. Options: int (1-indexed), "first", "last", "all", or
                 list of ints like [1, 3]. Only applies with 'containing' param.
-            remove_element: If True (default), remove the <w:p> element after
-                marking content as deleted. If False, keep the element for
-                review (content will show strikethrough but empty para remains
-                after accepting changes).
             author: Author name for tracked changes
             scope: Limit search scope for 'containing' parameter
 
@@ -487,12 +519,6 @@ class SectionOperations:
             >>> # Delete all matching paragraphs
             >>> deleted = doc.delete_paragraph_tracked(containing="TODO", occurrence="all")
             >>> print(f"Deleted {len(deleted)} paragraphs")
-
-            >>> # Keep for review (strikethrough only, no removal)
-            >>> doc.delete_paragraph_tracked(
-            ...     containing="text",
-            ...     remove_element=False
-            ... )
         """
         from datetime import timezone
 
@@ -502,9 +528,7 @@ class SectionOperations:
         selectors = [containing, paragraph, paragraph_index]
         provided = sum(1 for s in selectors if s is not None)
         if provided == 0:
-            raise ValueError(
-                "Must specify one of: containing, paragraph, or paragraph_index"
-            )
+            raise ValueError("Must specify one of: containing, paragraph, or paragraph_index")
         if provided > 1:
             raise ValueError(
                 "Only one of containing, paragraph, or paragraph_index can be specified"
@@ -512,9 +536,7 @@ class SectionOperations:
 
         # occurrence only applies to 'containing' mode
         if occurrence is not None and containing is None:
-            raise ValueError(
-                "The 'occurrence' parameter can only be used with 'containing'"
-            )
+            raise ValueError("The 'occurrence' parameter can only be used with 'containing'")
 
         # Find the target paragraph(s)
         target_paras: list[ParagraphModel] = []
@@ -538,23 +560,16 @@ class SectionOperations:
 
             matching_paras = []
             for p_elem in paragraphs:
-                para_text = "".join(
-                    t.text or ""
-                    for t in p_elem.iter(f"{{{WORD_NAMESPACE}}}t")
-                )
+                para_text = "".join(t.text or "" for t in p_elem.iter(f"{{{WORD_NAMESPACE}}}t"))
                 if containing in para_text:
                     matching_paras.append(p_elem)
 
             if not matching_paras:
-                suggestions = SuggestionGenerator.generate_suggestions(
-                    containing, paragraphs
-                )
+                suggestions = SuggestionGenerator.generate_suggestions(containing, paragraphs)
                 raise TextNotFoundError(containing, suggestions=suggestions)
 
             # Select paragraphs based on occurrence parameter
-            selected_paras = self._select_paragraph_matches(
-                matching_paras, occurrence, containing
-            )
+            selected_paras = self._select_paragraph_matches(matching_paras, occurrence, containing)
             target_paras = [ParagraphModel(p) for p in selected_paras]
 
         # Should not happen due to validation above, but satisfy type checker
@@ -566,16 +581,14 @@ class SectionOperations:
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         for target_para in reversed(target_paras):
+            # Mark text content as deleted (strikethrough)
             runs = list(target_para.element.iter(f"{{{WORD_NAMESPACE}}}r"))
             if runs:
                 del_elem = self._create_deletion_element(author_name, timestamp)
                 self._wrap_runs_in_deletion(target_para.element, runs, del_elem)
 
-            # Remove the paragraph element if requested
-            if remove_element:
-                parent = target_para.element.getparent()
-                if parent is not None:
-                    parent.remove(target_para.element)
+            # Mark paragraph mark as deleted (causes merge with next paragraph on accept)
+            self._mark_paragraph_mark_deleted(target_para.element, author_name, timestamp)
 
         # Return single Paragraph or list depending on what was requested
         if occurrence == "all" or isinstance(occurrence, list):
@@ -629,10 +642,7 @@ class SectionOperations:
             spans = []
             for p_elem in matches:
                 runs = list(p_elem.iter(f"{{{WORD_NAMESPACE}}}r"))
-                para_text = "".join(
-                    t.text or ""
-                    for t in p_elem.iter(f"{{{WORD_NAMESPACE}}}t")
-                )
+                para_text = "".join(t.text or "" for t in p_elem.iter(f"{{{WORD_NAMESPACE}}}t"))
                 if runs:
                     spans.append(
                         TextSpan(

@@ -1650,15 +1650,15 @@ class Document:
         paragraph: "Paragraph | None" = None,
         paragraph_index: int | None = None,
         occurrence: int | list[int] | str | None = None,
-        remove_element: bool = True,
         author: str | None = None,
         scope: str | dict | Any | None = None,
     ) -> "Paragraph | list[Paragraph]":
         """Delete an entire paragraph with tracked changes.
 
-        Unlike delete_tracked() which only marks text as deleted (leaving empty
-        paragraphs behind), this method completely removes the paragraph element
-        after marking its content as deleted.
+        Marks the paragraph content as deleted (strikethrough) and also marks
+        the paragraph mark as deleted. When the tracked change is accepted in
+        Word, the paragraph cleanly merges with the following paragraph,
+        leaving no empty lines behind.
 
         Args:
             containing: Text to search for to identify the paragraph
@@ -1667,10 +1667,6 @@ class Document:
             occurrence: Which occurrence(s) to delete when multiple paragraphs
                 match. Options: int (1-indexed), "first", "last", "all", or
                 list of ints like [1, 3]. Only applies with 'containing' param.
-            remove_element: If True (default), remove the <w:p> element after
-                marking content as deleted. If False, keep the element for
-                review (content will show strikethrough but empty para remains
-                after accepting changes).
             author: Author name for tracked changes
             scope: Limit search scope for 'containing' parameter
 
@@ -1704,19 +1700,12 @@ class Document:
             >>> # Delete all matching paragraphs
             >>> deleted = doc.delete_paragraph_tracked(containing="TODO", occurrence="all")
             >>> print(f"Deleted {len(deleted)} paragraphs")
-
-            >>> # Keep for review (strikethrough only, no removal)
-            >>> doc.delete_paragraph_tracked(
-            ...     containing="text",
-            ...     remove_element=False
-            ... )
         """
         return self._section_ops.delete_paragraph_tracked(
             containing=containing,
             paragraph=paragraph,
             paragraph_index=paragraph_index,
             occurrence=occurrence,
-            remove_element=remove_element,
             author=author,
             scope=scope,
         )

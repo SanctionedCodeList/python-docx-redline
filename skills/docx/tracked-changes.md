@@ -21,7 +21,7 @@ doc.save("contract_redlined.docx")
 
 ## Paragraph-Level Deletion
 
-Use `delete_paragraph_tracked()` to remove entire paragraphs cleanly. Unlike `delete_tracked()` which only marks text as deleted (leaving empty paragraphs behind), this removes the paragraph element entirely:
+Use `delete_paragraph_tracked()` to delete entire paragraphs with proper tracked changes. The text is marked with strikethrough, and when the change is accepted in Word, the paragraph cleanly merges with the next (no blank lines left behind):
 
 ```python
 # Delete paragraph containing specific text
@@ -33,9 +33,6 @@ doc.delete_paragraph_tracked(paragraph_index=5)
 # Delete paragraph object directly
 para = doc.paragraphs[5]
 doc.delete_paragraph_tracked(paragraph=para)
-
-# Keep for review (strikethrough only, empty para remains after accept)
-doc.delete_paragraph_tracked(containing="text", remove_element=False)
 ```
 
 ### Handling Multiple Matching Paragraphs
