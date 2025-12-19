@@ -218,9 +218,7 @@ class TrackedChangeOperations:
             anchor,
             paragraphs,
             regex=regex,
-            normalize_special_chars=normalize_special_chars
-            and not regex
-            and not fuzzy_config,
+            normalize_special_chars=normalize_special_chars and not regex and not fuzzy_config,
             fuzzy=fuzzy_config,
         )
 
@@ -293,9 +291,7 @@ class TrackedChangeOperations:
             text,
             paragraphs,
             regex=regex,
-            normalize_special_chars=normalize_special_chars
-            and not regex
-            and not fuzzy_config,
+            normalize_special_chars=normalize_special_chars and not regex and not fuzzy_config,
             fuzzy=fuzzy_config,
         )
 
@@ -382,9 +378,7 @@ class TrackedChangeOperations:
             find,
             paragraphs,
             regex=regex,
-            normalize_special_chars=normalize_special_chars
-            and not regex
-            and not fuzzy_config,
+            normalize_special_chars=normalize_special_chars and not regex and not fuzzy_config,
             fuzzy=fuzzy_config,
         )
 
@@ -609,9 +603,7 @@ class TrackedChangeOperations:
         insert_after = after is not None
 
         # Find source text and destination anchor
-        source_match = self._find_unique_match(
-            text, source_scope, regex, normalize_special_chars
-        )
+        source_match = self._find_unique_match(text, source_scope, regex, normalize_special_chars)
         dest_match = self._find_unique_match(
             dest_anchor, dest_scope, regex, normalize_special_chars
         )
@@ -744,6 +736,8 @@ class TrackedChangeOperations:
         This handles the complexity of text potentially spanning multiple runs.
         The matched runs are removed and replaced with the new element.
 
+        Handles runs that may be inside tracked change wrappers (w:ins, w:del).
+
         Args:
             match: TextSpan object representing the text to replace
             replacement_element: The lxml Element to insert in place of matched text
@@ -755,11 +749,21 @@ class TrackedChangeOperations:
             run = match.runs[match.start_run_index]
             run_text = "".join(run.itertext())
 
+            # Get the actual parent of the run (may be paragraph or a wrapper)
+            actual_parent = run.getparent()
+            if actual_parent is None:
+                actual_parent = paragraph
+
             # If the match is the entire run, replace the run
             if match.start_offset == 0 and match.end_offset == len(run_text):
-                run_index = list(paragraph).index(run)
-                paragraph.remove(run)
-                paragraph.insert(run_index, replacement_element)
+                try:
+                    run_index = list(actual_parent).index(run)
+                except ValueError:
+                    # Fallback to paragraph
+                    run_index = list(paragraph).index(run)
+                    actual_parent = paragraph
+                actual_parent.remove(run)
+                actual_parent.insert(run_index, replacement_element)
             else:
                 # Match is partial - need to split the run
                 self._split_and_replace_in_run(
@@ -769,7 +773,18 @@ class TrackedChangeOperations:
             # Match spans multiple runs - need to preserve text before/after match
             start_run = match.runs[match.start_run_index]
             end_run = match.runs[match.end_run_index]
-            start_run_index = list(paragraph).index(start_run)
+
+            # Get the actual parent of the start run
+            actual_parent = start_run.getparent()
+            if actual_parent is None:
+                actual_parent = paragraph
+
+            try:
+                start_run_index = list(actual_parent).index(start_run)
+            except ValueError:
+                # Fallback to paragraph
+                start_run_index = list(paragraph).index(start_run)
+                actual_parent = paragraph
 
             # Get text before match in the first run (only from w:t elements)
             first_run_text = self._get_run_text_content(start_run)
@@ -782,8 +797,9 @@ class TrackedChangeOperations:
             # Remove all runs in the match
             for i in range(match.start_run_index, match.end_run_index + 1):
                 run = match.runs[i]
-                if run in paragraph:
-                    paragraph.remove(run)
+                run_parent = run.getparent()
+                if run_parent is not None and run in run_parent:
+                    run_parent.remove(run)
 
             # Build replacement elements: [before_run] + replacement + [after_run]
             new_elements = self._build_split_elements(
@@ -792,7 +808,7 @@ class TrackedChangeOperations:
 
             # Insert all elements at the position of the first removed run
             for i, elem in enumerate(new_elements):
-                paragraph.insert(start_run_index + i, elem)
+                actual_parent.insert(start_run_index + i, elem)
 
     def _replace_match_with_elements(
         self, match: TextSpan, replacement_elements: list[Any]
@@ -800,6 +816,8 @@ class TrackedChangeOperations:
         """Replace matched text with multiple XML elements.
 
         Used for replace_tracked which needs both deletion and insertion elements.
+
+        Handles runs that may be inside tracked change wrappers (w:ins, w:del).
 
         Args:
             match: TextSpan object representing the text to replace
@@ -812,13 +830,23 @@ class TrackedChangeOperations:
             run = match.runs[match.start_run_index]
             run_text = "".join(run.itertext())
 
+            # Get the actual parent of the run (may be paragraph or a wrapper)
+            actual_parent = run.getparent()
+            if actual_parent is None:
+                actual_parent = paragraph
+
             # If the match is the entire run, replace the run
             if match.start_offset == 0 and match.end_offset == len(run_text):
-                run_index = list(paragraph).index(run)
-                paragraph.remove(run)
+                try:
+                    run_index = list(actual_parent).index(run)
+                except ValueError:
+                    # Fallback to paragraph
+                    run_index = list(paragraph).index(run)
+                    actual_parent = paragraph
+                actual_parent.remove(run)
                 # Insert elements in order
                 for i, elem in enumerate(replacement_elements):
-                    paragraph.insert(run_index + i, elem)
+                    actual_parent.insert(run_index + i, elem)
             else:
                 # Match is partial - need to split the run
                 self._split_and_replace_in_run_multiple(
@@ -832,7 +860,18 @@ class TrackedChangeOperations:
             # Match spans multiple runs - need to preserve text before/after match
             start_run = match.runs[match.start_run_index]
             end_run = match.runs[match.end_run_index]
-            start_run_index = list(paragraph).index(start_run)
+
+            # Get the actual parent of the start run
+            actual_parent = start_run.getparent()
+            if actual_parent is None:
+                actual_parent = paragraph
+
+            try:
+                start_run_index = list(actual_parent).index(start_run)
+            except ValueError:
+                # Fallback to paragraph
+                start_run_index = list(paragraph).index(start_run)
+                actual_parent = paragraph
 
             # Get text before match in the first run (only from w:t elements)
             first_run_text = self._get_run_text_content(start_run)
@@ -845,8 +884,9 @@ class TrackedChangeOperations:
             # Remove all runs in the match
             for i in range(match.start_run_index, match.end_run_index + 1):
                 run = match.runs[i]
-                if run in paragraph:
-                    paragraph.remove(run)
+                run_parent = run.getparent()
+                if run_parent is not None and run in run_parent:
+                    run_parent.remove(run)
 
             # Build replacement elements: [before_run] + replacements + [after_run]
             new_elements = self._build_split_elements(
@@ -855,7 +895,7 @@ class TrackedChangeOperations:
 
             # Insert all elements at the position of the first removed run
             for i, elem in enumerate(new_elements):
-                paragraph.insert(start_run_index + i, elem)
+                actual_parent.insert(start_run_index + i, elem)
 
     def _get_run_text_content(self, run: Any) -> str:
         """Extract text content from a run, avoiding XML structural whitespace.
@@ -908,6 +948,101 @@ class TrackedChangeOperations:
             return "", 0
         return text_elements[0].text or "", len(text_elements)
 
+    def _is_tracked_change_wrapper(self, elem: Any) -> bool:
+        """Check if an element is a tracked change wrapper (w:ins or w:del).
+
+        Args:
+            elem: The element to check
+
+        Returns:
+            True if the element is a w:ins or w:del element
+        """
+        if elem is None:
+            return False
+        tag = elem.tag
+        return tag == f"{{{WORD_NAMESPACE}}}ins" or tag == f"{{{WORD_NAMESPACE}}}del"
+
+    def _is_insertion_wrapper(self, elem: Any) -> bool:
+        """Check if an element is a tracked insertion wrapper (w:ins).
+
+        Args:
+            elem: The element to check
+
+        Returns:
+            True if the element is a w:ins element
+        """
+        if elem is None:
+            return False
+        return elem.tag == f"{{{WORD_NAMESPACE}}}ins"
+
+    def _is_deletion_wrapper(self, elem: Any) -> bool:
+        """Check if an element is a tracked deletion wrapper (w:del).
+
+        Args:
+            elem: The element to check
+
+        Returns:
+            True if the element is a w:del element
+        """
+        if elem is None:
+            return False
+        return elem.tag == f"{{{WORD_NAMESPACE}}}del"
+
+    def _get_wrapper_author(self, wrapper: Any) -> str | None:
+        """Get the author attribute from a tracked change wrapper.
+
+        Args:
+            wrapper: A w:ins or w:del element
+
+        Returns:
+            The author name, or None if not found
+        """
+        return wrapper.get(f"{{{WORD_NAMESPACE}}}author")
+
+    def _is_same_author(self, wrapper: Any, author: str | None) -> bool:
+        """Check if the wrapper's author matches the given author.
+
+        Args:
+            wrapper: A w:ins or w:del element
+            author: The author to compare against (uses document author if None)
+
+        Returns:
+            True if authors match
+        """
+        current_author = author if author is not None else self._document._xml_generator.author
+        wrapper_author = self._get_wrapper_author(wrapper)
+        return wrapper_author == current_author
+
+    def _get_run_parent_info(self, run: Any) -> tuple[Any, Any, int]:
+        """Get parent information for a run, handling tracked change wrappers.
+
+        A run might be a direct child of a paragraph, or nested inside a
+        tracked change wrapper (w:ins or w:del).
+
+        Args:
+            run: The run element
+
+        Returns:
+            Tuple of (paragraph, immediate_parent, index_in_parent)
+            - paragraph: The containing paragraph element
+            - immediate_parent: The direct parent (paragraph or wrapper)
+            - index_in_parent: The run's index in its immediate parent
+        """
+        immediate_parent = run.getparent()
+        if immediate_parent is None:
+            raise ValueError("Run has no parent element")
+
+        # Find the containing paragraph
+        paragraph = immediate_parent
+        while paragraph is not None and paragraph.tag != f"{{{WORD_NAMESPACE}}}p":
+            paragraph = paragraph.getparent()
+
+        if paragraph is None:
+            raise ValueError("Run is not contained in a paragraph")
+
+        run_index = list(immediate_parent).index(run)
+        return paragraph, immediate_parent, run_index
+
     def _build_split_elements(
         self, run: Any, before_text: str, after_text: str, replacement_elements: list[Any]
     ) -> list[Any]:
@@ -933,15 +1068,31 @@ class TrackedChangeOperations:
     def _replace_run_with_elements(self, paragraph: Any, run: Any, new_elements: list[Any]) -> None:
         """Replace a run with a list of new elements.
 
+        Handles runs that may be inside tracked change wrappers (w:ins, w:del).
+        Uses getparent() to find the actual parent rather than assuming the
+        paragraph is the direct parent.
+
         Args:
-            paragraph: The paragraph containing the run
+            paragraph: The paragraph containing the run (used as fallback)
             run: The run to replace
             new_elements: Elements to insert in place of the run
         """
-        run_index = list(paragraph).index(run)
-        paragraph.remove(run)
+        # Get the actual parent of the run (may be paragraph or a wrapper)
+        actual_parent = run.getparent()
+        if actual_parent is None:
+            # Fallback to paragraph if no parent found
+            actual_parent = paragraph
+
+        try:
+            run_index = list(actual_parent).index(run)
+        except ValueError:
+            # Run not in expected parent, try paragraph as fallback
+            run_index = list(paragraph).index(run)
+            actual_parent = paragraph
+
+        actual_parent.remove(run)
         for i, elem in enumerate(new_elements):
-            paragraph.insert(run_index + i, elem)
+            actual_parent.insert(run_index + i, elem)
 
     def _split_and_replace_in_run(
         self,
