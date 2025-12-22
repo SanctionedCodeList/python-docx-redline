@@ -21,6 +21,7 @@ brew install pandoc                    # Text extraction (macOS)
 | **Create new document** | python-docx | See below |
 | **Edit with tracked changes** | python-docx-redline | [tracked-changes.md](./tracked-changes.md) |
 | **Add comments** | python-docx-redline | [comments.md](./comments.md) |
+| **CriticMarkup workflow** | python-docx-redline | [criticmarkup.md](./criticmarkup.md) |
 | **Complex XML manipulation** | Raw OOXML | [ooxml.md](./ooxml.md) |
 
 ## Quick Examples
@@ -95,9 +96,22 @@ edits = [
 doc.apply_edits(edits)
 ```
 
+### CriticMarkup Round-Trip
+```python
+# Export tracked changes to markdown
+doc = Document("contract.docx")
+markdown = doc.to_criticmarkup()
+# Output: "Payment in {--30--}{++45++} days"
+
+# Apply CriticMarkup changes back to DOCX
+doc.apply_criticmarkup("{++new clause++}", author="Reviewer")
+doc.save("updated.docx")
+```
+
 ## Detailed Guides
 
 - **[reading.md](./reading.md)** - Text extraction, find_all(), document structure, tables
 - **[tracked-changes.md](./tracked-changes.md)** - Insert/delete/replace, regex, scopes, batch ops, formatting
 - **[comments.md](./comments.md)** - Adding comments, occurrence parameter, replies, resolution
+- **[criticmarkup.md](./criticmarkup.md)** - Export/import with CriticMarkup, round-trip workflows
 - **[ooxml.md](./ooxml.md)** - Raw XML manipulation for complex scenarios
