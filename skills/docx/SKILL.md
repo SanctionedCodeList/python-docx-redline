@@ -1,6 +1,6 @@
 ---
 name: docx
-description: "Document creation, editing, and analysis with tracked changes and comments. Use for .docx files: creating documents, editing with tracked changes, adding comments, or text extraction."
+description: "Document creation, editing, and analysis with tracked changes and comments. Use for .docx files: creating documents, editing with tracked changes, adding comments, text extraction, or CriticMarkup round-trip workflows (export/import tracked changes as markdown)."
 ---
 
 # DOCX Skill - Quick Reference
