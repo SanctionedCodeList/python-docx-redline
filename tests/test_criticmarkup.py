@@ -613,3 +613,240 @@ class TestDocxToCriticmarkupExport:
             assert "{++content++}" in result
         finally:
             docx_path.unlink()
+
+
+# =============================================================================
+# CriticMarkup to DOCX Import Tests
+# =============================================================================
+
+
+class TestApplyResult:
+    """Tests for ApplyResult dataclass."""
+
+    def test_apply_result_success_rate(self):
+        """Test success rate calculation."""
+        from python_docx_redline.criticmarkup import ApplyResult
+
+        result = ApplyResult(total=10, successful=8, failed=2, errors=[])
+        assert result.success_rate == 80.0
+
+    def test_apply_result_empty(self):
+        """Test success rate with no operations."""
+        from python_docx_redline.criticmarkup import ApplyResult
+
+        result = ApplyResult(total=0, successful=0, failed=0, errors=[])
+        assert result.success_rate == 100.0
+
+    def test_apply_result_repr(self):
+        """Test string representation."""
+        from python_docx_redline.criticmarkup import ApplyResult
+
+        result = ApplyResult(total=5, successful=4, failed=1, errors=[])
+        assert "4/5" in repr(result)
+        assert "80.0%" in repr(result)
+
+
+class TestCriticmarkupToDocxImport:
+    """Tests for CriticMarkup to DOCX import functionality."""
+
+    def test_import_deletion(self):
+        """Import deletion from CriticMarkup."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Hello old world.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+
+            # Apply deletion using CriticMarkup
+            result = doc.apply_criticmarkup("Hello {--old --}world.", author="Test Author")
+
+            assert result.successful == 1
+            assert result.failed == 0
+
+            # Verify the deletion was applied
+            changes = doc.get_tracked_changes(change_type="deletion")
+            assert len(changes) == 1
+            assert changes[0].text == "old "
+        finally:
+            docx_path.unlink()
+
+    def test_import_substitution(self):
+        """Import substitution from CriticMarkup."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Payment in 30 days.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+
+            # Apply substitution using CriticMarkup
+            result = doc.apply_criticmarkup("Payment in {~~30~>45~~} days.", author="Test Author")
+
+            assert result.successful == 1
+            assert result.failed == 0
+
+            # Verify the changes were applied
+            insertions = doc.get_tracked_changes(change_type="insertion")
+            deletions = doc.get_tracked_changes(change_type="deletion")
+
+            # Substitution creates both a deletion and an insertion
+            assert len(insertions) == 1
+            assert len(deletions) == 1
+            assert insertions[0].text == "45"
+            assert deletions[0].text == "30"
+        finally:
+            docx_path.unlink()
+
+    def test_import_insertion_with_context(self):
+        """Import insertion using context to find location."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Hello world.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+
+            # Apply insertion using CriticMarkup with context
+            result = doc.apply_criticmarkup("Hello {++beautiful ++}world.", author="Test Author")
+
+            assert result.successful == 1
+            assert result.failed == 0
+
+            # Verify the insertion was applied
+            insertions = doc.get_tracked_changes(change_type="insertion")
+            assert len(insertions) == 1
+            assert insertions[0].text == "beautiful "
+        finally:
+            docx_path.unlink()
+
+    def test_import_multiple_operations(self):
+        """Import multiple operations from CriticMarkup."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>The old contract states payment in 30 days.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+
+            # Apply multiple operations
+            result = doc.apply_criticmarkup(
+                "The {--old --}contract states payment in {~~30~>45~~} days.",
+                author="Test Author",
+            )
+
+            # Should have 2 operations: 1 deletion + 1 substitution
+            assert result.total == 2
+            assert result.successful == 2
+            assert result.failed == 0
+        finally:
+            docx_path.unlink()
+
+    def test_import_via_document_method(self):
+        """Test Document.apply_criticmarkup() method works."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Delete this text.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+
+            # Test the Document method directly
+            result = doc.apply_criticmarkup("Delete {--this --}text.", author="Method Test")
+
+            assert result.successful == 1
+            changes = doc.get_tracked_changes()
+            assert len(changes) == 1
+        finally:
+            docx_path.unlink()
+
+    def test_import_no_operations(self):
+        """Import text with no CriticMarkup."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Plain text.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+
+            result = doc.apply_criticmarkup("Plain text.")
+
+            assert result.total == 0
+            assert result.successful == 0
+            assert result.failed == 0
+        finally:
+            docx_path.unlink()
+
+    def test_import_stop_on_error(self):
+        """Test stop_on_error parameter."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Some text here.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+
+            # First operation will fail (text not found), second should not run
+            result = doc.apply_criticmarkup("{--nonexistent--} {--text--}", stop_on_error=True)
+
+            # Should stop after first failure
+            assert result.failed >= 1
+            assert len(result.errors) >= 1
+        finally:
+            docx_path.unlink()

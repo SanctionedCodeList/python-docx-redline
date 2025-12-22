@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
 if TYPE_CHECKING:
+    from python_docx_redline.criticmarkup import ApplyResult
     from python_docx_redline.models.comment import Comment
     from python_docx_redline.models.footnote import Endnote, Footnote
     from python_docx_redline.models.header_footer import Footer, Header
@@ -2293,6 +2294,51 @@ class Document:
         from .criticmarkup import docx_to_criticmarkup
 
         return docx_to_criticmarkup(self, include_comments=include_comments)
+
+    def apply_criticmarkup(
+        self,
+        markup_text: str,
+        author: str | None = None,
+        stop_on_error: bool = False,
+    ) -> "ApplyResult":
+        """Apply CriticMarkup changes to the document as tracked changes.
+
+        Parses CriticMarkup syntax from the input text and applies each operation
+        to the document using tracked changes. This enables a plain-text editing
+        workflow where documents are exported to CriticMarkup, edited in any
+        text editor, then imported back with changes tracked.
+
+        CriticMarkup syntax is converted to Word tracked changes:
+        - {++text++} → tracked insertion
+        - {--text--} → tracked deletion
+        - {~~old~>new~~} → tracked replacement
+        - {>>comment<<} → Word comment
+        - {==text=={>>comment<<}} → Comment attached to text
+
+        Args:
+            markup_text: Markdown text with CriticMarkup annotations
+            author: Author for tracked changes (uses document default if None)
+            stop_on_error: If True, stop on first error. If False, continue
+                processing remaining operations.
+
+        Returns:
+            ApplyResult with success/failure counts and error details
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> with open("reviewed.md") as f:
+            ...     markup = f.read()
+            >>> result = doc.apply_criticmarkup(markup, author="Reviewer")
+            >>> print(f"Applied {result.successful}/{result.total} changes")
+            >>> doc.save("contract_reviewed.docx")
+
+        See Also:
+            - to_criticmarkup(): Export document to CriticMarkup format
+            - http://criticmarkup.com/ for syntax reference
+        """
+        from .criticmarkup import apply_criticmarkup
+
+        return apply_criticmarkup(self, markup_text, author, stop_on_error)
 
     def generate_change_report(
         self,

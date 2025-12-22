@@ -555,3 +555,168 @@ def _extract_deletion_text(del_element, ns: str) -> str:
     for dt_elem in del_element.findall(f".//{{{ns}}}delText"):
         text_parts.append(dt_elem.text or "")
     return "".join(text_parts)
+
+
+# =============================================================================
+# CriticMarkup to DOCX Import
+# =============================================================================
+
+
+@dataclass
+class ApplyResult:
+    """Result of applying CriticMarkup operations to a document.
+
+    Attributes:
+        total: Total number of operations attempted
+        successful: Number of operations that succeeded
+        failed: Number of operations that failed
+        errors: List of (operation, error_message) tuples for failures
+    """
+
+    total: int
+    successful: int
+    failed: int
+    errors: list[tuple[CriticOperation, str]]
+
+    @property
+    def success_rate(self) -> float:
+        """Calculate success rate as a percentage."""
+        if self.total == 0:
+            return 100.0
+        return (self.successful / self.total) * 100
+
+    def __repr__(self) -> str:
+        return f"<ApplyResult: {self.successful}/{self.total} succeeded ({self.success_rate:.1f}%)>"
+
+
+def apply_criticmarkup(
+    doc: Document,
+    markup_text: str,
+    author: str | None = None,
+    stop_on_error: bool = False,
+) -> ApplyResult:
+    """Apply CriticMarkup changes to document as tracked changes.
+
+    Parses CriticMarkup syntax from the input text and applies each operation
+    to the document using the appropriate tracked change method:
+    - {++text++} → tracked insertion
+    - {--text--} → tracked deletion
+    - {~~old~>new~~} → tracked replacement (delete old + insert new)
+    - {>>comment<<} → Word comment (requires context to attach)
+
+    Args:
+        doc: Document to modify
+        markup_text: Markdown text with CriticMarkup annotations
+        author: Author for tracked changes (uses document default if None)
+        stop_on_error: If True, stop on first error. If False, continue
+            processing remaining operations.
+
+    Returns:
+        ApplyResult with success/failure counts and error details
+
+    Example:
+        >>> doc = Document("contract.docx")
+        >>> result = doc.apply_criticmarkup(
+        ...     "Payment in {--30--}{++45++} days",
+        ...     author="Review Bot"
+        ... )
+        >>> print(f"Applied {result.successful} of {result.total} changes")
+
+    Note:
+        Operations are applied in document order. For insertions, the
+        context_before field is used to locate the insertion point.
+    """
+    operations = parse_criticmarkup(markup_text)
+
+    successful = 0
+    failed = 0
+    errors: list[tuple[CriticOperation, str]] = []
+
+    for op in operations:
+        try:
+            _apply_operation(doc, op, author)
+            successful += 1
+        except Exception as e:
+            failed += 1
+            errors.append((op, str(e)))
+            if stop_on_error:
+                break
+
+    return ApplyResult(
+        total=len(operations),
+        successful=successful,
+        failed=failed,
+        errors=errors,
+    )
+
+
+def _apply_operation(doc: Document, op: CriticOperation, author: str | None) -> None:
+    """Apply a single CriticMarkup operation to the document.
+
+    Args:
+        doc: Document to modify
+        op: The operation to apply
+        author: Author for tracked changes
+
+    Raises:
+        TextNotFoundError: If the anchor text cannot be found
+        ValueError: If the operation type is not supported
+    """
+    if op.type == OperationType.INSERTION:
+        # For insertions, we need to find where to insert using context
+        anchor = _find_insertion_anchor(op)
+        if anchor:
+            doc.insert_tracked(op.text, after=anchor, author=author)
+        else:
+            # No context - try inserting at start of document
+            # This is a fallback for insertions at the very beginning
+            raise ValueError(
+                f"Cannot determine insertion point for '{op.text[:30]}...' - no context available"
+            )
+
+    elif op.type == OperationType.DELETION:
+        doc.delete_tracked(op.text, author=author)
+
+    elif op.type == OperationType.SUBSTITUTION:
+        doc.replace_tracked(op.text, op.replacement or "", author=author)
+
+    elif op.type == OperationType.COMMENT:
+        # Standalone comments need context to attach to
+        anchor = op.context_before.strip()[-50:] if op.context_before else None
+        if anchor:
+            doc.add_comment(op.comment or "", on=anchor, author=author)
+        else:
+            raise ValueError(f"Cannot attach comment '{op.comment[:30]}...' - no context available")
+
+    elif op.type == OperationType.HIGHLIGHT:
+        # Highlights with comments become attached comments
+        if op.comment:
+            doc.add_comment(op.comment, on=op.text, author=author)
+        # Highlights without comments are just markers - nothing to do in DOCX
+
+    else:
+        raise ValueError(f"Unsupported operation type: {op.type}")
+
+
+def _find_insertion_anchor(op: CriticOperation) -> str | None:
+    """Find the best anchor text for an insertion operation.
+
+    Uses the context_before field to determine where to insert.
+    Returns the last portion of the context as the anchor.
+
+    Args:
+        op: The insertion operation
+
+    Returns:
+        Anchor text to insert after, or None if no context available
+    """
+    if not op.context_before:
+        return None
+
+    # Use the last 50 characters of context as anchor
+    # This balances specificity with likelihood of matching
+    anchor = op.context_before.strip()
+    if len(anchor) > 50:
+        anchor = anchor[-50:]
+
+    return anchor if anchor else None
