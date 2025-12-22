@@ -858,44 +858,8 @@ class TrackedChangeOperations:
                 )
         else:
             # Match spans multiple runs - need to preserve text before/after match
-            start_run = match.runs[match.start_run_index]
-            end_run = match.runs[match.end_run_index]
-
-            # Get the actual parent of the start run
-            actual_parent = start_run.getparent()
-            if actual_parent is None:
-                actual_parent = paragraph
-
-            try:
-                start_run_index = list(actual_parent).index(start_run)
-            except ValueError:
-                # Fallback to paragraph
-                start_run_index = list(paragraph).index(start_run)
-                actual_parent = paragraph
-
-            # Get text before match in the first run (only from w:t elements)
-            first_run_text = self._get_run_text_content(start_run)
-            before_text = first_run_text[: match.start_offset]
-
-            # Get text after match in the last run (only from w:t elements)
-            last_run_text = self._get_run_text_content(end_run)
-            after_text = last_run_text[match.end_offset :]
-
-            # Remove all runs in the match
-            for i in range(match.start_run_index, match.end_run_index + 1):
-                run = match.runs[i]
-                run_parent = run.getparent()
-                if run_parent is not None and run in run_parent:
-                    run_parent.remove(run)
-
-            # Build replacement elements: [before_run] + replacements + [after_run]
-            new_elements = self._build_split_elements(
-                start_run, before_text, after_text, replacement_elements
-            )
-
-            # Insert all elements at the position of the first removed run
-            for i, elem in enumerate(new_elements):
-                actual_parent.insert(start_run_index + i, elem)
+            # and handle cases where runs are in different parents (wrappers vs paragraph)
+            self._replace_multirun_match_with_elements(match, paragraph, replacement_elements)
 
     def _get_run_text_content(self, run: Any) -> str:
         """Extract text content from a run, avoiding XML structural whitespace.
@@ -1043,6 +1007,108 @@ class TrackedChangeOperations:
         run_index = list(immediate_parent).index(run)
         return paragraph, immediate_parent, run_index
 
+    def _clone_wrapper(self, wrapper: Any, new_id: int | None = None) -> Any:
+        """Create a copy of a tracked change wrapper (w:ins or w:del) with a new ID.
+
+        Args:
+            wrapper: The wrapper element to clone
+            new_id: Optional new ID to use. If None, generates a new unique ID.
+
+        Returns:
+            A new wrapper element with the same attributes but a new ID
+        """
+        if new_id is None:
+            new_id = self._document._xml_generator.next_change_id
+
+        # Create new element with same tag
+        new_wrapper = etree.Element(wrapper.tag)
+
+        # Copy all attributes except id
+        for attr_name, attr_value in wrapper.attrib.items():
+            if attr_name == f"{{{WORD_NAMESPACE}}}id":
+                new_wrapper.set(attr_name, str(new_id))
+            else:
+                new_wrapper.set(attr_name, attr_value)
+
+        # If no id was present, add one
+        id_attr = f"{{{WORD_NAMESPACE}}}id"
+        if id_attr not in new_wrapper.attrib:
+            new_wrapper.set(id_attr, str(new_id))
+
+        return new_wrapper
+
+    def _get_wrapper_position_in_paragraph(self, wrapper: Any, paragraph: Any) -> int:
+        """Get the position of a wrapper element within its paragraph.
+
+        Args:
+            wrapper: The wrapper element (w:ins or w:del)
+            paragraph: The containing paragraph
+
+        Returns:
+            The index of the wrapper in the paragraph's children
+
+        Raises:
+            ValueError: If wrapper is not a direct child of paragraph
+        """
+        return list(paragraph).index(wrapper)
+
+    def _extract_remaining_content_from_wrapper(
+        self,
+        wrapper: Any,
+        paragraph: Any,
+        start_run_index: int | None = None,
+        end_run_index: int | None = None,
+    ) -> tuple[Any | None, Any | None]:
+        """Extract content before and/or after specified runs from a wrapper.
+
+        This creates new wrapper elements containing the content that should be
+        preserved (not part of the match). The original wrapper should be handled
+        separately (removed or modified).
+
+        Args:
+            wrapper: The wrapper element containing runs
+            paragraph: The containing paragraph
+            start_run_index: Index of first run in match (content before this is extracted)
+            end_run_index: Index of last run in match (content after this is extracted)
+
+        Returns:
+            Tuple of (before_wrapper, after_wrapper) - either may be None if no content
+        """
+        runs_in_wrapper = list(wrapper)
+        before_wrapper = None
+        after_wrapper = None
+
+        # Extract content before the match
+        if start_run_index is not None and start_run_index > 0:
+            before_wrapper = self._clone_wrapper(wrapper)
+            for i in range(start_run_index):
+                run_copy = etree.fromstring(etree.tostring(runs_in_wrapper[i]))
+                before_wrapper.append(run_copy)
+
+        # Extract content after the match
+        if end_run_index is not None and end_run_index < len(runs_in_wrapper) - 1:
+            after_wrapper = self._clone_wrapper(wrapper)
+            for i in range(end_run_index + 1, len(runs_in_wrapper)):
+                run_copy = etree.fromstring(etree.tostring(runs_in_wrapper[i]))
+                after_wrapper.append(run_copy)
+
+        return before_wrapper, after_wrapper
+
+    def _wrap_runs_in_cloned_wrapper(self, runs: list[Any], original_wrapper: Any) -> Any:
+        """Wrap runs in a cloned wrapper with same attributes but new ID.
+
+        Args:
+            runs: List of run elements to wrap
+            original_wrapper: The wrapper to clone attributes from
+
+        Returns:
+            New wrapper element containing the runs
+        """
+        new_wrapper = self._clone_wrapper(original_wrapper)
+        for run in runs:
+            new_wrapper.append(run)
+        return new_wrapper
+
     def _build_split_elements(
         self, run: Any, before_text: str, after_text: str, replacement_elements: list[Any]
     ) -> list[Any]:
@@ -1149,3 +1215,206 @@ class TrackedChangeOperations:
             run, before_text, after_text, replacement_elements
         )
         self._replace_run_with_elements(paragraph, run, new_elements)
+
+    def _replace_multirun_match_with_elements(
+        self,
+        match: TextSpan,
+        paragraph: Any,
+        replacement_elements: list[Any],
+    ) -> None:
+        """Replace a match spanning multiple runs with new elements.
+
+        This handles the complex case where runs may have different parents:
+        - Some runs may be direct children of the paragraph
+        - Some runs may be inside tracked change wrappers (w:ins, w:del)
+
+        When runs are removed from wrappers, any remaining content in those
+        wrappers is preserved by creating new wrapper elements.
+
+        Args:
+            match: TextSpan object representing the text to replace
+            paragraph: The paragraph containing the runs
+            replacement_elements: Elements to insert in place of matched text
+        """
+        start_run = match.runs[match.start_run_index]
+        end_run = match.runs[match.end_run_index]
+
+        # Save parent information BEFORE removing runs (getparent() won't work after removal)
+        start_run_parent = start_run.getparent()
+        end_run_parent = end_run.getparent()
+
+        # Get text before match in the first run
+        first_run_text = self._get_run_text_content(start_run)
+        before_text = first_run_text[: match.start_offset]
+
+        # Get text after match in the last run
+        last_run_text = self._get_run_text_content(end_run)
+        after_text = last_run_text[match.end_offset :]
+
+        # Track wrappers that need to have remaining content preserved
+        # Key: wrapper element, Value: (runs_to_keep_before, runs_to_keep_after)
+        wrapper_remaining_content: dict[Any, tuple[list[Any], list[Any]]] = {}
+
+        # Analyze each run's parent and track wrapper content
+        for i in range(match.start_run_index, match.end_run_index + 1):
+            run = match.runs[i]
+            run_parent = run.getparent()
+
+            if run_parent is not None and self._is_tracked_change_wrapper(run_parent):
+                wrapper = run_parent
+                wrapper_children = list(wrapper)
+                run_idx_in_wrapper = wrapper_children.index(run)
+
+                if wrapper not in wrapper_remaining_content:
+                    # First time seeing this wrapper - initialize
+                    wrapper_remaining_content[wrapper] = ([], [])
+
+                # For first run in wrapper that's part of match, save content before
+                before_runs, after_runs = wrapper_remaining_content[wrapper]
+                if not before_runs and run_idx_in_wrapper > 0:
+                    # Only save before content if this is the first matched run in wrapper
+                    is_first_matched_in_wrapper = True
+                    for j in range(match.start_run_index, i):
+                        other_run = match.runs[j]
+                        if other_run.getparent() == wrapper:
+                            is_first_matched_in_wrapper = False
+                            break
+                    if is_first_matched_in_wrapper:
+                        for k in range(run_idx_in_wrapper):
+                            before_runs.append(wrapper_children[k])
+
+                # For last run in wrapper that's part of match, save content after
+                is_last_matched_in_wrapper = True
+                for j in range(i + 1, match.end_run_index + 1):
+                    other_run = match.runs[j]
+                    if other_run.getparent() == wrapper:
+                        is_last_matched_in_wrapper = False
+                        break
+                if is_last_matched_in_wrapper and run_idx_in_wrapper < len(wrapper_children) - 1:
+                    for k in range(run_idx_in_wrapper + 1, len(wrapper_children)):
+                        after_runs.append(wrapper_children[k])
+
+                wrapper_remaining_content[wrapper] = (before_runs, after_runs)
+
+        # Find the insertion point in the paragraph
+        # We need to insert at paragraph level, finding the right position
+        insertion_index = self._find_paragraph_insertion_index(match, paragraph, start_run)
+
+        # Remove all runs in the match from their parents
+        for i in range(match.start_run_index, match.end_run_index + 1):
+            run = match.runs[i]
+            run_parent = run.getparent()
+            if run_parent is not None and run in run_parent:
+                run_parent.remove(run)
+
+        # Remove empty wrappers and handle wrapper remaining content
+        preserved_before: list[Any] = []
+        preserved_after: list[Any] = []
+
+        for wrapper, (before_runs, after_runs) in wrapper_remaining_content.items():
+            # Check if wrapper is empty or only has matched runs
+            wrapper_still_has_content = len(list(wrapper)) > 0
+
+            if not wrapper_still_has_content:
+                # Remove empty wrapper
+                if wrapper.getparent() is not None:
+                    wrapper.getparent().remove(wrapper)
+
+            # Create new wrappers for remaining content
+            if before_runs:
+                new_before_wrapper = self._clone_wrapper(wrapper)
+                for run in before_runs:
+                    # Clone the run since it's still attached to original wrapper
+                    run_copy = etree.fromstring(etree.tostring(run))
+                    new_before_wrapper.append(run_copy)
+                preserved_before.append(new_before_wrapper)
+
+            if after_runs:
+                new_after_wrapper = self._clone_wrapper(wrapper)
+                for run in after_runs:
+                    # Clone the run since it's still attached to original wrapper
+                    run_copy = etree.fromstring(etree.tostring(run))
+                    new_after_wrapper.append(run_copy)
+                preserved_after.append(new_after_wrapper)
+
+        # Build the elements to insert
+        elements_to_insert: list[Any] = []
+
+        # Add preserved content from wrappers (before)
+        elements_to_insert.extend(preserved_before)
+
+        # Add before_text run if needed
+        # If the start_run was inside a wrapper, wrap the before_text in a cloned wrapper
+        if before_text:
+            before_run = self._create_text_run(before_text, start_run)
+            if start_run_parent is not None and self._is_tracked_change_wrapper(start_run_parent):
+                # Wrap in cloned wrapper to preserve original attribution
+                before_wrapper = self._clone_wrapper(start_run_parent)
+                before_wrapper.append(before_run)
+                elements_to_insert.append(before_wrapper)
+            else:
+                elements_to_insert.append(before_run)
+
+        # Add replacement elements
+        elements_to_insert.extend(replacement_elements)
+
+        # Add after_text run if needed
+        # If the end_run was inside a wrapper, wrap the after_text in a cloned wrapper
+        if after_text:
+            after_run = self._create_text_run(after_text, end_run)
+            if end_run_parent is not None and self._is_tracked_change_wrapper(end_run_parent):
+                # Wrap in cloned wrapper to preserve original attribution
+                after_wrapper = self._clone_wrapper(end_run_parent)
+                after_wrapper.append(after_run)
+                elements_to_insert.append(after_wrapper)
+            else:
+                elements_to_insert.append(after_run)
+
+        # Add preserved content from wrappers (after)
+        elements_to_insert.extend(preserved_after)
+
+        # Insert all elements at the insertion point
+        for i, elem in enumerate(elements_to_insert):
+            paragraph.insert(insertion_index + i, elem)
+
+    def _find_paragraph_insertion_index(
+        self, match: TextSpan, paragraph: Any, start_run: Any
+    ) -> int:
+        """Find the insertion index in the paragraph for replacement elements.
+
+        This handles the case where the start_run might be inside a wrapper,
+        finding the appropriate position at the paragraph level.
+
+        Args:
+            match: The TextSpan being replaced
+            paragraph: The paragraph element
+            start_run: The first run in the match
+
+        Returns:
+            The index in the paragraph where elements should be inserted
+        """
+        start_parent = start_run.getparent()
+
+        if start_parent == paragraph:
+            # Start run is direct child of paragraph
+            return list(paragraph).index(start_run)
+        elif self._is_tracked_change_wrapper(start_parent):
+            # Start run is inside a wrapper - find wrapper's position
+            try:
+                return list(paragraph).index(start_parent)
+            except ValueError:
+                # Wrapper not found - scan for first match run's position
+                pass
+
+        # Fallback: find the first paragraph-level element that contains
+        # or precedes any of the matched runs
+        for i, child in enumerate(paragraph):
+            if child == start_run:
+                return i
+            if self._is_tracked_change_wrapper(child):
+                for run_idx in range(match.start_run_index, match.end_run_index + 1):
+                    if match.runs[run_idx] in child:
+                        return i
+
+        # Last resort: append at end
+        return len(list(paragraph))

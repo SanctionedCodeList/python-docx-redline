@@ -1,9 +1,10 @@
 # Issue: Cannot Edit Text That Was Already Modified by Tracked Changes
 
 **Date:** 2025-12-19
+**Resolved:** 2025-12-22
 **Severity:** Medium
 **Category:** Feature Request / Usability
-**Status:** 🔴 OPEN
+**Status:** 🟢 RESOLVED
 
 ---
 

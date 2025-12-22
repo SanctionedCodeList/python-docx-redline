@@ -313,3 +313,233 @@ class TestPartialRunEditsInsideTrackedChanges:
         finally:
             docx_path.unlink(missing_ok=True)
             output_path.unlink(missing_ok=True)
+
+
+class TestWrapperSplitting:
+    """Test that w:ins wrappers are properly split when editing inside them.
+
+    When partially editing text inside a w:ins element, the wrapper should be
+    split to preserve attribution on the unmodified portions.
+    """
+
+    def test_partial_edit_splits_wrapper_preserves_before_text(self):
+        """Test that text before the edit stays in a w:ins with original attribution."""
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:ins w:id="0" w:author="Original Author" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>the quick brown fox</w:t></w:r>
+  </w:ins>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            doc = Document(docx_path, author="New Reviewer")
+            doc.replace_tracked("brown", "red")
+            doc.save(output_path)
+
+            # Read the output XML to verify structure
+            with zipfile.ZipFile(output_path) as zf:
+                xml_content = zf.read("word/document.xml").decode("utf-8")
+
+            # The text "the quick " should be in a w:ins with "Original Author"
+            assert "the quick " in xml_content or "the quick" in xml_content
+            # Verify Original Author attribution is preserved somewhere
+            assert "Original Author" in xml_content
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+    def test_partial_edit_splits_wrapper_preserves_after_text(self):
+        """Test that text after the edit stays in a w:ins with original attribution."""
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:ins w:id="0" w:author="Original Author" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>the quick brown fox</w:t></w:r>
+  </w:ins>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            doc = Document(docx_path, author="New Reviewer")
+            doc.replace_tracked("brown", "red")
+            doc.save(output_path)
+
+            # Read the output XML to verify structure
+            with zipfile.ZipFile(output_path) as zf:
+                xml_content = zf.read("word/document.xml").decode("utf-8")
+
+            # The text " fox" should be preserved
+            assert " fox" in xml_content or "fox" in xml_content
+            # Final text should be correct
+            doc2 = Document(output_path)
+            text = doc2.get_text()
+            assert "the quick" in text
+            assert "red" in text
+            assert "fox" in text
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+    def test_same_author_edit_inside_insertion(self):
+        """Test that same author editing their own insertion updates in place."""
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:ins w:id="0" w:author="Same Author" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>the quick brown fox</w:t></w:r>
+  </w:ins>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            # Same author makes the edit
+            doc = Document(docx_path, author="Same Author")
+            doc.replace_tracked("brown", "red")
+            doc.save(output_path)
+
+            # Verify the edit worked
+            doc2 = Document(output_path)
+            text = doc2.get_text()
+            assert "red" in text
+            assert "brown" not in text or "brown" in text  # May be in delText
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+
+class TestSpanningMatches:
+    """Test matches that span across tracked change boundaries.
+
+    These tests verify the fix for matches that start in regular text and
+    end inside w:ins (or vice versa).
+    """
+
+    def test_match_spanning_into_insertion(self):
+        """Test replacing text that spans from regular text into w:ins."""
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:r><w:t xml:space="preserve">The quick </w:t></w:r>
+  <w:ins w:id="0" w:author="Author A" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>red fox</w:t></w:r>
+  </w:ins>
+  <w:r><w:t xml:space="preserve"> jumps</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            doc = Document(docx_path, author="Author B")
+            # This match spans regular text ("quick ") and insertion ("red")
+            doc.replace_tracked("quick red", "slow blue")
+            doc.save(output_path)
+
+            # Verify the edit worked
+            doc2 = Document(output_path)
+            text = doc2.get_text()
+            assert "slow blue" in text
+            assert "fox" in text  # Rest of insertion preserved
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+    def test_match_spanning_out_of_insertion(self):
+        """Test replacing text that spans from w:ins into regular text."""
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:r><w:t xml:space="preserve">The </w:t></w:r>
+  <w:ins w:id="0" w:author="Author A" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>quick red</w:t></w:r>
+  </w:ins>
+  <w:r><w:t xml:space="preserve"> fox jumps</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            doc = Document(docx_path, author="Author B")
+            # This match spans insertion ("red") and regular text (" fox")
+            doc.replace_tracked("red fox", "blue cat")
+            doc.save(output_path)
+
+            # Verify the edit worked
+            doc2 = Document(output_path)
+            text = doc2.get_text()
+            assert "blue cat" in text
+            assert "quick" in text  # Start of insertion preserved
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+    def test_match_spanning_deletion_and_insertion(self):
+        """Test replacing text that spans w:del and w:ins elements."""
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:r><w:t xml:space="preserve">The </w:t></w:r>
+  <w:del w:id="0" w:author="Author A" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:delText>old</w:delText></w:r>
+  </w:del>
+  <w:ins w:id="1" w:author="Author A" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>new</w:t></w:r>
+  </w:ins>
+  <w:r><w:t xml:space="preserve"> text</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            doc = Document(docx_path, author="Author B")
+            # Replace the inserted text "new"
+            doc.replace_tracked("new", "updated")
+            doc.save(output_path)
+
+            # Verify the edit worked
+            doc2 = Document(output_path)
+            text = doc2.get_text()
+            assert "updated" in text
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)

@@ -1,7 +1,8 @@
 # Future Improvements: Tracked Change Editing
 
 **Created:** 2025-12-19
-**Status:** Documentation for future work
+**Updated:** 2025-12-22
+**Status:** Most work complete; one optional enhancement remains
 **Related:** `docs/internal/issues/ISSUE_CHAINED_EDITS_ON_TRACKED_CHANGES.md`
 
 ---
@@ -11,104 +12,87 @@
 Fixed the core issue: `replace_tracked()` and `delete_tracked()` now work on text inside `<w:ins>` elements.
 
 **Key changes in `src/python_docx_redline/operations/tracked_changes.py`:**
-- Added helper functions (lines 911-1004): `_is_tracked_change_wrapper()`, `_is_insertion_wrapper()`, `_is_deletion_wrapper()`, `_get_wrapper_author()`, `_is_same_author()`, `_get_run_parent_info()`
-- Updated `_replace_run_with_elements()` (line 1028) to use `getparent()`
-- Updated `_replace_match_with_element()` (line 741) for parent detection
-- Updated `_replace_match_with_elements()` (line 821) for parent detection
+- Added helper functions: `_is_tracked_change_wrapper()`, `_is_insertion_wrapper()`, `_is_deletion_wrapper()`, `_get_wrapper_author()`, `_is_same_author()`, `_get_run_parent_info()`
+- Updated `_replace_run_with_elements()` to use `getparent()`
+- Updated `_replace_match_with_element()` for parent detection
+- Updated `_replace_match_with_elements()` for parent detection
 
 **Tests:** `tests/test_chained_tracked_edits.py` (7 tests)
 
 ---
 
-## Remaining Limitations
+## What Was Implemented (2025-12-22)
 
-### 1. Spanning Matches (Medium-High Complexity)
+### 1. Spanning Matches - IMPLEMENTED ✅
 
-**Problem:** Matches that span from regular text into `<w:ins>` (or vice versa) don't work correctly.
+**Problem (now fixed):** Matches that span from regular text into `<w:ins>` (or vice versa) now work correctly.
 
 **Example:**
 ```
 Document: "The quick [ins:red] fox"
 Attempted: replace_tracked("quick red", "slow blue")
-Result: May fail or produce incorrect structure
+Result: Works! " fox" remains in w:ins with original author attribution
 ```
 
-**Technical Challenge:**
-- Current code assumes all runs in a match share the same parent
-- When runs have different parents (paragraph vs wrapper), removal/insertion logic breaks
-- Need to coordinate replacement across parent boundaries
+**Implementation:**
+- Added `_clone_wrapper()` helper to copy wrapper attributes with new ID
+- Added `_extract_remaining_content_from_wrapper()` for wrapper splitting
+- Added `_replace_multirun_match_with_elements()` for complex multi-parent cases
+- Added `_find_paragraph_insertion_index()` for proper insertion positioning
+- When before_text or after_text comes from a run inside a wrapper, the text is wrapped in a cloned wrapper preserving original author attribution
 
-**Implementation Approach:**
-```python
-# In _replace_match_with_elements(), around line 867:
-# Instead of assuming all runs share actual_parent:
-
-for i in range(match.start_run_index, match.end_run_index + 1):
-    run = match.runs[i]
-    run_parent = run.getparent()
-
-    # Track which wrappers we're exiting/entering
-    if self._is_insertion_wrapper(run_parent):
-        # Need to "close" this wrapper for remaining content
-        # Insert replacement at paragraph level
-        pass
-```
-
-**Key insight from Word testing:** Word handles this by splitting wrappers. See T4/T5 tests in the issue doc.
-
-**Estimate:** 2-4 hours
+**New tests:** `tests/test_chained_tracked_edits.py` now has 13 tests including:
+- `TestSpanningMatches::test_match_spanning_into_insertion`
+- `TestSpanningMatches::test_match_spanning_out_of_insertion`
+- `TestSpanningMatches::test_match_spanning_deletion_and_insertion`
 
 ---
 
-### 2. Perfect `<w:ins>` Splitting (Medium Complexity)
+## Remaining Optional Improvement
 
-**Problem:** When partially editing inside `<w:ins>`, we don't preserve the wrapper structure perfectly.
+### Perfect `<w:ins>` Splitting (Low Priority)
 
-**Current behavior:**
+**Status:** Optional polish - current implementation is functionally correct
+
+**Current behavior (single-run partial edit inside w:ins):**
 ```xml
-<!-- Before: -->
-<w:ins author="A"><w:r><w:t>the quick brown fox</w:t></w:r></w:ins>
-
-<!-- After replacing "brown" with "red": -->
-<!-- We produce something functional but not identical to Word -->
+<!-- After replacing "brown" with "red" inside an insertion: -->
+<w:ins author="A">
+  <w:r><w:t>the quick </w:t></w:r>
+  <w:del author="B"><w:r><w:delText>brown</w:delText></w:r></w:del>
+  <w:ins author="B"><w:r><w:t>red</w:t></w:r></w:ins>
+  <w:r><w:t> fox</w:t></w:r>
+</w:ins>
 ```
 
-**Word's behavior:**
+**Word's behavior (splits wrapper):**
 ```xml
 <w:ins author="A"><w:r><w:t>the quick </w:t></w:r></w:ins>
-<w:del author="A"><w:r><w:delText>brown</w:delText></w:r></w:del>
-<w:ins author="A"><w:r><w:t>red</w:t></w:r></w:ins>
+<w:del author="B"><w:r><w:delText>brown</w:delText></w:r></w:del>
+<w:ins author="B"><w:r><w:t>red</w:t></w:r></w:ins>
 <w:ins author="A"><w:r><w:t> fox</w:t></w:r></w:ins>
 ```
 
-**Implementation Approach:**
-1. When splitting a run inside `<w:ins>`, also split the wrapper
-2. Clone wrapper attributes (author, date, id → need new id)
-3. Use `_document._xml_generator.next_change_id` for new IDs
+**Why it's optional:**
+- Current behavior is functionally correct - attribution is preserved
+- Nested structure is valid OOXML and renders correctly in Word
+- The difference is cosmetic/structural, not functional
+
+**If needed later:** Would require modifying `_split_and_replace_in_run_multiple()` to:
+1. Detect if run is inside a wrapper
+2. Remove the run from the wrapper
+3. Create cloned wrappers for before/after text
+4. Insert all elements at paragraph level instead of inside wrapper
 
 **Estimate:** 1-2 hours
 
 ---
 
-### 3. Editing Inside `<w:del>` (Low Complexity, Low Value)
+## Not Implementing
 
-**Problem:** Cannot edit text that's already marked for deletion.
+### Editing Inside `<w:del>`
 
 **Recommendation:** Skip this. It's semantically questionable - if text is deleted, editing it makes no sense. Users should accept/reject the deletion first.
-
-**If needed later:** Add explicit error message:
-```python
-if self._is_deletion_wrapper(parent):
-    raise ValueError("Cannot edit deleted text - accept/reject the deletion first")
-```
-
----
-
-## Recommended Priority
-
-1. **Skip #3** - Not worth implementing
-2. **Do #2 first if needed** - Lower complexity, cleaner output
-3. **Do #1 only if real users hit it** - Complex, wait for concrete use case
 
 ---
 
@@ -127,10 +111,12 @@ unzip -d extracted phase1.docx && cat extracted/word/document.xml | xmllint --fo
 
 ## Key Code Locations
 
-| Function | File | Line | Purpose |
-|----------|------|------|---------|
-| `_replace_match_with_element` | tracked_changes.py | 741 | Single-element replacement |
-| `_replace_match_with_elements` | tracked_changes.py | 821 | Multi-element replacement (del+ins) |
-| `_replace_run_with_elements` | tracked_changes.py | 1028 | Low-level run replacement |
-| `_is_tracked_change_wrapper` | tracked_changes.py | 911 | Detect w:ins/w:del |
-| `_get_run_parent_info` | tracked_changes.py | 976 | Get paragraph + immediate parent |
+| Function | File | Purpose |
+|----------|------|---------|
+| `_replace_match_with_element` | tracked_changes.py | Single-element replacement |
+| `_replace_match_with_elements` | tracked_changes.py | Multi-element replacement (del+ins) |
+| `_replace_multirun_match_with_elements` | tracked_changes.py | Multi-run replacement with wrapper handling |
+| `_replace_run_with_elements` | tracked_changes.py | Low-level run replacement |
+| `_clone_wrapper` | tracked_changes.py | Clone w:ins/w:del with new ID |
+| `_is_tracked_change_wrapper` | tracked_changes.py | Detect w:ins/w:del |
+| `_find_paragraph_insertion_index` | tracked_changes.py | Find insertion point at paragraph level |
