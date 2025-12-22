@@ -2260,6 +2260,40 @@ class Document:
             inline_styles=inline_styles,
         )
 
+    def to_criticmarkup(self, include_comments: bool = True) -> str:
+        """Export document with tracked changes to CriticMarkup markdown.
+
+        Converts the document to plain text with CriticMarkup annotations for
+        tracked changes and comments. This format is useful for:
+        - Reviewing changes in plain text editors
+        - Version control (text diffs work well)
+        - AI agent workflows
+
+        Tracked changes are converted as follows:
+        - Insertions → {++text++}
+        - Deletions → {--text--}
+        - Comments → {>>comment text<<}
+
+        Args:
+            include_comments: Whether to include comments (default: True)
+
+        Returns:
+            Markdown string with CriticMarkup annotations
+
+        Example:
+            >>> doc = Document("contract_with_changes.docx")
+            >>> markdown = doc.to_criticmarkup()
+            >>> print(markdown)
+            The parties agree to {--30--}{++45++} day payment terms.
+
+        See Also:
+            - apply_criticmarkup(): Import CriticMarkup changes back to DOCX
+            - http://criticmarkup.com/ for syntax reference
+        """
+        from .criticmarkup import docx_to_criticmarkup
+
+        return docx_to_criticmarkup(self, include_comments=include_comments)
+
     def generate_change_report(
         self,
         format: str = "html",

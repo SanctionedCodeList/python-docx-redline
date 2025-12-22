@@ -1,5 +1,9 @@
 """Tests for CriticMarkup parser."""
 
+import tempfile
+import zipfile
+from pathlib import Path
+
 import pytest
 
 from python_docx_redline.criticmarkup import (
@@ -401,3 +405,211 @@ class TestRoundTrip:
         ops = parse_criticmarkup(markup)
         assert len(ops) == 1
         assert ops[0].type in OperationType
+
+
+# =============================================================================
+# DOCX to CriticMarkup Export Tests
+# =============================================================================
+
+
+def create_test_docx(content: str) -> Path:
+    """Create a minimal but valid OOXML test .docx file."""
+    temp_dir = Path(tempfile.mkdtemp())
+    docx_path = temp_dir / "test.docx"
+
+    content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    with zipfile.ZipFile(docx_path, "w", zipfile.ZIP_DEFLATED) as docx:
+        docx.writestr("[Content_Types].xml", content_types)
+        docx.writestr("_rels/.rels", rels)
+        docx.writestr("word/document.xml", content)
+
+    return docx_path
+
+
+class TestDocxToCriticmarkupExport:
+    """Tests for DOCX to CriticMarkup export functionality."""
+
+    def test_export_plain_text(self):
+        """Export document with no tracked changes."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Hello world.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+            result = doc.to_criticmarkup()
+            assert result == "Hello world."
+        finally:
+            docx_path.unlink()
+
+    def test_export_insertion(self):
+        """Export document with tracked insertion."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Hello </w:t></w:r>
+      <w:ins w:id="1" w:author="Test" w:date="2024-01-01T00:00:00Z">
+        <w:r><w:t>beautiful </w:t></w:r>
+      </w:ins>
+      <w:r><w:t>world.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+            result = doc.to_criticmarkup()
+            assert result == "Hello {++beautiful ++}world."
+        finally:
+            docx_path.unlink()
+
+    def test_export_deletion(self):
+        """Export document with tracked deletion."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Hello </w:t></w:r>
+      <w:del w:id="1" w:author="Test" w:date="2024-01-01T00:00:00Z">
+        <w:r><w:delText>old </w:delText></w:r>
+      </w:del>
+      <w:r><w:t>world.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+            result = doc.to_criticmarkup()
+            assert result == "Hello {--old --}world."
+        finally:
+            docx_path.unlink()
+
+    def test_export_insertion_and_deletion(self):
+        """Export document with both insertion and deletion (substitution pattern)."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Payment in </w:t></w:r>
+      <w:del w:id="1" w:author="Test" w:date="2024-01-01T00:00:00Z">
+        <w:r><w:delText>30</w:delText></w:r>
+      </w:del>
+      <w:ins w:id="2" w:author="Test" w:date="2024-01-01T00:00:00Z">
+        <w:r><w:t>45</w:t></w:r>
+      </w:ins>
+      <w:r><w:t> days.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+            result = doc.to_criticmarkup()
+            assert result == "Payment in {--30--}{++45++} days."
+        finally:
+            docx_path.unlink()
+
+    def test_export_multiple_paragraphs(self):
+        """Export document with multiple paragraphs."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>First paragraph.</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>Second </w:t></w:r>
+      <w:ins w:id="1" w:author="Test" w:date="2024-01-01T00:00:00Z">
+        <w:r><w:t>modified </w:t></w:r>
+      </w:ins>
+      <w:r><w:t>paragraph.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+            result = doc.to_criticmarkup()
+            assert "First paragraph." in result
+            assert "Second {++modified ++}paragraph." in result
+            # Paragraphs should be separated by double newlines
+            assert "\n\n" in result
+        finally:
+            docx_path.unlink()
+
+    def test_export_empty_document(self):
+        """Export document with no content."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p></w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+            result = doc.to_criticmarkup()
+            assert result == ""
+        finally:
+            docx_path.unlink()
+
+    def test_export_via_document_method(self):
+        """Test that Document.to_criticmarkup() method works."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Test </w:t></w:r>
+      <w:ins w:id="1" w:author="Test" w:date="2024-01-01T00:00:00Z">
+        <w:r><w:t>content</w:t></w:r>
+      </w:ins>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+            # Test the Document method directly
+            result = doc.to_criticmarkup()
+            assert "{++content++}" in result
+        finally:
+            docx_path.unlink()
