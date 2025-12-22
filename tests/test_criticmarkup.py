@@ -850,3 +850,290 @@ class TestCriticmarkupToDocxImport:
             assert len(result.errors) >= 1
         finally:
             docx_path.unlink()
+
+
+# =============================================================================
+# Integration Tests: Round-Trip Verification
+# =============================================================================
+
+
+class TestCriticmarkupRoundTrip:
+    """Integration tests for CriticMarkup round-trip workflow.
+
+    These tests verify the complete workflow:
+    1. Start with a document
+    2. Make changes (tracked insertions/deletions)
+    3. Export to CriticMarkup
+    4. Verify CriticMarkup contains the changes
+    5. Apply CriticMarkup to a fresh document
+    6. Verify the changes were applied correctly
+    """
+
+    def test_roundtrip_deletion(self):
+        """Test round-trip: create deletion -> export -> import."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Hello beautiful world.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            # Step 1: Create a document and make a tracked deletion
+            doc1 = Document(docx_path)
+            doc1.delete_tracked("beautiful ", author="Test")
+
+            # Step 2: Export to CriticMarkup
+            markup = doc1.to_criticmarkup()
+
+            # Step 3: Verify the export contains deletion markup
+            assert "{--beautiful --}" in markup
+
+            # Step 4: Create a fresh document and apply the markup
+            doc2 = Document(docx_path)
+            result = doc2.apply_criticmarkup(markup, author="Import")
+
+            # Step 5: Verify the change was applied
+            assert result.successful >= 1
+            deletions = doc2.get_tracked_changes(change_type="deletion")
+            assert len(deletions) >= 1
+        finally:
+            docx_path.unlink()
+
+    def test_roundtrip_insertion(self):
+        """Test round-trip: create insertion -> export -> verify markup."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Hello world.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            # Step 1: Create a document and make a tracked insertion
+            doc = Document(docx_path)
+            doc.insert_tracked("beautiful ", after="Hello ", author="Test")
+
+            # Step 2: Export to CriticMarkup
+            markup = doc.to_criticmarkup()
+
+            # Step 3: Verify the export contains insertion markup
+            assert "{++beautiful ++}" in markup
+            assert "Hello" in markup
+            assert "world" in markup
+        finally:
+            docx_path.unlink()
+
+    def test_roundtrip_substitution_pattern(self):
+        """Test round-trip with deletion+insertion pattern (like substitution)."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>Payment due in 30 days.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            # Step 1: Create a substitution (delete + insert)
+            doc1 = Document(docx_path)
+            doc1.replace_tracked("30", "45", author="Test")
+
+            # Step 2: Export to CriticMarkup
+            markup = doc1.to_criticmarkup()
+
+            # Step 3: Verify the export contains the changes
+            assert "{--30--}" in markup
+            assert "{++45++}" in markup
+
+            # Step 4: Apply to fresh document
+            doc2 = Document(docx_path)
+            result = doc2.apply_criticmarkup("Payment due in {~~30~>45~~} days.", author="Import")
+
+            # Step 5: Verify changes were applied
+            assert result.successful == 1
+            insertions = doc2.get_tracked_changes(change_type="insertion")
+            deletions = doc2.get_tracked_changes(change_type="deletion")
+            assert len(insertions) == 1
+            assert len(deletions) == 1
+        finally:
+            docx_path.unlink()
+
+    def test_roundtrip_multiple_paragraphs(self):
+        """Test round-trip with multiple paragraphs."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>First paragraph content.</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>Second paragraph with text.</w:t></w:r>
+    </w:p>
+    <w:p>
+      <w:r><w:t>Third paragraph here.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            # Step 1: Make changes across multiple paragraphs
+            doc = Document(docx_path)
+            doc.delete_tracked("content", author="Test")
+            doc.delete_tracked("with text", author="Test")
+
+            # Step 2: Export to CriticMarkup
+            markup = doc.to_criticmarkup()
+
+            # Step 3: Verify all paragraphs are in the export
+            assert "First paragraph" in markup
+            assert "Second paragraph" in markup
+            assert "Third paragraph" in markup
+
+            # Step 4: Verify deletions are marked
+            assert "{--content--}" in markup
+            assert "{--with text--}" in markup
+
+            # Step 5: Verify paragraphs are separated
+            assert "\n\n" in markup
+        finally:
+            docx_path.unlink()
+
+    def test_roundtrip_preserves_plain_text(self):
+        """Test that plain text without changes survives round-trip."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>This is plain text without any changes.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+
+            # Export without any changes
+            markup = doc.to_criticmarkup()
+
+            # Verify plain text is preserved without any markup
+            assert markup == "This is plain text without any changes."
+            assert "{++" not in markup
+            assert "{--" not in markup
+        finally:
+            docx_path.unlink()
+
+    def test_roundtrip_existing_tracked_changes(self):
+        """Test that existing tracked changes in document are exported correctly."""
+        from python_docx_redline import Document
+
+        # Document that already has tracked changes
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>The </w:t></w:r>
+      <w:del w:id="1" w:author="Original" w:date="2024-01-01T00:00:00Z">
+        <w:r><w:delText>old </w:delText></w:r>
+      </w:del>
+      <w:ins w:id="2" w:author="Original" w:date="2024-01-01T00:00:00Z">
+        <w:r><w:t>new </w:t></w:r>
+      </w:ins>
+      <w:r><w:t>contract.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+
+            # Export should show existing tracked changes
+            markup = doc.to_criticmarkup()
+
+            assert "{--old --}" in markup
+            assert "{++new ++}" in markup
+            assert "The" in markup
+            assert "contract" in markup
+        finally:
+            docx_path.unlink()
+
+    def test_roundtrip_empty_document(self):
+        """Test round-trip with empty/minimal document."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p></w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            doc = Document(docx_path)
+
+            # Export empty document
+            markup = doc.to_criticmarkup()
+
+            # Should be empty string
+            assert markup == ""
+        finally:
+            docx_path.unlink()
+
+    def test_workflow_edit_exported_markdown(self):
+        """Test the complete workflow: export, edit markdown, import changes."""
+        from python_docx_redline import Document
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p>
+      <w:r><w:t>The agreement requires 30 days notice.</w:t></w:r>
+    </w:p>
+  </w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        try:
+            # Step 1: Export original document
+            doc1 = Document(docx_path)
+            original_markup = doc1.to_criticmarkup()
+            assert original_markup == "The agreement requires 30 days notice."
+
+            # Step 2: Simulate user editing the markdown with CriticMarkup
+            edited_markup = "The {++revised ++}agreement requires {~~30~>45~~} days notice."
+
+            # Step 3: Apply edits to a fresh document
+            doc2 = Document(docx_path)
+            result = doc2.apply_criticmarkup(edited_markup, author="Reviewer")
+
+            # Step 4: Verify all edits were applied
+            assert result.total == 2  # 1 insertion + 1 substitution
+            assert result.successful == 2
+
+            # Step 5: Verify tracked changes exist
+            all_changes = doc2.get_tracked_changes()
+            assert len(all_changes) >= 2
+        finally:
+            docx_path.unlink()
