@@ -15,11 +15,13 @@ OOXML Structure:
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from lxml import etree
 
+from ..accessibility.bookmarks import BookmarkRegistry
 from ..constants import OFFICE_RELATIONSHIPS_NAMESPACE, WORD_NAMESPACE
 from ..errors import AmbiguousTextError, TextNotFoundError
 from ..relationships import RelationshipManager, RelationshipTypes
@@ -208,6 +210,16 @@ class HyperlinkOperations:
         else:
             # Internal link: no relationship needed, just w:anchor attribute
             # Note: anchor is not None here due to earlier validation
+
+            # Validate that the bookmark exists (warn if not, but allow the link)
+            bookmark_registry = BookmarkRegistry.from_xml(self._document.xml_root)
+            if not bookmark_registry.get_bookmark(anchor):
+                warnings.warn(
+                    f"Bookmark '{anchor}' does not exist. Internal hyperlink will be broken.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
             hyperlink_elem = self._create_hyperlink_element(
                 text=text,
                 r_id=None,
@@ -413,7 +425,7 @@ class HyperlinkOperations:
         Only works for external hyperlinks (not internal bookmarks).
 
         Args:
-            ref: Hyperlink ref (e.g., "lnk:5")
+            ref: Hyperlink ref (e.g., "lnk:5") or relationship ID (e.g., "rId5")
             new_url: The new URL to link to
 
         Raises:
@@ -423,7 +435,38 @@ class HyperlinkOperations:
         Example:
             >>> doc.edit_hyperlink_url("lnk:5", "https://new-url.com")
         """
-        raise NotImplementedError("edit_hyperlink_url not yet implemented")
+        # Validate new_url
+        if not new_url or not new_url.strip():
+            raise ValueError("new_url cannot be empty")
+
+        # Ensure we have a valid package
+        if not self._document._is_zip or not self._document._temp_dir:
+            raise ValueError("Cannot edit hyperlinks in non-ZIP documents")
+
+        package = self._document._package
+        if not package:
+            raise ValueError("Cannot edit hyperlinks: package not available")
+
+        # Find the hyperlink element and its relationship ID
+        hyperlink_elem, r_id = self._find_hyperlink_by_ref(ref)
+
+        if hyperlink_elem is None:
+            raise ValueError(f"Hyperlink not found: {ref}")
+
+        if r_id is None:
+            raise ValueError(
+                f"Cannot edit URL of internal hyperlink '{ref}' - "
+                "use edit_hyperlink_anchor() for internal links"
+            )
+
+        # Update the relationship target
+        rel_mgr = RelationshipManager(package, "word/document.xml")
+        updated = rel_mgr.update_relationship_target(r_id, new_url)
+
+        if not updated:
+            raise ValueError(f"Relationship '{r_id}' not found for hyperlink '{ref}'")
+
+        rel_mgr.save()
 
     def edit_hyperlink_text(
         self,
