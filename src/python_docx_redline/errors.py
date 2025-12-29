@@ -193,3 +193,37 @@ class StaleRefError(DocxRedlineError):
             "Regenerate the accessibility tree to get updated refs."
         )
         return msg
+
+
+class NoteNotFoundError(DocxRedlineError):
+    """Raised when a footnote or endnote cannot be found by ID.
+
+    This error occurs when attempting to access, edit, or delete a footnote
+    or endnote that does not exist in the document.
+
+    Attributes:
+        note_type: The type of note ('footnote' or 'endnote')
+        note_id: The ID that was searched for
+        available_ids: List of valid IDs in the document
+    """
+
+    def __init__(
+        self,
+        note_type: str,
+        note_id: str | int,
+        available_ids: list[str] | None = None,
+    ) -> None:
+        self.note_type = note_type
+        self.note_id = str(note_id)
+        self.available_ids = available_ids or []
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        """Format an error message with available IDs."""
+        msg = f"{self.note_type.capitalize()} with ID '{self.note_id}' not found"
+        if self.available_ids:
+            ids_str = ", ".join(self.available_ids)
+            msg += f"\n\nAvailable {self.note_type} IDs: {ids_str}"
+        else:
+            msg += f"\n\nNo {self.note_type}s exist in the document"
+        return msg

@@ -30,6 +30,7 @@ __all__ = [
     "AmbiguousTextError",
     "ValidationError",
     "ContinuityWarning",
+    "NoteNotFoundError",
     "TextSearch",
     "TextSpan",
     "Match",
@@ -86,6 +87,7 @@ from .errors import (
     AmbiguousTextError,
     ContinuityWarning,
     DocxRedlineError,
+    NoteNotFoundError,
     TextNotFoundError,
     ValidationError,
 )

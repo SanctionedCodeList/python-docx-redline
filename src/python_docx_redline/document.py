@@ -40,7 +40,7 @@ from .operations.tables import TableOperations
 from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
 from .results import ComparisonStats, EditResult, FormatResult
-from .scope import ScopeEvaluator
+from .scope import NoteScope, ScopeEvaluator, parse_note_scope
 from .text_search import TextSearch, TextSpan
 from .tracked_xml import TrackedXMLGenerator
 from .validation import ValidationError
@@ -553,6 +553,8 @@ class Document:
         context_chars: int = 40,
         fuzzy: float | dict[str, Any] | None = None,
         include_deleted: bool = False,
+        include_footnotes: bool = False,
+        include_endnotes: bool = False,
     ) -> list[Match]:
         """Find all occurrences of text in the document with location metadata.
 
@@ -564,7 +566,16 @@ class Document:
             text: The text or regex pattern to search for
             regex: Whether to treat text as a regex pattern (default: False)
             case_sensitive: Whether to perform case-sensitive search (default: True)
-            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            scope: Limit search scope. Can be:
+                - None: Search all body paragraphs (default)
+                - str: "text" for paragraph containing text
+                - str: "section:Name" for paragraphs in named section
+                - str: "footnotes" for all footnotes
+                - str: "endnotes" for all endnotes
+                - str: "notes" for all footnotes and endnotes
+                - str: "footnote:N" for specific footnote by ID
+                - str: "endnote:N" for specific endnote by ID
+                - dict: {"contains": "text", ...} for complex filters
             context_chars: Number of characters to show before/after match (default: 40)
             fuzzy: Fuzzy matching configuration:
                 - None: Exact matching (default)
@@ -572,9 +583,15 @@ class Document:
                 - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
             include_deleted: If True, include text inside tracked deletions when
                 searching. If False (default), skip text in w:del elements.
+            include_footnotes: If True, also search within footnotes (default: False).
+                Matches will have location like "footnote:1", "footnote:2", etc.
+            include_endnotes: If True, also search within endnotes (default: False).
+                Matches will have location like "endnote:1", "endnote:2", etc.
 
         Returns:
-            List of Match objects with text, context, location, and metadata
+            List of Match objects with text, context, location, and metadata.
+            When searching footnotes/endnotes, the location field indicates which
+            note contains the match (e.g., "footnote:1", "endnote:2").
 
         Raises:
             re.error: If regex=True and the pattern is invalid
@@ -600,16 +617,37 @@ class Document:
             >>> # Search only in tables
             >>> matches = doc.find_all("text", scope={"location": "tables"})
             >>>
+            >>> # Search only in footnotes
+            >>> matches = doc.find_all("citation", scope="footnotes")
+            >>>
+            >>> # Search in a specific footnote
+            >>> matches = doc.find_all("text", scope="footnote:1")
+            >>>
+            >>> # Search body AND footnotes
+            >>> matches = doc.find_all("text", include_footnotes=True)
+            >>>
             >>> # Fuzzy matching with threshold
             >>> matches = doc.find_all("production products", fuzzy=0.85)
-            >>>
-            >>> # Fuzzy with custom algorithm
-            >>> matches = doc.find_all("text", fuzzy={'threshold': 0.9, 'algorithm': 'levenshtein'})
             >>>
             >>> # Include text inside tracked deletions
             >>> matches = doc.find_all("deleted text", include_deleted=True)
         """
-        # Get all paragraphs, then filter by scope
+        # Check if scope is targeting notes specifically
+        note_scope = parse_note_scope(scope) if isinstance(scope, str) else None
+
+        if note_scope is not None:
+            # Scope targets notes - search only within notes
+            return self._find_all_in_notes(
+                text=text,
+                note_scope=note_scope,
+                regex=regex,
+                case_sensitive=case_sensitive,
+                context_chars=context_chars,
+                fuzzy=fuzzy,
+                include_deleted=include_deleted,
+            )
+
+        # Search document body
         all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
         paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
 
@@ -656,7 +694,258 @@ class Document:
             )
             matches.append(match)
 
+        # Optionally search footnotes
+        if include_footnotes:
+            footnote_matches = self._find_all_in_notes(
+                text=text,
+                note_scope=NoteScope(scope_type="footnotes"),
+                regex=regex,
+                case_sensitive=case_sensitive,
+                context_chars=context_chars,
+                fuzzy=fuzzy,
+                include_deleted=include_deleted,
+            )
+            # Re-index the matches to continue from where body matches left off
+            for fm in footnote_matches:
+                fm.index = len(matches)
+                matches.append(fm)
+
+        # Optionally search endnotes
+        if include_endnotes:
+            endnote_matches = self._find_all_in_notes(
+                text=text,
+                note_scope=NoteScope(scope_type="endnotes"),
+                regex=regex,
+                case_sensitive=case_sensitive,
+                context_chars=context_chars,
+                fuzzy=fuzzy,
+                include_deleted=include_deleted,
+            )
+            # Re-index the matches to continue from where body/footnote matches left off
+            for em in endnote_matches:
+                em.index = len(matches)
+                matches.append(em)
+
         return matches
+
+    def _find_all_in_notes(
+        self,
+        text: str,
+        note_scope: NoteScope,
+        regex: bool = False,
+        case_sensitive: bool = True,
+        context_chars: int = 40,
+        fuzzy: float | dict[str, Any] | None = None,
+        include_deleted: bool = False,
+    ) -> list[Match]:
+        """Find all occurrences of text within footnotes/endnotes.
+
+        Args:
+            text: The text or regex pattern to search for
+            note_scope: NoteScope specifying which notes to search
+            regex: Whether to treat text as a regex pattern
+            case_sensitive: Whether to perform case-sensitive search
+            context_chars: Number of characters to show before/after match
+            fuzzy: Fuzzy matching configuration
+            include_deleted: If True, include text inside tracked deletions
+
+        Returns:
+            List of Match objects with location indicating the note source
+        """
+        from .fuzzy import parse_fuzzy_config
+
+        fuzzy_config = parse_fuzzy_config(fuzzy)
+        matches: list[Match] = []
+        match_index = 0
+
+        # Determine which notes to search
+        search_footnotes = note_scope.scope_type in ("footnotes", "footnote", "notes")
+        search_endnotes = note_scope.scope_type in ("endnotes", "endnote", "notes")
+        specific_note_id = note_scope.note_id
+
+        # Search footnotes
+        if search_footnotes:
+            footnotes = self.footnotes
+            for footnote in footnotes:
+                # If searching specific note, skip others
+                if specific_note_id is not None and footnote.id != specific_note_id:
+                    continue
+
+                # Get paragraphs from this footnote
+                note_paragraphs = [p._element for p in footnote.paragraphs]
+                if not note_paragraphs:
+                    continue
+
+                # Find matches in this note
+                spans = self._text_search.find_text(
+                    text,
+                    note_paragraphs,
+                    case_sensitive=case_sensitive,
+                    regex=regex,
+                    fuzzy=fuzzy_config,
+                    include_deleted=include_deleted,
+                )
+
+                # Convert spans to Match objects
+                for span in spans:
+                    # Get paragraph text
+                    text_elements = span.paragraph.findall(f".//{{{WORD_NAMESPACE}}}t")
+                    paragraph_text = "".join(elem.text or "" for elem in text_elements)
+
+                    # Location indicates which footnote
+                    location = f"footnote:{footnote.id}"
+
+                    # Get context
+                    context = self._get_context_with_size(span, context_chars)
+
+                    # Create Match object (paragraph_index = position within note)
+                    match = Match(
+                        index=match_index,
+                        text=span.text,
+                        context=context,
+                        paragraph_index=note_paragraphs.index(span.paragraph),
+                        paragraph_text=paragraph_text,
+                        location=location,
+                        span=span,
+                    )
+                    matches.append(match)
+                    match_index += 1
+
+        # Search endnotes
+        if search_endnotes:
+            endnotes = self.endnotes
+            for endnote in endnotes:
+                # If searching specific note, skip others
+                if specific_note_id is not None and endnote.id != specific_note_id:
+                    continue
+
+                # Get paragraphs from this endnote
+                note_paragraphs = [p._element for p in endnote.paragraphs]
+                if not note_paragraphs:
+                    continue
+
+                # Find matches in this note
+                spans = self._text_search.find_text(
+                    text,
+                    note_paragraphs,
+                    case_sensitive=case_sensitive,
+                    regex=regex,
+                    fuzzy=fuzzy_config,
+                    include_deleted=include_deleted,
+                )
+
+                # Convert spans to Match objects
+                for span in spans:
+                    # Get paragraph text
+                    text_elements = span.paragraph.findall(f".//{{{WORD_NAMESPACE}}}t")
+                    paragraph_text = "".join(elem.text or "" for elem in text_elements)
+
+                    # Location indicates which endnote
+                    location = f"endnote:{endnote.id}"
+
+                    # Get context
+                    context = self._get_context_with_size(span, context_chars)
+
+                    # Create Match object (paragraph_index = position within note)
+                    match = Match(
+                        index=match_index,
+                        text=span.text,
+                        context=context,
+                        paragraph_index=note_paragraphs.index(span.paragraph),
+                        paragraph_text=paragraph_text,
+                        location=location,
+                        span=span,
+                    )
+                    matches.append(match)
+                    match_index += 1
+
+        return matches
+
+    def find_in_footnotes(
+        self,
+        text: str,
+        regex: bool = False,
+        case_sensitive: bool = True,
+        context_chars: int = 40,
+        fuzzy: float | dict[str, Any] | None = None,
+        include_deleted: bool = False,
+    ) -> list[Match]:
+        """Search all footnotes for text.
+
+        This is a convenience method equivalent to:
+        doc.find_all(text, scope="footnotes", ...)
+
+        Args:
+            text: The text or regex pattern to search for
+            regex: Whether to treat text as a regex pattern (default: False)
+            case_sensitive: Whether to perform case-sensitive search (default: True)
+            context_chars: Number of characters to show before/after match (default: 40)
+            fuzzy: Fuzzy matching configuration
+            include_deleted: If True, include text inside tracked deletions
+
+        Returns:
+            List of Match objects with location indicating which footnote
+            (e.g., "footnote:1", "footnote:2")
+
+        Example:
+            >>> matches = doc.find_in_footnotes("citation")
+            >>> for match in matches:
+            ...     print(f"{match.location}: {match.text}")
+            footnote:1: citation needed
+            footnote:3: original citation
+        """
+        return self._find_all_in_notes(
+            text=text,
+            note_scope=NoteScope(scope_type="footnotes"),
+            regex=regex,
+            case_sensitive=case_sensitive,
+            context_chars=context_chars,
+            fuzzy=fuzzy,
+            include_deleted=include_deleted,
+        )
+
+    def find_in_endnotes(
+        self,
+        text: str,
+        regex: bool = False,
+        case_sensitive: bool = True,
+        context_chars: int = 40,
+        fuzzy: float | dict[str, Any] | None = None,
+        include_deleted: bool = False,
+    ) -> list[Match]:
+        """Search all endnotes for text.
+
+        This is a convenience method equivalent to:
+        doc.find_all(text, scope="endnotes", ...)
+
+        Args:
+            text: The text or regex pattern to search for
+            regex: Whether to treat text as a regex pattern (default: False)
+            case_sensitive: Whether to perform case-sensitive search (default: True)
+            context_chars: Number of characters to show before/after match (default: 40)
+            fuzzy: Fuzzy matching configuration
+            include_deleted: If True, include text inside tracked deletions
+
+        Returns:
+            List of Match objects with location indicating which endnote
+            (e.g., "endnote:1", "endnote:2")
+
+        Example:
+            >>> matches = doc.find_in_endnotes("reference")
+            >>> for match in matches:
+            ...     print(f"{match.location}: {match.text}")
+            endnote:1: See reference 42
+            endnote:2: Reference to original source
+        """
+        return self._find_all_in_notes(
+            text=text,
+            note_scope=NoteScope(scope_type="endnotes"),
+            regex=regex,
+            case_sensitive=case_sensitive,
+            context_chars=context_chars,
+            fuzzy=fuzzy,
+            include_deleted=include_deleted,
+        )
 
     def _get_location_string(self, paragraph: Any) -> str:
         """Get a human-readable location string for a paragraph.
@@ -3484,6 +3773,302 @@ class Document:
             >>> doc.insert_endnote("Additional details here", at="main conclusion")
         """
         return self._note_ops.insert_endnote(text, at, author=author, scope=scope)
+
+    def get_footnote(self, note_id: str | int) -> "Footnote":
+        """Get a specific footnote by ID.
+
+        Args:
+            note_id: The footnote ID to retrieve
+
+        Returns:
+            The Footnote object
+
+        Raises:
+            NoteNotFoundError: If the footnote ID is not found
+
+        Example:
+            >>> footnote = doc.get_footnote(1)
+            >>> print(footnote.text)
+        """
+        return self._note_ops.get_footnote(note_id)
+
+    def get_endnote(self, note_id: str | int) -> "Endnote":
+        """Get a specific endnote by ID.
+
+        Args:
+            note_id: The endnote ID to retrieve
+
+        Returns:
+            The Endnote object
+
+        Raises:
+            NoteNotFoundError: If the endnote ID is not found
+
+        Example:
+            >>> endnote = doc.get_endnote(1)
+            >>> print(endnote.text)
+        """
+        return self._note_ops.get_endnote(note_id)
+
+    def delete_footnote(self, note_id: str | int, renumber: bool = True) -> None:
+        """Delete a footnote by ID.
+
+        This removes both the footnote content from footnotes.xml and the
+        corresponding footnote reference from the document body.
+
+        Args:
+            note_id: The footnote ID to delete
+            renumber: If True, renumber remaining footnotes sequentially (default)
+
+        Raises:
+            NoteNotFoundError: If the footnote ID is not found
+
+        Example:
+            >>> doc.delete_footnote(2)  # Delete footnote 2 and renumber
+            >>> doc.delete_footnote(2, renumber=False)  # Delete without renumbering
+        """
+        self._note_ops.delete_footnote(note_id, renumber=renumber)
+
+    def delete_endnote(self, note_id: str | int, renumber: bool = True) -> None:
+        """Delete an endnote by ID.
+
+        This removes both the endnote content from endnotes.xml and the
+        corresponding endnote reference from the document body.
+
+        Args:
+            note_id: The endnote ID to delete
+            renumber: If True, renumber remaining endnotes sequentially (default)
+
+        Raises:
+            NoteNotFoundError: If the endnote ID is not found
+
+        Example:
+            >>> doc.delete_endnote(2)  # Delete endnote 2 and renumber
+            >>> doc.delete_endnote(2, renumber=False)  # Delete without renumbering
+        """
+        self._note_ops.delete_endnote(note_id, renumber=renumber)
+
+    def edit_footnote(
+        self,
+        note_id: str | int,
+        new_text: str,
+        track: bool = False,
+        author: str | None = None,
+    ) -> None:
+        """Edit the text of a footnote.
+
+        Args:
+            note_id: The footnote ID to edit
+            new_text: The new text content for the footnote
+            track: If True, track the edit as a change (Phase 3 feature)
+            author: Author name for tracked changes (uses document author if None)
+
+        Raises:
+            NoteNotFoundError: If the footnote ID is not found
+
+        Example:
+            >>> doc.edit_footnote(1, "Updated citation text")
+        """
+        self._note_ops.edit_footnote(note_id, new_text, track=track, author=author)
+
+    def edit_endnote(
+        self,
+        note_id: str | int,
+        new_text: str,
+        track: bool = False,
+        author: str | None = None,
+    ) -> None:
+        """Edit the text of an endnote.
+
+        Args:
+            note_id: The endnote ID to edit
+            new_text: The new text content for the endnote
+            track: If True, track the edit as a change (Phase 3 feature)
+            author: Author name for tracked changes (uses document author if None)
+
+        Raises:
+            NoteNotFoundError: If the endnote ID is not found
+
+        Example:
+            >>> doc.edit_endnote(1, "Updated citation text")
+        """
+        self._note_ops.edit_endnote(note_id, new_text, track=track, author=author)
+
+    def insert_tracked_in_footnote(
+        self,
+        note_id: str | int,
+        text: str,
+        after: str | None = None,
+        before: str | None = None,
+        author: str | None = None,
+    ) -> None:
+        """Insert text with tracked changes inside a footnote.
+
+        This method searches for anchor text within the footnote and inserts
+        new text as a tracked insertion (w:ins) either after or before it.
+
+        Args:
+            note_id: The footnote ID to edit
+            text: The text to insert (supports markdown formatting)
+            after: Text to insert after (mutually exclusive with before)
+            before: Text to insert before (mutually exclusive with after)
+            author: Optional author override (uses document author if None)
+
+        Raises:
+            ValueError: If both or neither of after/before specified
+            NoteNotFoundError: If footnote not found
+            TextNotFoundError: If anchor text not found in footnote
+            AmbiguousTextError: If anchor text found multiple times
+
+        Example:
+            >>> doc.insert_tracked_in_footnote(1, " [updated]", after="citation")
+        """
+        self._note_ops.insert_tracked_in_footnote(
+            note_id, text, after=after, before=before, author=author
+        )
+
+    def insert_tracked_in_endnote(
+        self,
+        note_id: str | int,
+        text: str,
+        after: str | None = None,
+        before: str | None = None,
+        author: str | None = None,
+    ) -> None:
+        """Insert text with tracked changes inside an endnote.
+
+        This method searches for anchor text within the endnote and inserts
+        new text as a tracked insertion (w:ins) either after or before it.
+
+        Args:
+            note_id: The endnote ID to edit
+            text: The text to insert (supports markdown formatting)
+            after: Text to insert after (mutually exclusive with before)
+            before: Text to insert before (mutually exclusive with after)
+            author: Optional author override (uses document author if None)
+
+        Raises:
+            ValueError: If both or neither of after/before specified
+            NoteNotFoundError: If endnote not found
+            TextNotFoundError: If anchor text not found in endnote
+            AmbiguousTextError: If anchor text found multiple times
+
+        Example:
+            >>> doc.insert_tracked_in_endnote(1, " [see also]", after="reference")
+        """
+        self._note_ops.insert_tracked_in_endnote(
+            note_id, text, after=after, before=before, author=author
+        )
+
+    def delete_tracked_in_footnote(
+        self,
+        note_id: str | int,
+        text: str,
+        author: str | None = None,
+    ) -> None:
+        """Delete text with tracked changes inside a footnote.
+
+        This method searches for text within the footnote and marks it
+        as a tracked deletion (w:del).
+
+        Args:
+            note_id: The footnote ID to edit
+            text: The text to delete
+            author: Optional author override (uses document author if None)
+
+        Raises:
+            NoteNotFoundError: If footnote not found
+            TextNotFoundError: If text not found in footnote
+            AmbiguousTextError: If text found multiple times
+
+        Example:
+            >>> doc.delete_tracked_in_footnote(1, "outdated reference")
+        """
+        self._note_ops.delete_tracked_in_footnote(note_id, text, author=author)
+
+    def delete_tracked_in_endnote(
+        self,
+        note_id: str | int,
+        text: str,
+        author: str | None = None,
+    ) -> None:
+        """Delete text with tracked changes inside an endnote.
+
+        This method searches for text within the endnote and marks it
+        as a tracked deletion (w:del).
+
+        Args:
+            note_id: The endnote ID to edit
+            text: The text to delete
+            author: Optional author override (uses document author if None)
+
+        Raises:
+            NoteNotFoundError: If endnote not found
+            TextNotFoundError: If text not found in endnote
+            AmbiguousTextError: If text found multiple times
+
+        Example:
+            >>> doc.delete_tracked_in_endnote(1, "obsolete citation")
+        """
+        self._note_ops.delete_tracked_in_endnote(note_id, text, author=author)
+
+    def replace_tracked_in_footnote(
+        self,
+        note_id: str | int,
+        find: str,
+        replace: str,
+        author: str | None = None,
+    ) -> None:
+        """Replace text with tracked changes inside a footnote.
+
+        This method searches for text within the footnote and replaces it
+        showing both the deletion of old text and insertion of new text
+        as tracked changes.
+
+        Args:
+            note_id: The footnote ID to edit
+            find: The text to find and replace
+            replace: The replacement text (supports markdown formatting)
+            author: Optional author override (uses document author if None)
+
+        Raises:
+            NoteNotFoundError: If footnote not found
+            TextNotFoundError: If find text not found in footnote
+            AmbiguousTextError: If find text found multiple times
+
+        Example:
+            >>> doc.replace_tracked_in_footnote(1, "2020", "2024")
+        """
+        self._note_ops.replace_tracked_in_footnote(note_id, find, replace, author=author)
+
+    def replace_tracked_in_endnote(
+        self,
+        note_id: str | int,
+        find: str,
+        replace: str,
+        author: str | None = None,
+    ) -> None:
+        """Replace text with tracked changes inside an endnote.
+
+        This method searches for text within the endnote and replaces it
+        showing both the deletion of old text and insertion of new text
+        as tracked changes.
+
+        Args:
+            note_id: The endnote ID to edit
+            find: The text to find and replace
+            replace: The replacement text (supports markdown formatting)
+            author: Optional author override (uses document author if None)
+
+        Raises:
+            NoteNotFoundError: If endnote not found
+            TextNotFoundError: If find text not found in endnote
+            AmbiguousTextError: If find text found multiple times
+
+        Example:
+            >>> doc.replace_tracked_in_endnote(1, "ibid", "op. cit.")
+        """
+        self._note_ops.replace_tracked_in_endnote(note_id, find, replace, author=author)
 
     # ========================================================================
     # HEADER / FOOTER METHODS

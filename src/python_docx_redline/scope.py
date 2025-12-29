@@ -3,12 +3,91 @@ Scope evaluation for filtering paragraphs in Word documents.
 
 This module provides a flexible scope system that allows users to limit
 search operations to specific sections, paragraphs, or text ranges.
+
+Supports footnote/endnote scopes:
+- "footnotes": Search within all footnotes
+- "endnotes": Search within all endnotes
+- "notes": Search within all footnotes and endnotes
+- "footnote:N": Search within footnote with ID N
+- "endnote:N": Search within endnote with ID N
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from .constants import WORD_NAMESPACE
+
+
+@dataclass
+class NoteScope:
+    """Represents a scope targeting footnotes or endnotes.
+
+    This is returned by parse_note_scope() when the scope string
+    specifies note-related filtering.
+
+    Attributes:
+        scope_type: One of 'footnotes', 'endnotes', 'notes', 'footnote', 'endnote'
+        note_id: Optional specific note ID (for 'footnote:N' or 'endnote:N')
+    """
+
+    scope_type: str
+    note_id: str | None = None
+
+
+def parse_note_scope(scope_spec: str) -> NoteScope | None:
+    """Parse a scope string to check if it targets footnotes/endnotes.
+
+    Args:
+        scope_spec: The scope string to parse
+
+    Returns:
+        NoteScope if scope targets notes, None otherwise
+
+    Examples:
+        >>> parse_note_scope("footnotes")
+        NoteScope(scope_type='footnotes', note_id=None)
+        >>> parse_note_scope("footnote:1")
+        NoteScope(scope_type='footnote', note_id='1')
+        >>> parse_note_scope("section:Intro")
+        None
+    """
+    if not isinstance(scope_spec, str):
+        return None
+
+    # Check for plural forms (all notes of that type)
+    if scope_spec == "footnotes":
+        return NoteScope(scope_type="footnotes")
+    elif scope_spec == "endnotes":
+        return NoteScope(scope_type="endnotes")
+    elif scope_spec == "notes":
+        return NoteScope(scope_type="notes")
+
+    # Check for specific note by ID
+    if scope_spec.startswith("footnote:"):
+        note_id = scope_spec[9:]  # len("footnote:") = 9
+        if note_id:
+            return NoteScope(scope_type="footnote", note_id=note_id)
+    elif scope_spec.startswith("endnote:"):
+        note_id = scope_spec[8:]  # len("endnote:") = 8
+        if note_id:
+            return NoteScope(scope_type="endnote", note_id=note_id)
+
+    return None
+
+
+def is_note_scope(scope_spec: str | dict | Callable | None) -> bool:
+    """Check if a scope specification targets footnotes/endnotes.
+
+    Args:
+        scope_spec: The scope specification to check
+
+    Returns:
+        True if scope targets notes, False otherwise
+    """
+    if isinstance(scope_spec, str):
+        return parse_note_scope(scope_spec) is not None
+    return False
 
 
 class ScopeEvaluator:
