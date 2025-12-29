@@ -185,8 +185,8 @@ edits:
 """
         yaml_path.write_text(yaml_content, encoding="utf-8")
 
-        # Apply edits from file
-        doc = Document(doc_path)
+        # Apply edits from file (use minimal_edits=False for coarse mode assertions)
+        doc = Document(doc_path, minimal_edits=False)
         results = doc.apply_edit_file(yaml_path)
 
         # Check all edits succeeded
@@ -217,7 +217,8 @@ def test_scoped_edits_workflow():
     doc_path = create_realistic_docx()
 
     try:
-        doc = Document(doc_path)
+        # Use minimal_edits=False for coarse mode assertions
+        doc = Document(doc_path, minimal_edits=False)
 
         # Edit only in Introduction
         doc.insert_tracked(
@@ -446,7 +447,8 @@ def test_structural_operations_workflow():
     doc_path = create_structured_contract()
 
     try:
-        doc = Document(doc_path)
+        # Use minimal_edits=False for coarse mode assertions
+        doc = Document(doc_path, minimal_edits=False)
 
         # 1. Delete outdated section completely
         doc.delete_section("Outdated Clause", track=True)

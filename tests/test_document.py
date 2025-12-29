@@ -225,7 +225,8 @@ def test_replace_tracked():
     output_path = docx_path.parent / "output.docx"
 
     try:
-        doc = Document(docx_path, author="TestAuthor")
+        # Use minimal_edits=False to get coarse mode (entire text as single deletion/insertion)
+        doc = Document(docx_path, author="TestAuthor", minimal_edits=False)
 
         # Replace "test document" with "sample file"
         doc.replace_tracked("test document", "sample file")
@@ -310,7 +311,8 @@ def test_replace_across_multiple_runs():
     output_path = docx_path.parent / "output.docx"
 
     try:
-        doc = Document(docx_path)
+        # Use minimal_edits=False to get coarse mode (entire text as single deletion/insertion)
+        doc = Document(docx_path, minimal_edits=False)
 
         # Replace text that spans across runs
         doc.replace_tracked("fragmented text", "unified content")

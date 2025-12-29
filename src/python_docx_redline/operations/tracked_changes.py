@@ -345,6 +345,7 @@ class TrackedChangeOperations:
         context_chars: int = 50,
         fuzzy: float | dict[str, Any] | None = None,
         track: bool = False,
+        minimal: bool | None = None,
     ) -> None:
         """Find and replace text in the document.
 
@@ -379,6 +380,9 @@ class TrackedChangeOperations:
                 - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
             track: If True, show as tracked change (w:del + w:ins). If False, replace
                 text without tracking (default: False).
+            minimal: If True, use word-level diffing for human-looking tracked changes.
+                If False, use coarse delete-all + insert-all. If None (default),
+                uses the document's minimal_edits setting. Only applies when track=True.
 
         Raises:
             TextNotFoundError: If the 'find' text is not found
@@ -430,7 +434,31 @@ class TrackedChangeOperations:
                 self._check_and_warn_continuity(match, replacement_text, context_chars)
 
             if track:
-                # Tracked replace: deletion + insertion XML
+                # Determine effective minimal setting
+                use_minimal = minimal if minimal is not None else self._document._minimal_edits
+
+                if use_minimal:
+                    # Attempt word-level minimal edit
+                    from ..minimal_diff import apply_minimal_edits_to_textspan
+
+                    success, reason = apply_minimal_edits_to_textspan(
+                        match,
+                        replacement_text,
+                        self._document._xml_generator,
+                        author,
+                    )
+                    if success:
+                        continue  # Minimal edit applied successfully
+                    else:
+                        # Log fallback at INFO level
+                        logger.info(
+                            "Falling back to coarse tracked change for '%s' -> '%s': %s",
+                            matched_text[:50],
+                            replacement_text[:50],
+                            reason,
+                        )
+
+                # Coarse tracked replace: deletion + insertion XML
                 deletion_xml = self._document._xml_generator.create_deletion(matched_text, author)
                 insertion_xml = self._document._xml_generator.create_insertion(
                     replacement_text, author

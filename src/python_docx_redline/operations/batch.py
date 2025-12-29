@@ -291,6 +291,7 @@ class BatchOperations:
         regex = edit.get("regex", False)
         occurrence = edit.get("occurrence", "first")
         track = self._get_track_value(edit, default_track)
+        minimal = edit.get("minimal")  # None = use document default
 
         if not find or replace is None:
             return EditResult(
@@ -308,6 +309,7 @@ class BatchOperations:
             regex=regex,
             occurrence=occurrence,
             track=track,
+            minimal=minimal,
         )
         track_msg = " (tracked)" if track else ""
         return EditResult(
@@ -370,6 +372,7 @@ class BatchOperations:
         author = edit.get("author")
         scope = edit.get("scope")
         regex = edit.get("regex", False)
+        minimal = edit.get("minimal")  # None = use document default
 
         if not find or replace is None:
             return EditResult(
@@ -379,7 +382,9 @@ class BatchOperations:
                 error=ValidationError("Missing required parameter"),
             )
 
-        self._document.replace_tracked(find, replace, author=author, scope=scope, regex=regex)
+        self._document.replace_tracked(
+            find, replace, author=author, scope=scope, regex=regex, minimal=minimal
+        )
         return EditResult(
             success=True,
             edit_type=edit_type,

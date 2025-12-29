@@ -12,14 +12,20 @@ The key components:
 4. apply_minimal_edits() - applies hunks to OOXML paragraph structure
 """
 
+import logging
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from lxml import etree
 
 from .constants import MAX_TRACKED_HUNKS_PER_PARAGRAPH, WORD_NAMESPACE
+
+if TYPE_CHECKING:
+    from .text_search import TextSpan
+
+logger = logging.getLogger(__name__)
 
 # Tokenizer pattern:
 # - \s+ : whitespace runs
@@ -966,3 +972,111 @@ def _replace_across_runs(
     if before_text:
         before_run = _create_run_with_text(before_text, rpr)
         paragraph.insert(insert_pos, before_run)
+
+
+# --- TextSpan-Aware Minimal Editing ---
+
+
+def apply_minimal_edits_to_textspan(
+    match: "TextSpan",
+    replacement_text: str,
+    xml_generator: Any,
+    author: str | None = None,
+) -> tuple[bool, str]:
+    """Apply word-level minimal edits to a TextSpan replacement.
+
+    This function adapts minimal diffing for TextSpan-based replace operations,
+    which operate on a portion of a paragraph rather than the whole paragraph.
+
+    The function computes word-level hunks between the matched text and
+    replacement text, then applies those changes using delete-then-insert
+    ordering for a human-looking redline.
+
+    Args:
+        match: The TextSpan being replaced (contains runs, offsets, paragraph)
+        replacement_text: The new text to insert
+        xml_generator: TrackedXMLGenerator for creating tracked change elements
+        author: Author for tracked changes (optional)
+
+    Returns:
+        Tuple of (success: bool, reason: str).
+        - If success is True, minimal edits were applied and reason is empty.
+        - If success is False, reason explains why fallback is needed.
+
+    Example:
+        >>> success, reason = apply_minimal_edits_to_textspan(
+        ...     match, "45 days", doc._xml_generator, "Editor"
+        ... )
+        >>> if not success:
+        ...     logger.info("Falling back to coarse edit: %s", reason)
+        ...     # Apply coarse delete + insert instead
+    """
+    paragraph = match.paragraph
+    matched_text = match.text
+
+    # Safety check 1: Existing tracked revisions
+    if paragraph_has_tracked_revisions(paragraph):
+        return False, "Paragraph has existing tracked revisions"
+
+    # Safety check 2: Unsupported constructs
+    if paragraph_has_unsupported_constructs(paragraph):
+        return False, "Paragraph has unsupported constructs"
+
+    # Safety check 3: Nested runs
+    if paragraph_has_nested_runs(paragraph):
+        return False, "Paragraph has nested runs"
+
+    # Compute word-level hunks between matched text and replacement
+    diff_result = compute_minimal_hunks(matched_text, replacement_text)
+
+    if diff_result.fallback_required:
+        return False, diff_result.fallback_reason
+
+    if not diff_result.hunks:
+        # No changes needed (whitespace-only diff was suppressed)
+        # This is a successful minimal edit - just nothing to do
+        return True, ""
+
+    # Calculate the starting character position of the TextSpan within the paragraph
+    # We need this to translate hunk positions (relative to matched_text)
+    # to positions within the paragraph's full text
+    span_start_char = _calculate_textspan_char_offset(match)
+
+    # Adjust hunk character positions to be relative to paragraph
+    for hunk in diff_result.hunks:
+        hunk.char_start += span_start_char
+        hunk.char_end += span_start_char
+
+    # Apply the hunks to the paragraph
+    apply_minimal_edits_to_paragraph(
+        paragraph,
+        diff_result.hunks,
+        xml_generator,
+        author,
+    )
+
+    return True, ""
+
+
+def _calculate_textspan_char_offset(match: "TextSpan") -> int:
+    """Calculate the character offset where a TextSpan starts within its paragraph.
+
+    Args:
+        match: The TextSpan to calculate offset for
+
+    Returns:
+        Character offset from the start of the paragraph to the start of the TextSpan
+    """
+    char_offset = 0
+
+    # Count characters in runs before the start run
+    for idx in range(match.start_run_index):
+        run = match.runs[idx]
+        text_elements = run.findall(f".//{{{WORD_NAMESPACE}}}t")
+        run_text = "".join(elem.text or "" for elem in text_elements)
+        char_offset += len(run_text)
+
+    # Add the offset within the start run
+    char_offset += match.start_offset
+
+    return char_offset

@@ -95,6 +95,7 @@ class TableOperations:
         author: str | AuthorIdentity | None = None,
         regex: bool = False,
         case_sensitive: bool = True,
+        minimal: bool | None = None,
     ) -> int:
         """Replace text in table cells with optional tracked changes.
 
@@ -106,6 +107,9 @@ class TableOperations:
             author: Author for tracked changes (uses document author if None)
             regex: Whether old_text is a regex pattern (default: False)
             case_sensitive: Whether search is case sensitive (default: True)
+            minimal: If True, use word-level diffing for human-looking tracked changes.
+                If False, use coarse delete-all + insert-all. If None (default),
+                uses the document's minimal_edits setting. Only applies when track=True.
 
         Returns:
             Number of replacements made
@@ -139,7 +143,7 @@ class TableOperations:
 
                         for match in matches:
                             if track:
-                                self._replace_match_tracked(match, new_text, author_name)
+                                self._replace_match_tracked(match, new_text, author_name, minimal)
                             else:
                                 self._replace_match_untracked(match, new_text)
                             count += 1
@@ -151,6 +155,7 @@ class TableOperations:
         match: TextSpan,
         new_text: str,
         author_name: str | AuthorIdentity,
+        minimal: bool | None = None,
     ) -> None:
         """Replace a text match with tracked deletion and insertion.
 
@@ -158,10 +163,39 @@ class TableOperations:
             match: The TextSpan representing the matched text
             new_text: The replacement text
             author_name: Author for the tracked change
+            minimal: If True, use word-level diffing. If None, use document default.
         """
         # Extract author string if AuthorIdentity object
         author_str = author_name.author if isinstance(author_name, AuthorIdentity) else author_name
-        # Create tracked replacement
+
+        # Determine effective minimal setting
+        use_minimal = minimal if minimal is not None else self._document._minimal_edits
+
+        if use_minimal:
+            # Attempt word-level minimal edit
+            from ..minimal_diff import apply_minimal_edits_to_textspan
+
+            success, reason = apply_minimal_edits_to_textspan(
+                match,
+                new_text,
+                self._document._xml_generator,
+                author_str,
+            )
+            if success:
+                return  # Minimal edit applied successfully
+            else:
+                # Log fallback at INFO level
+                import logging
+
+                logger = logging.getLogger(__name__)
+                logger.info(
+                    "Table cell: Falling back to coarse tracked change for '%s' -> '%s': %s",
+                    match.text[:50],
+                    new_text[:50],
+                    reason,
+                )
+
+        # Coarse tracked replacement
         deletion_xml = self._document._xml_generator.create_deletion(match.text, author_str)
         insertion_xml = self._document._xml_generator.create_insertion(new_text, author_str)
 

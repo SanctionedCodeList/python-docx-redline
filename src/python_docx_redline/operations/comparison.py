@@ -54,7 +54,7 @@ class ComparisonOperations:
         self,
         modified: Document,
         author: str | None = None,
-        minimal_edits: bool = False,
+        minimal_edits: bool | None = None,
     ) -> int:
         """Generate tracked changes by comparing this document to a modified version.
 
@@ -73,7 +73,7 @@ class ComparisonOperations:
             minimal_edits: If True, use word-level diffs for 1:1 paragraph replacements
                 instead of deleting/inserting entire paragraphs. This produces
                 legal-style redlines where only the changed words are marked.
-                (default: False)
+                If None (default), uses the document's minimal_edits setting.
 
         Returns:
             Number of changes made (insertions + deletions)
@@ -97,6 +97,9 @@ class ComparisonOperations:
               for readability, and paragraphs with existing tracked changes
               fall back to coarse replacement
         """
+        # Determine effective minimal_edits setting
+        use_minimal = minimal_edits if minimal_edits is not None else self._document._minimal_edits
+
         # Get paragraph texts from both documents
         original_texts = [p.text for p in self._document.paragraphs]
         modified_texts = [p.text for p in modified.paragraphs]
@@ -137,10 +140,10 @@ class ComparisonOperations:
                     )
             elif tag == "replace":
                 # Paragraphs changed
-                # Check if this is a 1:1 replacement and minimal_edits is enabled
+                # Check if this is a 1:1 replacement and minimal editing is enabled
                 is_one_to_one = (i2 - i1) == 1 and (j2 - j1) == 1
 
-                if minimal_edits and is_one_to_one:
+                if use_minimal and is_one_to_one:
                     # Attempt minimal intra-paragraph edit for 1:1 replacement
                     operations.append(
                         {
@@ -173,7 +176,7 @@ class ComparisonOperations:
                         )
 
         # Apply operations to the document
-        change_count = self._apply_comparison_changes(operations, author, minimal_edits)
+        change_count = self._apply_comparison_changes(operations, author, use_minimal)
 
         return change_count
 

@@ -82,6 +82,7 @@ class Document:
         self,
         source: str | Path | bytes | BinaryIO,
         author: str | AuthorIdentity = "Claude",
+        minimal_edits: bool = True,
     ) -> None:
         """Initialize a Document from a .docx file or in-memory data.
 
@@ -93,6 +94,10 @@ class Document:
                     - Open file object in binary mode
             author: Author name (str) or full AuthorIdentity for MS365 integration
                    (default: "Claude")
+            minimal_edits: If True (default), tracked changes use word-level diffing
+                   to produce human-looking redlines. If False, uses coarse
+                   "delete all + insert all" pattern. Per-operation overrides
+                   are available via the `minimal` parameter on individual methods.
 
         Raises:
             ValidationError: If the document cannot be loaded or is invalid
@@ -137,6 +142,9 @@ class Document:
         else:
             self._author_identity = author
             self.author = author.display_name
+
+        # Store minimal edits setting (propagates to all operations)
+        self._minimal_edits = minimal_edits
 
         self._package: OOXMLPackage | None = None
 
@@ -896,6 +904,7 @@ class Document:
         check_continuity: bool = False,
         context_chars: int = 50,
         fuzzy: float | dict[str, Any] | None = None,
+        minimal: bool | None = None,
     ) -> None:
         """Find and replace text in the document.
 
@@ -927,6 +936,8 @@ class Document:
                 - None: Exact matching (default)
                 - float: Similarity threshold (e.g., 0.9 for 90% similar)
                 - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
+            minimal: Use minimal word-level diffing for tracked changes (default: None,
+                uses document's minimal_edits setting). Only applies when track=True.
 
         Raises:
             TextNotFoundError: If the 'find' text is not found
@@ -956,6 +967,7 @@ class Document:
             context_chars=context_chars,
             track=track,
             fuzzy=fuzzy,
+            minimal=minimal,
         )
 
     def move(
@@ -1222,6 +1234,7 @@ class Document:
         check_continuity: bool = False,
         context_chars: int = 50,
         fuzzy: float | dict[str, Any] | None = None,
+        minimal: bool | None = None,
     ) -> None:
         """Find and replace text with tracked changes.
 
@@ -1244,6 +1257,7 @@ class Document:
             check_continuity=check_continuity,
             context_chars=context_chars,
             fuzzy=fuzzy,
+            minimal=minimal,
         )
 
     def move_tracked(

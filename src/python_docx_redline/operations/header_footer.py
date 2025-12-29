@@ -7,6 +7,7 @@ extracted from the main Document class to improve separation of concerns.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from lxml import etree
@@ -18,6 +19,8 @@ from ..suggestions import SuggestionGenerator
 if TYPE_CHECKING:
     from ..document import Document
     from ..models.header_footer import Footer, Header
+
+logger = logging.getLogger(__name__)
 
 
 class HeaderFooterOperations:
@@ -293,6 +296,7 @@ class HeaderFooterOperations:
         regex: bool = False,
         normalize_special_chars: bool = True,
         track: bool = True,
+        minimal: bool | None = None,
     ) -> None:
         """Replace text in a header with optional tracked changes.
 
@@ -304,6 +308,7 @@ class HeaderFooterOperations:
             regex: Whether to treat 'find' as a regex pattern
             normalize_special_chars: Auto-convert quotes for matching
             track: If True, show as tracked change; if False, silent replace (default: True)
+            minimal: If True, use word-level diffing. If None, use document default.
 
         Raises:
             TextNotFoundError: If 'find' text is not found
@@ -327,6 +332,7 @@ class HeaderFooterOperations:
             regex=regex,
             normalize_special_chars=normalize_special_chars,
             track=track,
+            minimal=minimal,
         )
 
     def replace_in_footer(
@@ -338,6 +344,7 @@ class HeaderFooterOperations:
         regex: bool = False,
         normalize_special_chars: bool = True,
         track: bool = True,
+        minimal: bool | None = None,
     ) -> None:
         """Replace text in a footer with optional tracked changes.
 
@@ -349,6 +356,7 @@ class HeaderFooterOperations:
             regex: Whether to treat 'find' as a regex pattern
             normalize_special_chars: Auto-convert quotes for matching
             track: If True, show as tracked change; if False, silent replace (default: True)
+            minimal: If True, use word-level diffing. If None, use document default.
 
         Raises:
             TextNotFoundError: If 'find' text is not found
@@ -372,6 +380,7 @@ class HeaderFooterOperations:
             regex=regex,
             normalize_special_chars=normalize_special_chars,
             track=track,
+            minimal=minimal,
         )
 
     def insert_in_header(
@@ -498,6 +507,7 @@ class HeaderFooterOperations:
         header: Header | None = None,
         footer: Footer | None = None,
         track: bool = True,
+        minimal: bool | None = None,
     ) -> None:
         """Replace text in a header or footer with optional tracked changes.
 
@@ -510,6 +520,7 @@ class HeaderFooterOperations:
             header: Header object (if replacing in header)
             footer: Footer object (if replacing in footer)
             track: If True, show as tracked change; if False, silent replace
+            minimal: If True, use word-level diffing. If None, use document default.
         """
         # Get the element and file path
         if header is not None:
@@ -542,7 +553,33 @@ class HeaderFooterOperations:
         match = matches[0]
 
         if track:
-            # Generate the replacement XML (deletion + insertion)
+            # Determine effective minimal setting
+            use_minimal = minimal if minimal is not None else self._document._minimal_edits
+
+            if use_minimal:
+                # Attempt word-level minimal edit
+                from ..minimal_diff import apply_minimal_edits_to_textspan
+
+                success, reason = apply_minimal_edits_to_textspan(
+                    match,
+                    replace,
+                    self._document._xml_generator,
+                    author,
+                )
+                if success:
+                    # Save the modified header/footer XML and return
+                    self._save_header_footer_xml(file_path, element)
+                    return
+                else:
+                    # Log fallback at INFO level
+                    logger.info(
+                        "Header/footer: Falling back to coarse tracked change for '%s' -> '%s': %s",
+                        find[:50],
+                        replace[:50],
+                        reason,
+                    )
+
+            # Coarse tracked replacement: deletion + insertion XML
             deletion_xml = self._document._xml_generator.create_deletion(find, author)
             insertion_xml = self._document._xml_generator.create_insertion(replace, author)
 

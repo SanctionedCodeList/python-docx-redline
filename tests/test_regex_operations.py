@@ -106,7 +106,8 @@ def test_regex_currency_pattern():
     """Test regex pattern matching currency amounts."""
     doc_path = create_test_document_with_patterns()
     try:
-        doc = Document(doc_path)
+        # Use minimal_edits=False for coarse mode assertions
+        doc = Document(doc_path, minimal_edits=False)
 
         # Replace dollar amount with redacted version
         doc.replace_tracked(r"\$[\d,]+\.?\d*", "$XXX.XX", regex=True)
@@ -128,7 +129,8 @@ def test_regex_capture_groups_simple():
     """Test regex with simple capture group replacement."""
     doc_path = create_test_document_with_patterns()
     try:
-        doc = Document(doc_path)
+        # Use minimal_edits=False for coarse mode assertions
+        doc = Document(doc_path, minimal_edits=False)
 
         # Change "30 days" to "30 business days" using capture group
         doc.replace_tracked(r"(\d+) days", r"\1 business days", regex=True)
@@ -145,7 +147,8 @@ def test_regex_capture_groups_swap():
     """Test regex with capture groups to swap text."""
     doc_path = create_test_document_with_patterns()
     try:
-        doc = Document(doc_path)
+        # Use minimal_edits=False for coarse mode assertions
+        doc = Document(doc_path, minimal_edits=False)
 
         # Swap specific date MM/DD/YYYY to DD/MM/YYYY format (avoid ambiguous match)
         doc.replace_tracked(
@@ -166,7 +169,8 @@ def test_regex_capture_groups_multiple():
     """Test regex with multiple capture groups."""
     doc_path = create_test_document_with_patterns()
     try:
-        doc = Document(doc_path)
+        # Use minimal_edits=False for coarse mode assertions
+        doc = Document(doc_path, minimal_edits=False)
 
         # Transform specific "Section 2.1" to "Article 2, Subsection 1"
         doc.replace_tracked(
@@ -326,7 +330,8 @@ def test_regex_in_batch_operations():
     """Test regex operations in batch mode."""
     doc_path = create_test_document_with_patterns()
     try:
-        doc = Document(doc_path)
+        # Use minimal_edits=False for coarse mode assertions
+        doc = Document(doc_path, minimal_edits=False)
 
         edits = [
             # Replace specific dollar amount
@@ -396,7 +401,8 @@ def test_regex_with_scope_filter():
     doc_path.write_text(xml_content, encoding="utf-8")
 
     try:
-        doc = Document(doc_path)
+        # Use minimal_edits=False for coarse mode assertions
+        doc = Document(doc_path, minimal_edits=False)
 
         # Replace "30 days" only in Section B
         doc.replace_tracked(r"(\d+) days", r"\1 business days", regex=True, scope="Section B")
