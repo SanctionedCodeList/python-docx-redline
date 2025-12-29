@@ -4597,6 +4597,45 @@ class Document:
         """
         return self._hyperlink_ops.edit_hyperlink_url(ref=ref, new_url=new_url)
 
+    def remove_hyperlink(
+        self,
+        ref: str,
+        keep_text: bool = True,
+        track: bool = False,
+        author: str | None = None,
+    ) -> None:
+        """Remove a hyperlink from the document.
+
+        Can either keep the display text (unlinking it) or remove both
+        the link and the text entirely.
+
+        Args:
+            ref: Hyperlink ref (e.g., "lnk:5")
+            keep_text: If True (default), keep the display text without the link.
+                       If False, remove both the link and the text.
+            track: If True and keep_text=False, show text removal as tracked deletion
+            author: Optional author for tracked change
+
+        Raises:
+            ValueError: If hyperlink not found
+
+        Example:
+            >>> # Keep text, just remove the link
+            >>> doc.remove_hyperlink("lnk:5")
+
+            >>> # Remove link and text entirely
+            >>> doc.remove_hyperlink("lnk:5", keep_text=False)
+
+            >>> # Remove with tracking
+            >>> doc.remove_hyperlink("lnk:5", keep_text=False, track=True)
+        """
+        return self._hyperlink_ops.remove_hyperlink(
+            ref=ref,
+            keep_text=keep_text,
+            track=track,
+            author=author,
+        )
+
     # ========================================================================
     # Ref-based editing operations (DocTree accessibility layer)
     # ========================================================================
