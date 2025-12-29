@@ -214,6 +214,211 @@ DOCUMENT_NO_IMAGES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </w:document>"""
 
 
+DOCUMENT_WITH_TABLE_IMAGE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:tbl>
+      <w:tr>
+        <w:tc>
+          <w:p>
+            <w:r>
+              <w:t>Text in cell</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:p>
+            <w:r>
+              <w:drawing>
+                <wp:inline>
+                  <wp:extent cx="914400" cy="914400"/>
+                  <wp:docPr id="1" name="Table Image" descr="Image in table cell"/>
+                  <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                      <pic:pic>
+                        <pic:blipFill>
+                          <a:blip r:embed="rId10"/>
+                        </pic:blipFill>
+                      </pic:pic>
+                    </a:graphicData>
+                  </a:graphic>
+                </wp:inline>
+              </w:drawing>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>"""
+
+
+DOCUMENT_WITH_MULTIPLE_TABLE_IMAGES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>Text before table</w:t>
+      </w:r>
+    </w:p>
+    <w:tbl>
+      <w:tr>
+        <w:tc>
+          <w:p>
+            <w:r>
+              <w:drawing>
+                <wp:inline>
+                  <wp:extent cx="457200" cy="457200"/>
+                  <wp:docPr id="1" name="Image 1" descr="First table image"/>
+                  <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                      <pic:pic>
+                        <pic:blipFill>
+                          <a:blip r:embed="rId1"/>
+                        </pic:blipFill>
+                      </pic:pic>
+                    </a:graphicData>
+                  </a:graphic>
+                </wp:inline>
+              </w:drawing>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:p>
+            <w:r>
+              <w:t>Empty cell</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+      <w:tr>
+        <w:tc>
+          <w:p>
+            <w:r>
+              <w:t>Row 2, Cell 1</w:t>
+            </w:r>
+          </w:p>
+        </w:tc>
+        <w:tc>
+          <w:p>
+            <w:r>
+              <w:drawing>
+                <wp:inline>
+                  <wp:extent cx="685800" cy="685800"/>
+                  <wp:docPr id="2" name="Image 2"/>
+                  <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                      <pic:pic>
+                        <pic:blipFill>
+                          <a:blip r:embed="rId2"/>
+                        </pic:blipFill>
+                      </pic:pic>
+                    </a:graphicData>
+                  </a:graphic>
+                </wp:inline>
+              </w:drawing>
+            </w:r>
+            <w:r>
+              <w:drawing>
+                <wp:inline>
+                  <wp:extent cx="914400" cy="914400"/>
+                  <wp:docPr id="3" name="Image 3" descr="Third image"/>
+                  <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                      <pic:pic>
+                        <pic:blipFill>
+                          <a:blip r:embed="rId3"/>
+                        </pic:blipFill>
+                      </pic:pic>
+                    </a:graphicData>
+                  </a:graphic>
+                </wp:inline>
+              </w:drawing>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>"""
+
+
+DOCUMENT_WITH_TABLE_VML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:v="urn:schemas-microsoft-com:vml">
+  <w:body>
+    <w:tbl>
+      <w:tr>
+        <w:tc>
+          <w:p>
+            <w:r>
+              <w:pict>
+                <v:shape id="TableShape1" style="width:50pt;height:50pt"/>
+              </w:pict>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>"""
+
+
+DOCUMENT_WITH_TABLE_FLOATING_IMAGE = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:tbl>
+      <w:tr>
+        <w:tc>
+          <w:p>
+            <w:r>
+              <w:drawing>
+                <wp:anchor distT="0" distB="0" distL="0" distR="0"
+                           simplePos="0" relativeHeight="1" behindDoc="0"
+                           locked="0" layoutInCell="1" allowOverlap="1">
+                  <wp:simplePos x="0" y="0"/>
+                  <wp:positionH relativeFrom="column">
+                    <wp:align>center</wp:align>
+                  </wp:positionH>
+                  <wp:positionV relativeFrom="paragraph">
+                    <wp:align>top</wp:align>
+                  </wp:positionV>
+                  <wp:extent cx="1143000" cy="857250"/>
+                  <wp:wrapSquare wrapText="bothSides"/>
+                  <wp:docPr id="1" name="Floating Table Image"/>
+                  <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                      <pic:pic>
+                        <pic:blipFill>
+                          <a:blip r:embed="rId5"/>
+                        </pic:blipFill>
+                      </pic:pic>
+                    </a:graphicData>
+                  </a:graphic>
+                </wp:anchor>
+              </w:drawing>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>"""
+
+
 def create_tree_from_xml(xml_content: str, view_mode: ViewMode | None = None) -> AccessibilityTree:
     """Create an AccessibilityTree from raw XML content."""
     root = etree.fromstring(xml_content.encode("utf-8"))
@@ -591,3 +796,274 @@ class TestImageRefFormat:
         images = tree.get_images()
         assert len(images) == 1
         assert images[0].ref == "vml:0/0"
+
+
+class TestTableImageExtraction:
+    """Tests for image extraction from table cells."""
+
+    def test_extract_single_table_image(self) -> None:
+        """Test extracting a single image from a table cell."""
+        from python_docx_redline.accessibility.images import (
+            ImageExtractor,
+            _extract_images_from_table,
+        )
+
+        root = etree.fromstring(DOCUMENT_WITH_TABLE_IMAGE.encode("utf-8"))
+        extractor = ImageExtractor(root)
+
+        nsmap = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        tables = root.findall(".//w:tbl", namespaces=nsmap)
+
+        assert len(tables) == 1
+        images = _extract_images_from_table(extractor, tables[0], 0)
+
+        assert len(images) == 1
+        img = images[0]
+        # Expected format: tbl:0/row:0/cell:1/img:0
+        assert img.ref == "tbl:0/row:0/cell:1/img:0"
+        assert img.image_type == ImageType.IMAGE
+        assert img.position_type == ImagePositionType.INLINE
+        assert img.name == "Table Image"
+        assert img.alt_text == "Image in table cell"
+        assert img.size is not None
+        assert img.size.width_emu == 914400
+        assert img.relationship_id == "rId10"
+
+    def test_extract_multiple_table_images(self) -> None:
+        """Test extracting multiple images from different table cells."""
+        from python_docx_redline.accessibility.images import (
+            ImageExtractor,
+            _extract_images_from_table,
+        )
+
+        root = etree.fromstring(DOCUMENT_WITH_MULTIPLE_TABLE_IMAGES.encode("utf-8"))
+        extractor = ImageExtractor(root)
+
+        nsmap = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        tables = root.findall(".//w:tbl", namespaces=nsmap)
+
+        assert len(tables) == 1
+        images = _extract_images_from_table(extractor, tables[0], 0)
+
+        assert len(images) == 3
+
+        # First image in row 0, cell 0
+        assert images[0].ref == "tbl:0/row:0/cell:0/img:0"
+        assert images[0].name == "Image 1"
+        assert images[0].alt_text == "First table image"
+
+        # Second image in row 1, cell 1
+        assert images[1].ref == "tbl:0/row:1/cell:1/img:0"
+        assert images[1].name == "Image 2"
+
+        # Third image also in row 1, cell 1 (same cell, second image)
+        assert images[2].ref == "tbl:0/row:1/cell:1/img:1"
+        assert images[2].name == "Image 3"
+        assert images[2].alt_text == "Third image"
+
+    def test_extract_table_vml(self) -> None:
+        """Test extracting VML graphics from table cells."""
+        from python_docx_redline.accessibility.images import (
+            ImageExtractor,
+            _extract_images_from_table,
+        )
+
+        root = etree.fromstring(DOCUMENT_WITH_TABLE_VML.encode("utf-8"))
+        extractor = ImageExtractor(root)
+
+        nsmap = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        tables = root.findall(".//w:tbl", namespaces=nsmap)
+
+        images = _extract_images_from_table(extractor, tables[0], 0)
+
+        assert len(images) == 1
+        assert images[0].ref == "tbl:0/row:0/cell:0/vml:0"
+        assert images[0].image_type == ImageType.VML
+
+    def test_extract_table_floating_image(self) -> None:
+        """Test extracting floating images from table cells."""
+        from python_docx_redline.accessibility.images import (
+            ImageExtractor,
+            _extract_images_from_table,
+        )
+
+        root = etree.fromstring(DOCUMENT_WITH_TABLE_FLOATING_IMAGE.encode("utf-8"))
+        extractor = ImageExtractor(root)
+
+        nsmap = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        tables = root.findall(".//w:tbl", namespaces=nsmap)
+
+        images = _extract_images_from_table(extractor, tables[0], 0)
+
+        assert len(images) == 1
+        img = images[0]
+        # Floating images use f: prefix in the ref
+        assert img.ref == "tbl:0/row:0/cell:0/img:f:0"
+        assert img.image_type == ImageType.IMAGE
+        assert img.position_type == ImagePositionType.FLOATING
+        assert img.name == "Floating Table Image"
+        assert img.position is not None
+        assert img.position.horizontal == "center"
+        assert img.position.wrap_type == "square"
+
+    def test_table_index_in_ref(self) -> None:
+        """Test that table index is correctly reflected in ref."""
+        from python_docx_redline.accessibility.images import (
+            ImageExtractor,
+            _extract_images_from_table,
+        )
+
+        root = etree.fromstring(DOCUMENT_WITH_TABLE_IMAGE.encode("utf-8"))
+        extractor = ImageExtractor(root)
+
+        nsmap = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        tables = root.findall(".//w:tbl", namespaces=nsmap)
+
+        # Test with table_index=5
+        images = _extract_images_from_table(extractor, tables[0], 5)
+
+        assert len(images) == 1
+        assert images[0].ref == "tbl:5/row:0/cell:1/img:0"
+
+
+class TestGetImagesFromDocumentWithTables:
+    """Tests for get_images_from_document with tables."""
+
+    def test_get_images_includes_table_images(self) -> None:
+        """Test that get_images_from_document includes table images."""
+        from python_docx_redline.accessibility.images import get_images_from_document
+
+        root = etree.fromstring(DOCUMENT_WITH_TABLE_IMAGE.encode("utf-8"))
+        images = get_images_from_document(root)
+
+        assert len(images) == 1
+        assert images[0].ref == "tbl:0/row:0/cell:1/img:0"
+
+    def test_get_images_with_paragraph_and_table_images(self) -> None:
+        """Test that images from both paragraphs and tables are extracted."""
+        from python_docx_redline.accessibility.images import get_images_from_document
+
+        root = etree.fromstring(DOCUMENT_WITH_MULTIPLE_TABLE_IMAGES.encode("utf-8"))
+        images = get_images_from_document(root)
+
+        # Should find 3 images (all in the table, none in the initial paragraph)
+        assert len(images) == 3
+
+        # All images should have table refs
+        for img in images:
+            assert img.ref.startswith("tbl:")
+
+    def test_mixed_paragraph_and_table_document(self) -> None:
+        """Test document with images in both paragraphs and tables."""
+        # Create a mixed document
+        mixed_doc = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+            xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+            xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:drawing>
+          <wp:inline>
+            <wp:extent cx="914400" cy="914400"/>
+            <wp:docPr id="1" name="Paragraph Image"/>
+            <a:graphic>
+              <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                <pic:pic>
+                  <pic:blipFill>
+                    <a:blip r:embed="rId1"/>
+                  </pic:blipFill>
+                </pic:pic>
+              </a:graphicData>
+            </a:graphic>
+          </wp:inline>
+        </w:drawing>
+      </w:r>
+    </w:p>
+    <w:tbl>
+      <w:tr>
+        <w:tc>
+          <w:p>
+            <w:r>
+              <w:drawing>
+                <wp:inline>
+                  <wp:extent cx="685800" cy="685800"/>
+                  <wp:docPr id="2" name="Table Image"/>
+                  <a:graphic>
+                    <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                      <pic:pic>
+                        <pic:blipFill>
+                          <a:blip r:embed="rId2"/>
+                        </pic:blipFill>
+                      </pic:pic>
+                    </a:graphicData>
+                  </a:graphic>
+                </wp:inline>
+              </w:drawing>
+            </w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>"""
+
+        from python_docx_redline.accessibility.images import get_images_from_document
+
+        root = etree.fromstring(mixed_doc.encode("utf-8"))
+        images = get_images_from_document(root)
+
+        assert len(images) == 2
+
+        # First is the paragraph image
+        assert images[0].ref == "img:0/0"
+        assert images[0].name == "Paragraph Image"
+
+        # Second is the table image
+        assert images[1].ref == "tbl:0/row:0/cell:0/img:0"
+        assert images[1].name == "Table Image"
+
+
+class TestTableImageRefFormat:
+    """Tests for table image ref format consistency."""
+
+    def test_table_image_ref_format(self) -> None:
+        """Test inline table image ref format: tbl:N/row:N/cell:N/img:N."""
+        from python_docx_redline.accessibility.images import get_images_from_document
+
+        root = etree.fromstring(DOCUMENT_WITH_TABLE_IMAGE.encode("utf-8"))
+        images = get_images_from_document(root)
+
+        assert len(images) == 1
+        # Format: tbl:table_idx/row:row_idx/cell:cell_idx/img:image_idx
+        ref = images[0].ref
+        assert ref.startswith("tbl:")
+        parts = ref.split("/")
+        assert len(parts) == 4
+        assert parts[0].startswith("tbl:")
+        assert parts[1].startswith("row:")
+        assert parts[2].startswith("cell:")
+        assert parts[3].startswith("img:")
+
+    def test_floating_table_image_ref_format(self) -> None:
+        """Test floating table image ref: tbl:N/row:N/cell:N/img:f:N."""
+        from python_docx_redline.accessibility.images import get_images_from_document
+
+        root = etree.fromstring(DOCUMENT_WITH_TABLE_FLOATING_IMAGE.encode("utf-8"))
+        images = get_images_from_document(root)
+
+        assert len(images) == 1
+        ref = images[0].ref
+        assert "img:f:" in ref  # Floating indicator
+
+    def test_vml_table_ref_format(self) -> None:
+        """Test VML in table ref format: tbl:N/row:N/cell:N/vml:N."""
+        from python_docx_redline.accessibility.images import get_images_from_document
+
+        root = etree.fromstring(DOCUMENT_WITH_TABLE_VML.encode("utf-8"))
+        images = get_images_from_document(root)
+
+        assert len(images) == 1
+        assert "vml:" in images[0].ref

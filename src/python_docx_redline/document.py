@@ -1158,19 +1158,35 @@ class Document:
         Example:
             >>> doc.insert("new text", after="anchor")  # Untracked
             >>> doc.insert("new text", after="anchor", track=True)  # Tracked
+            >>> doc.insert("new text", after="anchor", scope="footnote:1")  # In footnote
         """
-        self._tracked_ops.insert(
-            text,
-            after=after,
-            before=before,
-            author=author,
-            scope=scope,
-            occurrence=occurrence,
-            regex=regex,
-            normalize_special_chars=normalize_special_chars,
-            track=track,
-            fuzzy=fuzzy,
-        )
+        # Check if scope targets notes
+        note_scope = parse_note_scope(scope) if isinstance(scope, str) else None
+
+        if note_scope is not None and note_scope.note_id is not None:
+            # Route to note-specific operation
+            self._note_ops.insert_in_note(
+                note_type=note_scope.scope_type,  # "footnote" or "endnote"
+                note_id=note_scope.note_id,
+                text=text,
+                after=after,
+                before=before,
+                author=author,
+                track=track,
+            )
+        else:
+            self._tracked_ops.insert(
+                text,
+                after=after,
+                before=before,
+                author=author,
+                scope=scope,
+                occurrence=occurrence,
+                regex=regex,
+                normalize_special_chars=normalize_special_chars,
+                track=track,
+                fuzzy=fuzzy,
+            )
 
     def delete(
         self,
@@ -1213,17 +1229,31 @@ class Document:
             >>> doc.delete("old text")  # Untracked
             >>> doc.delete("old text", track=True)  # Tracked
             >>> doc.delete("obsolete", occurrence="all")  # Delete all occurrences
+            >>> doc.delete("old", scope="footnote:1")  # Delete in footnote
         """
-        self._tracked_ops.delete(
-            text,
-            author=author,
-            scope=scope,
-            occurrence=occurrence,
-            regex=regex,
-            normalize_special_chars=normalize_special_chars,
-            track=track,
-            fuzzy=fuzzy,
-        )
+        # Check if scope targets notes
+        note_scope = parse_note_scope(scope) if isinstance(scope, str) else None
+
+        if note_scope is not None and note_scope.note_id is not None:
+            # Route to note-specific operation
+            self._note_ops.delete_in_note(
+                note_type=note_scope.scope_type,  # "footnote" or "endnote"
+                note_id=note_scope.note_id,
+                text=text,
+                author=author,
+                track=track,
+            )
+        else:
+            self._tracked_ops.delete(
+                text,
+                author=author,
+                scope=scope,
+                occurrence=occurrence,
+                regex=regex,
+                normalize_special_chars=normalize_special_chars,
+                track=track,
+                fuzzy=fuzzy,
+            )
 
     def replace(
         self,
@@ -1288,22 +1318,37 @@ class Document:
             >>> doc.replace("30 days", "45 days", track=True)  # Tracked
             >>> doc.replace("old", "new", occurrence="all")  # Replace all
             >>> doc.replace(r"(\\d+) days", r"\\1 business days", regex=True)
+            >>> doc.replace("2020", "2024", scope="footnote:1")  # Replace in footnote
         """
-        self._tracked_ops.replace(
-            find,
-            replace_with,
-            author=author,
-            scope=scope,
-            occurrence=occurrence,
-            regex=regex,
-            normalize_special_chars=normalize_special_chars,
-            show_context=show_context,
-            check_continuity=check_continuity,
-            context_chars=context_chars,
-            track=track,
-            fuzzy=fuzzy,
-            minimal=minimal,
-        )
+        # Check if scope targets notes
+        note_scope = parse_note_scope(scope) if isinstance(scope, str) else None
+
+        if note_scope is not None and note_scope.note_id is not None:
+            # Route to note-specific operation
+            self._note_ops.replace_in_note(
+                note_type=note_scope.scope_type,  # "footnote" or "endnote"
+                note_id=note_scope.note_id,
+                find=find,
+                replace=replace_with,
+                author=author,
+                track=track,
+            )
+        else:
+            self._tracked_ops.replace(
+                find,
+                replace_with,
+                author=author,
+                scope=scope,
+                occurrence=occurrence,
+                regex=regex,
+                normalize_special_chars=normalize_special_chars,
+                show_context=show_context,
+                check_continuity=check_continuity,
+                context_chars=context_chars,
+                track=track,
+                fuzzy=fuzzy,
+                minimal=minimal,
+            )
 
     def move(
         self,

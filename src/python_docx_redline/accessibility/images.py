@@ -482,8 +482,9 @@ def get_images_from_document(
     if body is None:
         return images
 
-    # Iterate through paragraphs
+    # Iterate through body elements, tracking indices separately
     paragraph_index = 0
+    table_index = 0
     for child in body:
         if child.tag == w("p"):
             para_images = extractor.extract_from_paragraph(child, paragraph_index)
@@ -491,9 +492,9 @@ def get_images_from_document(
             paragraph_index += 1
         elif child.tag == w("tbl"):
             # Extract images from table cells
-            table_images = _extract_images_from_table(extractor, child, paragraph_index)
+            table_images = _extract_images_from_table(extractor, child, table_index)
             images.extend(table_images)
-            # Don't increment paragraph index for tables (it's handled in tree.py)
+            table_index += 1
 
     return images
 
@@ -501,22 +502,140 @@ def get_images_from_document(
 def _extract_images_from_table(
     extractor: ImageExtractor,
     table: etree._Element,
-    base_p_idx: int,
+    table_index: int,
 ) -> list[ImageInfo]:
     """Extract images from all cells in a table.
+
+    Iterates through rows and cells, extracting images from paragraphs
+    within each cell. Uses compound refs like tbl:0/row:1/cell:2/img:0.
 
     Args:
         extractor: ImageExtractor instance
         table: The w:tbl element
-        base_p_idx: Base paragraph index for ref generation
+        table_index: Index of this table in the document body
+
+    Returns:
+        List of ImageInfo objects with compound refs
+    """
+    images: list[ImageInfo] = []
+    table_ref = f"tbl:{table_index}"
+
+    # Find all rows in the table
+    for row_index, row in enumerate(table.findall(f"./{w('tr')}")):
+        row_ref = f"{table_ref}/row:{row_index}"
+
+        # Find all cells in the row
+        for cell_index, cell in enumerate(row.findall(f"./{w('tc')}")):
+            cell_ref = f"{row_ref}/cell:{cell_index}"
+
+            # Extract images from paragraphs in this cell
+            cell_images = _extract_cell_images(extractor, cell, cell_ref)
+            images.extend(cell_images)
+
+    return images
+
+
+def _extract_cell_images(
+    extractor: ImageExtractor,
+    cell: etree._Element,
+    cell_ref: str,
+) -> list[ImageInfo]:
+    """Extract images from a single table cell.
+
+    Args:
+        extractor: ImageExtractor instance
+        cell: The w:tc element
+        cell_ref: Base ref for this cell (e.g., "tbl:0/row:1/cell:2")
 
     Returns:
         List of ImageInfo objects
     """
     images: list[ImageInfo] = []
 
-    # For table cells, we use a compound ref like tbl:0/row:1/cell:2/img:0
-    # But for now, we skip table images as they need special handling
-    # TODO: Implement table cell image extraction with proper refs
+    # Track indices for each image type within the cell
+    inline_index = 0
+    floating_index = 0
+    vml_index = 0
+    obj_index = 0
+
+    # Iterate through paragraphs in the cell
+    for paragraph in cell.findall(f"./{w('p')}"):
+        # Find all w:drawing elements (modern DrawingML)
+        for drawing in paragraph.iter(w("drawing")):
+            # Check for inline images (wp:inline)
+            for inline in drawing.iter(wp("inline")):
+                info = extractor._extract_inline_image(inline, 0, inline_index, cell_ref)
+                if info:
+                    # Override the ref with our compound table ref
+                    info = _create_table_image_info(
+                        info, cell_ref, "img", inline_index, floating=False
+                    )
+                    images.append(info)
+                inline_index += 1
+
+            # Check for floating/anchored images (wp:anchor)
+            for anchor in drawing.iter(wp("anchor")):
+                info = extractor._extract_anchor_image(anchor, 0, floating_index, cell_ref)
+                if info:
+                    info = _create_table_image_info(
+                        info, cell_ref, "img", floating_index, floating=True
+                    )
+                    images.append(info)
+                floating_index += 1
+
+        # Find legacy VML graphics (w:pict)
+        for pict in paragraph.iter(w("pict")):
+            info = extractor._extract_vml_image(pict, 0, vml_index, cell_ref)
+            if info:
+                info = _create_table_image_info(info, cell_ref, "vml", vml_index, floating=False)
+                images.append(info)
+            vml_index += 1
+
+        # Find OLE objects (w:object)
+        for obj in paragraph.iter(w("object")):
+            info = extractor._extract_ole_object(obj, 0, obj_index, cell_ref)
+            if info:
+                info = _create_table_image_info(info, cell_ref, "obj", obj_index, floating=False)
+                images.append(info)
+            obj_index += 1
 
     return images
+
+
+def _create_table_image_info(
+    source_info: ImageInfo,
+    cell_ref: str,
+    prefix: str,
+    index: int,
+    floating: bool,
+) -> ImageInfo:
+    """Create an ImageInfo with a compound table ref.
+
+    Args:
+        source_info: Original ImageInfo from extractor
+        cell_ref: Cell ref (e.g., "tbl:0/row:1/cell:2")
+        prefix: Image type prefix ("img", "vml", "obj", etc.)
+        index: Image index within the cell
+        floating: Whether this is a floating image
+
+    Returns:
+        New ImageInfo with compound ref
+    """
+    if floating:
+        compound_ref = f"{cell_ref}/{prefix}:f:{index}"
+    else:
+        compound_ref = f"{cell_ref}/{prefix}:{index}"
+
+    return ImageInfo(
+        ref=compound_ref,
+        image_type=source_info.image_type,
+        position_type=source_info.position_type,
+        name=source_info.name,
+        alt_text=source_info.alt_text,
+        size=source_info.size,
+        format=source_info.format,
+        relationship_id=source_info.relationship_id,
+        paragraph_ref=cell_ref,
+        position=source_info.position,
+        _element=source_info._element,
+    )

@@ -8,6 +8,7 @@ import pytest
 from lxml import etree
 
 from python_docx_redline import Document
+from python_docx_redline.errors import TextNotFoundError
 
 WORD_NAMESPACE = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -2126,3 +2127,160 @@ class TestFindAllBothNotesAndBody:
         # Indices should be 0, 1 (no body matches in this case)
         indices = [m.index for m in matches]
         assert indices == list(range(len(matches)))
+
+
+class TestScopedNoteEditing:
+    """Tests for replace/insert/delete with scope='footnote:N' or 'endnote:N'."""
+
+    def test_replace_in_footnote_with_scope(self):
+        """Test that replace() with scope='footnote:N' works correctly."""
+        doc = Document(create_test_docx())
+
+        # Insert footnote with text to replace
+        doc.insert_footnote("See Smith 2020 for details", at="test document")
+
+        # Verify initial text
+        matches = doc.find_all("2020", scope="footnote:1")
+        assert len(matches) == 1
+
+        # Replace using scoped operation
+        doc.replace("2020", "2024", scope="footnote:1")
+
+        # Verify replacement worked
+        matches_old = doc.find_all("2020", scope="footnote:1")
+        assert len(matches_old) == 0
+
+        matches_new = doc.find_all("2024", scope="footnote:1")
+        assert len(matches_new) == 1
+
+    def test_replace_in_footnote_tracked(self):
+        """Test tracked replace() with scope='footnote:N'."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Citation from 2020", at="test document")
+
+        # Tracked replace
+        doc.replace("2020", "2024", scope="footnote:1", track=True)
+
+        # Both old and new text should be findable (tracked change includes deletion)
+        footnote = doc.get_footnote(1)
+        footnote_text = footnote.text
+
+        # The footnote text should contain the new text
+        assert "2024" in footnote_text
+
+    def test_insert_in_footnote_with_scope(self):
+        """Test that insert() with scope='footnote:N' works correctly."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Citation text here", at="test document")
+
+        # Insert after specific text in footnote
+        doc.insert(" [updated]", after="text", scope="footnote:1")
+
+        # Verify insertion
+        matches = doc.find_all("[updated]", scope="footnote:1")
+        assert len(matches) == 1
+
+    def test_insert_in_footnote_before(self):
+        """Test insert() before text with scope='footnote:N'."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Citation text here", at="test document")
+
+        # Insert before specific text
+        doc.insert("[note] ", before="Citation", scope="footnote:1")
+
+        # Verify insertion
+        footnote = doc.get_footnote(1)
+        assert "[note]" in footnote.text
+
+    def test_delete_in_footnote_with_scope(self):
+        """Test that delete() with scope='footnote:N' works correctly."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Remove this text from footnote", at="test document")
+
+        # Verify text exists
+        matches = doc.find_all("Remove", scope="footnote:1")
+        assert len(matches) == 1
+
+        # Delete using scoped operation
+        doc.delete("Remove ", scope="footnote:1")
+
+        # Verify deletion
+        matches_after = doc.find_all("Remove", scope="footnote:1")
+        assert len(matches_after) == 0
+
+        # Remaining text should still exist
+        matches_remaining = doc.find_all("this text", scope="footnote:1")
+        assert len(matches_remaining) == 1
+
+    def test_replace_in_endnote_with_scope(self):
+        """Test that replace() with scope='endnote:N' works correctly."""
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("Reference year 2020", at="test document")
+
+        # Replace in endnote
+        doc.replace("2020", "2024", scope="endnote:1")
+
+        # Verify replacement
+        matches = doc.find_all("2024", scope="endnote:1")
+        assert len(matches) == 1
+
+    def test_insert_in_endnote_with_scope(self):
+        """Test that insert() with scope='endnote:N' works correctly."""
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("Reference text", at="test document")
+
+        # Insert after text in endnote
+        doc.insert(" (see also)", after="text", scope="endnote:1")
+
+        # Verify insertion
+        endnote = doc.get_endnote(1)
+        assert "(see also)" in endnote.text
+
+    def test_delete_in_endnote_with_scope(self):
+        """Test that delete() with scope='endnote:N' works correctly."""
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("Delete this word from endnote", at="test document")
+
+        # Delete
+        doc.delete("this word ", scope="endnote:1")
+
+        # Verify deletion
+        endnote = doc.get_endnote(1)
+        assert "this word" not in endnote.text
+        assert "Delete" in endnote.text
+
+    def test_scoped_edit_text_not_found_error(self):
+        """Test that scoped edits raise TextNotFoundError appropriately."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Some footnote text", at="test document")
+
+        # Try to replace text that doesn't exist in the footnote
+        with pytest.raises(TextNotFoundError):
+            doc.replace("nonexistent", "replacement", scope="footnote:1")
+
+    def test_scoped_edit_only_affects_specified_note(self):
+        """Test that scoped edit only affects the specified note."""
+        doc = Document(create_test_docx())
+
+        # Insert two footnotes with similar text
+        doc.insert_footnote("Year 2020 reference", at="test document")
+        doc.insert_footnote("Year 2020 citation", at="Another paragraph")
+
+        # Replace only in footnote 1
+        doc.replace("2020", "2024", scope="footnote:1")
+
+        # Footnote 1 should have 2024
+        matches_fn1 = doc.find_all("2024", scope="footnote:1")
+        assert len(matches_fn1) == 1
+
+        # Footnote 2 should still have 2020
+        matches_fn2 = doc.find_all("2020", scope="footnote:2")
+        assert len(matches_fn2) == 1

@@ -1972,3 +1972,333 @@ class NoteOperations:
         actual_parent.remove(run)
         for i, elem in enumerate(new_elements):
             actual_parent.insert(run_index + i, elem)
+
+    # ==================== Unified Note Operations (tracked or untracked) ====================
+
+    def _remove_match(self, match: TextSpan) -> None:
+        """Remove matched text without creating tracked change markers.
+
+        This is used for untracked deletion - the text is simply removed
+        from the note without creating a <w:del> wrapper.
+
+        Args:
+            match: TextSpan object representing the text to remove
+        """
+        paragraph = match.paragraph
+
+        if match.start_run_index == match.end_run_index:
+            # Single run case
+            run = match.runs[match.start_run_index]
+            run_text = self._get_run_text(run)
+
+            actual_parent = run.getparent()
+            if actual_parent is None:
+                actual_parent = paragraph
+
+            if match.start_offset == 0 and match.end_offset == len(run_text):
+                # Remove entire run
+                if run in actual_parent:
+                    actual_parent.remove(run)
+            else:
+                # Partial run - split and remove middle portion
+                before_text = run_text[: match.start_offset]
+                after_text = run_text[match.end_offset :]
+
+                new_elements = []
+                if before_text:
+                    new_elements.append(self._create_text_run(before_text, run))
+                if after_text:
+                    new_elements.append(self._create_text_run(after_text, run))
+
+                self._replace_run_with_elements(paragraph, run, new_elements)
+        else:
+            # Multiple runs
+            start_run = match.runs[match.start_run_index]
+            end_run = match.runs[match.end_run_index]
+
+            actual_parent = start_run.getparent()
+            if actual_parent is None:
+                actual_parent = paragraph
+
+            try:
+                start_run_index = list(actual_parent).index(start_run)
+            except ValueError:
+                start_run_index = list(paragraph).index(start_run)
+                actual_parent = paragraph
+
+            first_run_text = self._get_run_text(start_run)
+            before_text = first_run_text[: match.start_offset]
+
+            last_run_text = self._get_run_text(end_run)
+            after_text = last_run_text[match.end_offset :]
+
+            # Remove all runs in the match
+            for i in range(match.start_run_index, match.end_run_index + 1):
+                run = match.runs[i]
+                run_parent = run.getparent()
+                if run_parent is not None and run in run_parent:
+                    run_parent.remove(run)
+
+            # Build replacement elements (just before/after text, no replacement)
+            new_elements = []
+            if before_text:
+                new_elements.append(self._create_text_run(before_text, start_run))
+            if after_text:
+                new_elements.append(self._create_text_run(after_text, end_run))
+
+            for i, elem in enumerate(new_elements):
+                actual_parent.insert(start_run_index + i, elem)
+
+    def _insert_after_match_elements(self, match: TextSpan, elements: list[Any] | Any) -> None:
+        """Insert element(s) after a matched text span.
+
+        Args:
+            match: TextSpan object representing where to insert
+            elements: The lxml Element(s) to insert (single element or list)
+        """
+        paragraph = match.paragraph
+        end_run = match.runs[match.end_run_index]
+        run_index = list(paragraph).index(end_run)
+
+        if isinstance(elements, list):
+            for i, elem in enumerate(elements):
+                paragraph.insert(run_index + 1 + i, elem)
+        else:
+            paragraph.insert(run_index + 1, elements)
+
+    def _insert_before_match_elements(self, match: TextSpan, elements: list[Any] | Any) -> None:
+        """Insert element(s) before a matched text span.
+
+        Args:
+            match: TextSpan object representing where to insert
+            elements: The lxml Element(s) to insert (single element or list)
+        """
+        paragraph = match.paragraph
+        start_run = match.runs[match.start_run_index]
+        run_index = list(paragraph).index(start_run)
+
+        if isinstance(elements, list):
+            for i, elem in enumerate(elements):
+                paragraph.insert(run_index + i, elem)
+        else:
+            paragraph.insert(run_index, elements)
+
+    def replace_in_note(
+        self,
+        note_type: str,
+        note_id: str | int,
+        find: str,
+        replace: str,
+        author: str | None = None,
+        track: bool = False,
+    ) -> None:
+        """Replace text inside a footnote or endnote.
+
+        This method searches for text within the note and replaces it.
+        When track=True, the operation shows both the deletion of the old text
+        and insertion of the new text as tracked changes.
+
+        Args:
+            note_type: Either "footnote" or "endnote"
+            note_id: The note ID to edit
+            find: The text to find and replace
+            replace: The replacement text (supports markdown formatting)
+            author: Optional author override (uses document author if None)
+            track: If True, show as tracked change (w:del + w:ins). If False,
+                replace text without tracking (default: False).
+
+        Raises:
+            NoteNotFoundError: If note not found
+            TextNotFoundError: If find text not found in note
+            AmbiguousTextError: If find text found multiple times
+        """
+        # Get note paragraphs for text search
+        note_elem, xml_path = self._get_note_element(note_type, note_id)
+        paragraphs = list(note_elem.findall(f"{{{WORD_NAMESPACE}}}p"))
+
+        if not paragraphs:
+            raise TextNotFoundError(find)
+
+        # Search for text to replace
+        matches = self._document._text_search.find_text(find, paragraphs)
+
+        if not matches:
+            raise TextNotFoundError(find)
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(find, matches)
+
+        match = matches[0]
+
+        if track:
+            # Tracked replace: deletion + insertion XML
+            deletion_xml = self._document._xml_generator.create_deletion(match.text, author)
+            insertion_xml = self._document._xml_generator.create_insertion(replace, author)
+            elements = self._parse_xml_elements(f"{deletion_xml}\n{insertion_xml}")
+            self._replace_match_with_elements(match, elements)
+        else:
+            # Untracked replace: just replace with plain runs
+            source_run = match.runs[0] if match.runs else None
+            new_runs = self._document._xml_generator.create_plain_runs(
+                replace, source_run=source_run
+            )
+            if len(new_runs) == 1:
+                self._replace_match_with_element(match, new_runs[0])
+            else:
+                self._replace_match_with_elements(match, new_runs)
+
+        # Save the modified XML
+        tree = etree.ElementTree(note_elem.getparent())
+        tree.write(
+            str(xml_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
+
+    def insert_in_note(
+        self,
+        note_type: str,
+        note_id: str | int,
+        text: str,
+        after: str | None = None,
+        before: str | None = None,
+        author: str | None = None,
+        track: bool = False,
+    ) -> None:
+        """Insert text inside a footnote or endnote.
+
+        This method searches for anchor text within the note and inserts
+        new text either after or before it.
+
+        Args:
+            note_type: Either "footnote" or "endnote"
+            note_id: The note ID to edit
+            text: The text to insert (supports markdown formatting)
+            after: Text to insert after (mutually exclusive with before)
+            before: Text to insert before (mutually exclusive with after)
+            author: Optional author override (uses document author if None)
+            track: If True, insert as tracked change (w:ins wrapper). If False,
+                insert as plain text without tracking (default: False).
+
+        Raises:
+            ValueError: If both or neither of after/before specified
+            NoteNotFoundError: If note not found
+            TextNotFoundError: If anchor text not found in note
+            AmbiguousTextError: If anchor text found multiple times
+        """
+        # Validate parameters
+        if after is not None and before is not None:
+            raise ValueError("Cannot specify both 'after' and 'before' parameters")
+        if after is None and before is None:
+            raise ValueError("Must specify either 'after' or 'before' parameter")
+
+        anchor = after if after is not None else before
+        insert_after = after is not None
+
+        # Get note paragraphs for text search
+        note_elem, xml_path = self._get_note_element(note_type, note_id)
+        paragraphs = list(note_elem.findall(f"{{{WORD_NAMESPACE}}}p"))
+
+        if not paragraphs:
+            raise TextNotFoundError(anchor)  # type: ignore[arg-type]
+
+        # Search for anchor text
+        matches = self._document._text_search.find_text(anchor, paragraphs)  # type: ignore[arg-type]
+
+        if not matches:
+            raise TextNotFoundError(anchor)  # type: ignore[arg-type]
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(anchor, matches)  # type: ignore[arg-type]
+
+        match = matches[0]
+
+        if track:
+            # Tracked insertion: wrap in <w:ins>
+            insertion_xml = self._document._xml_generator.create_insertion(text, author)
+            insertion_element = self._parse_xml_element(insertion_xml)
+        else:
+            # Untracked insertion: plain runs
+            source_run = match.runs[0] if match.runs else None
+            plain_runs = self._document._xml_generator.create_plain_runs(
+                text, source_run=source_run
+            )
+            insertion_element = plain_runs  # type: ignore[assignment]
+
+        # Insert at the match location
+        if insert_after:
+            self._insert_after_match_elements(match, insertion_element)
+        else:
+            self._insert_before_match_elements(match, insertion_element)
+
+        # Save the modified XML
+        tree = etree.ElementTree(note_elem.getparent())
+        tree.write(
+            str(xml_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
+
+    def delete_in_note(
+        self,
+        note_type: str,
+        note_id: str | int,
+        text: str,
+        author: str | None = None,
+        track: bool = False,
+    ) -> None:
+        """Delete text from a footnote or endnote.
+
+        This method searches for text within the note and removes it.
+        When track=True, the deletion is shown as a tracked change.
+
+        Args:
+            note_type: Either "footnote" or "endnote"
+            note_id: The note ID to edit
+            text: The text to delete
+            author: Optional author override (uses document author if None)
+            track: If True, show as tracked deletion (w:del wrapper). If False,
+                remove text without tracking (default: False).
+
+        Raises:
+            NoteNotFoundError: If note not found
+            TextNotFoundError: If text not found in note
+            AmbiguousTextError: If text found multiple times
+        """
+        # Get note paragraphs for text search
+        note_elem, xml_path = self._get_note_element(note_type, note_id)
+        paragraphs = list(note_elem.findall(f"{{{WORD_NAMESPACE}}}p"))
+
+        if not paragraphs:
+            raise TextNotFoundError(text)
+
+        # Search for text to delete
+        matches = self._document._text_search.find_text(text, paragraphs)
+
+        if not matches:
+            raise TextNotFoundError(text)
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(text, matches)
+
+        match = matches[0]
+
+        if track:
+            # Tracked deletion: wrap in <w:del>
+            deletion_xml = self._document._xml_generator.create_deletion(match.text, author)
+            deletion_element = self._parse_xml_element(deletion_xml)
+            self._replace_match_with_element(match, deletion_element)
+        else:
+            # Untracked deletion: simply remove the matched runs
+            self._remove_match(match)
+
+        # Save the modified XML
+        tree = etree.ElementTree(note_elem.getparent())
+        tree.write(
+            str(xml_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
