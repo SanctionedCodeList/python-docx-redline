@@ -137,3 +137,59 @@ class ContinuityWarning(UserWarning):
                 msg += f"  • {suggestion}\n"
 
         return msg
+
+
+class RefNotFoundError(DocxRedlineError):
+    """Raised when a ref cannot be resolved to a document element.
+
+    This error occurs when:
+    - The ref format is invalid
+    - The ordinal index is out of bounds
+    - The element type is not supported
+    - No element matches a fingerprint ref
+
+    Attributes:
+        ref: The ref path that could not be resolved
+        reason: Explanation of why resolution failed
+    """
+
+    def __init__(self, ref: str, reason: str | None = None) -> None:
+        self.ref = ref
+        self.reason = reason
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        """Format an error message with resolution details."""
+        msg = f"Could not resolve ref '{self.ref}'"
+        if self.reason:
+            msg += f": {self.reason}"
+        return msg
+
+
+class StaleRefError(DocxRedlineError):
+    """Raised when a ref points to an element that has been modified or deleted.
+
+    This error occurs when using fingerprint-based refs after the document
+    structure has changed. The fingerprint was previously valid but the
+    element content has been modified.
+
+    Attributes:
+        ref: The stale ref path
+        reason: Explanation of the staleness
+    """
+
+    def __init__(self, ref: str, reason: str | None = None) -> None:
+        self.ref = ref
+        self.reason = reason
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        """Format an error message indicating staleness."""
+        msg = f"Stale ref '{self.ref}'"
+        if self.reason:
+            msg += f": {self.reason}"
+        msg += (
+            "\n\nThe document structure has changed. "
+            "Regenerate the accessibility tree to get updated refs."
+        )
+        return msg
