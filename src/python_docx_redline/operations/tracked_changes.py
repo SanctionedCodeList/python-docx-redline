@@ -164,18 +164,20 @@ class TrackedChangeOperations:
         regex: bool = False,
         normalize_special_chars: bool = True,
         fuzzy: float | dict[str, Any] | None = None,
+        track: bool = False,
     ) -> None:
-        """Insert text with tracked changes after or before a specific location.
+        """Insert text after or before a specific location.
 
         This method searches for the anchor text in the document and inserts
-        the new text either immediately after it or immediately before it as
-        a tracked insertion.
+        the new text either immediately after it or immediately before it.
 
         Args:
-            text: The text to insert
+            text: The text to insert (supports markdown formatting: **bold**, *italic*,
+                ++underline++, ~~strikethrough~~)
             after: The text or regex pattern to insert after (optional)
             before: The text or regex pattern to insert before (optional)
-            author: Optional author override (uses document author if None)
+            author: Optional author override (uses document author if None). Ignored
+                when track=False.
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
             occurrence: Which occurrence(s) to insert at: 1 (first), 2 (second), "first",
                 "last", "all", or list of indices [1, 3, 5] (default: "first")
@@ -186,6 +188,8 @@ class TrackedChangeOperations:
                 - None: Exact matching (default)
                 - float: Similarity threshold (e.g., 0.9 for 90% similar)
                 - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
+            track: If True, insert as tracked change (w:ins wrapper). If False, insert
+                as plain text without tracking (default: False).
 
         Raises:
             ValueError: If both 'after' and 'before' are specified, or if neither is specified
@@ -229,13 +233,22 @@ class TrackedChangeOperations:
         # Select target matches based on occurrence
         target_matches = self._select_matches(matches, occurrence, anchor)
 
-        # Generate insertion XML
-        insertion_xml = self._document._xml_generator.create_insertion(text, author)
-
         # Insert at each target match (process in reverse to preserve indices)
         for match in reversed(target_matches):
-            elements = self._parse_xml_elements(insertion_xml)
-            insertion_element = elements[0]
+            if track:
+                # Tracked insertion: wrap in <w:ins>
+                insertion_xml = self._document._xml_generator.create_insertion(text, author)
+                elements = self._parse_xml_elements(insertion_xml)
+                insertion_element = elements[0]
+            else:
+                # Untracked insertion: plain runs
+                # Get source run for formatting if available
+                source_run = match.runs[0] if match.runs else None
+                plain_runs = self._document._xml_generator.create_plain_runs(
+                    text, source_run=source_run
+                )
+                # Use list of runs (could be multiple for markdown formatting)
+                insertion_element = plain_runs
 
             if insert_after:
                 self._insert_after_match(match, insertion_element)
@@ -251,15 +264,16 @@ class TrackedChangeOperations:
         regex: bool = False,
         normalize_special_chars: bool = True,
         fuzzy: float | dict[str, Any] | None = None,
+        track: bool = False,
     ) -> None:
-        """Delete text with tracked changes.
+        """Delete text from the document.
 
-        This method searches for the specified text in the document and marks
-        it as a tracked deletion.
+        This method searches for the specified text in the document and removes it.
 
         Args:
             text: The text or regex pattern to delete
-            author: Optional author override (uses document author if None)
+            author: Optional author override (uses document author if None). Ignored
+                when track=False.
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
             occurrence: Which occurrence(s) to delete: 1 (first), 2 (second), "first", "last",
                 "all", or list of indices [1, 3, 5] (default: "first")
@@ -270,6 +284,8 @@ class TrackedChangeOperations:
                 - None: Exact matching (default)
                 - float: Similarity threshold (e.g., 0.9 for 90% similar)
                 - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
+            track: If True, delete as tracked change (w:del wrapper). If False, remove
+                text without tracking (default: False).
 
         Raises:
             TextNotFoundError: If the text is not found
@@ -304,13 +320,16 @@ class TrackedChangeOperations:
 
         # Delete each target match (process in reverse to preserve indices)
         for match in reversed(target_matches):
-            # Generate and parse the deletion XML
-            deletion_xml = self._document._xml_generator.create_deletion(match.text, author)
-            elements = self._parse_xml_elements(deletion_xml)
-            deletion_element = elements[0]
-
-            # Replace the matched text with deletion
-            self._replace_match_with_element(match, deletion_element)
+            if track:
+                # Tracked deletion: wrap in <w:del>
+                deletion_xml = self._document._xml_generator.create_deletion(match.text, author)
+                elements = self._parse_xml_elements(deletion_xml)
+                deletion_element = elements[0]
+                # Replace the matched text with deletion
+                self._replace_match_with_element(match, deletion_element)
+            else:
+                # Untracked deletion: simply remove the matched runs
+                self._remove_match(match)
 
     def replace(
         self,
@@ -325,12 +344,13 @@ class TrackedChangeOperations:
         check_continuity: bool = False,
         context_chars: int = 50,
         fuzzy: float | dict[str, Any] | None = None,
+        track: bool = False,
     ) -> None:
-        """Find and replace text with tracked changes.
+        """Find and replace text in the document.
 
-        This method searches for text and replaces it with new text, showing
-        both the deletion of the old text and insertion of the new text as
-        tracked changes.
+        This method searches for text and replaces it with new text. When track=True,
+        the operation shows both the deletion of the old text and insertion of the
+        new text as tracked changes.
 
         When regex=True, the replacement string can use capture groups:
         - \\1, \\2, etc. for numbered groups
@@ -338,8 +358,11 @@ class TrackedChangeOperations:
 
         Args:
             find: Text or regex pattern to find
-            replace: Replacement text (can include capture group references if regex=True)
-            author: Optional author override (uses document author if None)
+            replace: Replacement text (can include capture group references if regex=True).
+                Supports markdown formatting: **bold**, *italic*, ++underline++,
+                ~~strikethrough~~
+            author: Optional author override (uses document author if None). Ignored
+                when track=False.
             scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
             occurrence: Which occurrence(s) to replace: 1 (first), 2 (second), "first", "last",
                 "all", or list of indices [1, 3, 5] (default: "first")
@@ -354,6 +377,8 @@ class TrackedChangeOperations:
                 - None: Exact matching (default)
                 - float: Similarity threshold (e.g., 0.9 for 90% similar)
                 - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
+            track: If True, show as tracked change (w:del + w:ins). If False, replace
+                text without tracking (default: False).
 
         Raises:
             TextNotFoundError: If the 'find' text is not found
@@ -404,13 +429,26 @@ class TrackedChangeOperations:
             if check_continuity:
                 self._check_and_warn_continuity(match, replacement_text, context_chars)
 
-            # Generate and parse deletion + insertion XMLs
-            deletion_xml = self._document._xml_generator.create_deletion(matched_text, author)
-            insertion_xml = self._document._xml_generator.create_insertion(replacement_text, author)
-            elements = self._parse_xml_elements(f"{deletion_xml}\n    {insertion_xml}")
-
-            # Replace the matched text with deletion + insertion
-            self._replace_match_with_elements(match, elements)
+            if track:
+                # Tracked replace: deletion + insertion XML
+                deletion_xml = self._document._xml_generator.create_deletion(matched_text, author)
+                insertion_xml = self._document._xml_generator.create_insertion(
+                    replacement_text, author
+                )
+                elements = self._parse_xml_elements(f"{deletion_xml}\n    {insertion_xml}")
+                # Replace the matched text with deletion + insertion
+                self._replace_match_with_elements(match, elements)
+            else:
+                # Untracked replace: just replace with plain runs
+                # Get source run for formatting
+                source_run = match.runs[0] if match.runs else None
+                new_runs = self._document._xml_generator.create_plain_runs(
+                    replacement_text, source_run=source_run
+                )
+                if len(new_runs) == 1:
+                    self._replace_match_with_element(match, new_runs[0])
+                else:
+                    self._replace_match_with_elements(match, new_runs)
 
     def _log_context_preview(self, match: TextSpan, replacement: str, context_chars: int) -> None:
         """Log context preview for debugging."""
@@ -563,28 +601,35 @@ class TrackedChangeOperations:
         dest_scope: str | dict | Any | None = None,
         regex: bool = False,
         normalize_special_chars: bool = True,
+        track: bool = False,
     ) -> None:
-        """Move text to a new location with proper move tracking.
+        """Move text to a new location.
 
-        Unlike delete + insert, move tracking creates linked markers that show
-        the text was relocated rather than deleted and re-added. This provides
-        better context for document reviewers in Word.
+        When track=True, creates linked move markers that show the text was
+        relocated rather than deleted and re-added. This provides better context
+        for document reviewers in Word.
 
-        In Word's track changes view:
+        In Word's track changes view (track=True):
         - Source location shows text with strikethrough and "Moved" annotation
         - Destination shows text with underline and "Moved" annotation
         - Both locations are linked with matching move markers
+
+        When track=False, simply deletes from source and inserts at destination
+        without any tracking markers.
 
         Args:
             text: The text to move (or regex pattern if regex=True)
             after: Text to insert the moved content after (at destination)
             before: Text to insert the moved content before (at destination)
-            author: Optional author override (uses document author if None)
+            author: Optional author override (uses document author if None). Ignored
+                when track=False.
             source_scope: Limit source text search scope
             dest_scope: Limit destination anchor search scope
             regex: Whether to treat 'text' and anchor as regex patterns (default: False)
             normalize_special_chars: Auto-convert straight quotes to smart quotes for
                 matching (default: True)
+            track: If True, show as tracked move (linked moveFrom/moveTo markers).
+                If False, move text without tracking (default: False).
 
         Raises:
             ValueError: If both 'after' and 'before' are specified, or if neither is specified
@@ -610,20 +655,39 @@ class TrackedChangeOperations:
 
         source_text = source_match.text
 
-        # Generate XML elements for move operation
-        move_name = self._generate_move_name()
-        move_to_elements, move_from_elements = self._create_move_elements(
-            source_text, move_name, author
-        )
+        if track:
+            # Tracked move: create linked moveFrom/moveTo markers
+            move_name = self._generate_move_name()
+            move_to_elements, move_from_elements = self._create_move_elements(
+                source_text, move_name, author
+            )
 
-        # Insert moveTo at destination first (so we don't mess up source position)
-        if insert_after:
-            self._insert_after_match(dest_match, move_to_elements)
+            # Insert moveTo at destination first (so we don't mess up source position)
+            if insert_after:
+                self._insert_after_match(dest_match, move_to_elements)
+            else:
+                self._insert_before_match(dest_match, move_to_elements)
+
+            # Replace source text with moveFrom markers
+            self._replace_match_with_elements(source_match, move_from_elements)
         else:
-            self._insert_before_match(dest_match, move_to_elements)
+            # Untracked move: delete from source and insert at destination
+            # Get source run for formatting
+            source_run = source_match.runs[0] if source_match.runs else None
 
-        # Replace source text with moveFrom markers
-        self._replace_match_with_elements(source_match, move_from_elements)
+            # Create plain runs for destination (using source formatting)
+            plain_runs = self._document._xml_generator.create_plain_runs(
+                source_text, source_run=source_run
+            )
+
+            # Insert at destination first (before deleting source)
+            if insert_after:
+                self._insert_after_match(dest_match, plain_runs)
+            else:
+                self._insert_before_match(dest_match, plain_runs)
+
+            # Remove source text
+            self._remove_match(source_match)
 
     def _create_move_elements(
         self, source_text: str, move_name: str, author: str | None
@@ -1418,3 +1482,214 @@ class TrackedChangeOperations:
 
         # Last resort: append at end
         return len(list(paragraph))
+
+    def _remove_match(self, match: TextSpan) -> None:
+        """Remove matched text without creating tracked change markers.
+
+        This is used for untracked deletion - the text is simply removed
+        from the document without creating a <w:del> wrapper.
+
+        Handles:
+        - Single run matches (remove run entirely, or split if partial)
+        - Multi-run matches (remove all matched runs, preserve text before/after)
+        - Runs inside tracked change wrappers (preserves wrapper structure)
+
+        Args:
+            match: TextSpan object representing the text to remove
+        """
+        paragraph = match.paragraph
+
+        # If the match is within a single run
+        if match.start_run_index == match.end_run_index:
+            run = match.runs[match.start_run_index]
+            run_text = self._get_run_text_content(run)
+
+            # Get the actual parent of the run (may be paragraph or a wrapper)
+            actual_parent = run.getparent()
+            if actual_parent is None:
+                actual_parent = paragraph
+
+            # If the match is the entire run, just remove the run
+            if match.start_offset == 0 and match.end_offset == len(run_text):
+                if run in actual_parent:
+                    actual_parent.remove(run)
+                    # Clean up empty wrappers
+                    if self._is_tracked_change_wrapper(actual_parent) and len(actual_parent) == 0:
+                        wrapper_parent = actual_parent.getparent()
+                        if wrapper_parent is not None:
+                            wrapper_parent.remove(actual_parent)
+            else:
+                # Match is partial - need to split the run and remove middle portion
+                self._split_and_remove_in_run(paragraph, run, match.start_offset, match.end_offset)
+        else:
+            # Match spans multiple runs - need to preserve text before/after match
+            self._remove_multirun_match(match, paragraph)
+
+    def _split_and_remove_in_run(
+        self,
+        paragraph: Any,
+        run: Any,
+        start_offset: int,
+        end_offset: int,
+    ) -> None:
+        """Split a run and remove a portion without replacement.
+
+        This is similar to _split_and_replace_in_run but doesn't insert
+        any replacement elements - just preserves the before/after text.
+
+        Args:
+            paragraph: The paragraph containing the run
+            run: The run to split
+            start_offset: Character offset where match starts
+            end_offset: Character offset where match ends (exclusive)
+        """
+        run_text, num_elements = self._get_run_text_info(run)
+        if num_elements == 0:
+            return
+
+        before_text = run_text[:start_offset]
+        after_text = run_text[end_offset:]
+
+        # Build replacement elements (before and after runs only)
+        new_elements = []
+        if before_text:
+            new_elements.append(self._create_text_run(before_text, run))
+        if after_text:
+            new_elements.append(self._create_text_run(after_text, run))
+
+        # Replace the run with the new elements (or nothing if both empty)
+        self._replace_run_with_elements(paragraph, run, new_elements)
+
+    def _remove_multirun_match(self, match: TextSpan, paragraph: Any) -> None:
+        """Remove a match spanning multiple runs without replacement.
+
+        This is similar to _replace_multirun_match_with_elements but doesn't
+        insert any replacement elements - just preserves surrounding text.
+
+        Args:
+            match: TextSpan object representing the text to remove
+            paragraph: The paragraph containing the runs
+        """
+        start_run = match.runs[match.start_run_index]
+        end_run = match.runs[match.end_run_index]
+
+        # Save parent information BEFORE removing runs
+        start_run_parent = start_run.getparent()
+        end_run_parent = end_run.getparent()
+
+        # Get text before match in the first run
+        first_run_text = self._get_run_text_content(start_run)
+        before_text = first_run_text[: match.start_offset]
+
+        # Get text after match in the last run
+        last_run_text = self._get_run_text_content(end_run)
+        after_text = last_run_text[match.end_offset :]
+
+        # Track wrappers that need remaining content preserved
+        wrapper_remaining_content: dict[Any, tuple[list[Any], list[Any]]] = {}
+
+        # Analyze each run's parent and track wrapper content
+        for i in range(match.start_run_index, match.end_run_index + 1):
+            run = match.runs[i]
+            run_parent = run.getparent()
+
+            if run_parent is not None and self._is_tracked_change_wrapper(run_parent):
+                wrapper = run_parent
+                wrapper_children = list(wrapper)
+                run_idx_in_wrapper = wrapper_children.index(run)
+
+                if wrapper not in wrapper_remaining_content:
+                    wrapper_remaining_content[wrapper] = ([], [])
+
+                before_runs, after_runs = wrapper_remaining_content[wrapper]
+
+                # Save content before first matched run in wrapper
+                if not before_runs and run_idx_in_wrapper > 0:
+                    is_first_matched_in_wrapper = True
+                    for j in range(match.start_run_index, i):
+                        if match.runs[j].getparent() == wrapper:
+                            is_first_matched_in_wrapper = False
+                            break
+                    if is_first_matched_in_wrapper:
+                        for k in range(run_idx_in_wrapper):
+                            before_runs.append(wrapper_children[k])
+
+                # Save content after last matched run in wrapper
+                is_last_matched_in_wrapper = True
+                for j in range(i + 1, match.end_run_index + 1):
+                    if match.runs[j].getparent() == wrapper:
+                        is_last_matched_in_wrapper = False
+                        break
+                if is_last_matched_in_wrapper and run_idx_in_wrapper < len(wrapper_children) - 1:
+                    for k in range(run_idx_in_wrapper + 1, len(wrapper_children)):
+                        after_runs.append(wrapper_children[k])
+
+                wrapper_remaining_content[wrapper] = (before_runs, after_runs)
+
+        # Find insertion point in paragraph
+        insertion_index = self._find_paragraph_insertion_index(match, paragraph, start_run)
+
+        # Remove all runs in the match from their parents
+        for i in range(match.start_run_index, match.end_run_index + 1):
+            run = match.runs[i]
+            run_parent = run.getparent()
+            if run_parent is not None and run in run_parent:
+                run_parent.remove(run)
+
+        # Handle empty wrappers and preserved content
+        preserved_before: list[Any] = []
+        preserved_after: list[Any] = []
+
+        for wrapper, (before_runs, after_runs) in wrapper_remaining_content.items():
+            wrapper_still_has_content = len(list(wrapper)) > 0
+
+            if not wrapper_still_has_content:
+                if wrapper.getparent() is not None:
+                    wrapper.getparent().remove(wrapper)
+
+            if before_runs:
+                new_before_wrapper = self._clone_wrapper(wrapper)
+                for run in before_runs:
+                    run_copy = etree.fromstring(etree.tostring(run))
+                    new_before_wrapper.append(run_copy)
+                preserved_before.append(new_before_wrapper)
+
+            if after_runs:
+                new_after_wrapper = self._clone_wrapper(wrapper)
+                for run in after_runs:
+                    run_copy = etree.fromstring(etree.tostring(run))
+                    new_after_wrapper.append(run_copy)
+                preserved_after.append(new_after_wrapper)
+
+        # Build elements to insert (just before/after text, no replacement)
+        elements_to_insert: list[Any] = []
+
+        # Add preserved content from wrappers (before)
+        elements_to_insert.extend(preserved_before)
+
+        # Add before_text run if needed
+        if before_text:
+            before_run = self._create_text_run(before_text, start_run)
+            if start_run_parent is not None and self._is_tracked_change_wrapper(start_run_parent):
+                before_wrapper = self._clone_wrapper(start_run_parent)
+                before_wrapper.append(before_run)
+                elements_to_insert.append(before_wrapper)
+            else:
+                elements_to_insert.append(before_run)
+
+        # Add after_text run if needed
+        if after_text:
+            after_run = self._create_text_run(after_text, end_run)
+            if end_run_parent is not None and self._is_tracked_change_wrapper(end_run_parent):
+                after_wrapper = self._clone_wrapper(end_run_parent)
+                after_wrapper.append(after_run)
+                elements_to_insert.append(after_wrapper)
+            else:
+                elements_to_insert.append(after_run)
+
+        # Add preserved content from wrappers (after)
+        elements_to_insert.extend(preserved_after)
+
+        # Insert all elements at the insertion point
+        for i, elem in enumerate(elements_to_insert):
+            paragraph.insert(insertion_index + i, elem)

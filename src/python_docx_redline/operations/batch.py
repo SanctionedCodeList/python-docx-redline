@@ -48,7 +48,10 @@ class BatchOperations:
         self._document = document
 
     def apply_edits(
-        self, edits: list[dict[str, Any]], stop_on_error: bool = False
+        self,
+        edits: list[dict[str, Any]],
+        stop_on_error: bool = False,
+        default_track: bool = False,
     ) -> list[EditResult]:
         """Apply multiple edits in sequence.
 
@@ -57,9 +60,13 @@ class BatchOperations:
 
         Args:
             edits: List of edit dictionaries with keys:
-                - type: Edit operation ("insert_tracked", "replace_tracked", "delete_tracked")
+                - type: Edit operation ("insert", "delete", "replace",
+                    "insert_tracked", "replace_tracked", "delete_tracked")
+                - track: Optional boolean to control tracking per-edit
                 - Other parameters specific to the edit type
             stop_on_error: If True, stop processing on first error
+            default_track: Default value for 'track' if not specified per-edit
+                (default: False). Note: *_tracked operations always track regardless.
 
         Returns:
             List of EditResult objects, one per edit
@@ -67,18 +74,19 @@ class BatchOperations:
         Example:
             >>> edits = [
             ...     {
-            ...         "type": "insert_tracked",
+            ...         "type": "insert",
             ...         "text": "new text",
             ...         "after": "anchor",
-            ...         "scope": "section:Introduction"
+            ...         "track": True,  # This edit is tracked
             ...     },
             ...     {
-            ...         "type": "replace_tracked",
+            ...         "type": "replace",
             ...         "find": "old",
-            ...         "replace": "new"
+            ...         "replace": "new",
+            ...         # Uses default_track value
             ...     }
             ... ]
-            >>> results = doc.apply_edits(edits)
+            >>> results = doc.apply_edits(edits, default_track=False)
             >>> print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")
         """
         results = []
@@ -99,7 +107,7 @@ class BatchOperations:
                 continue
 
             try:
-                result = self._apply_single_edit(edit_type, edit)
+                result = self._apply_single_edit(edit_type, edit, default_track)
                 results.append(result)
 
                 if not result.success and stop_on_error:
@@ -119,18 +127,26 @@ class BatchOperations:
 
         return results
 
-    def _apply_single_edit(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+    def _apply_single_edit(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
         """Apply a single edit operation.
 
         Args:
             edit_type: The type of edit to perform
             edit: Dictionary with edit parameters
+            default_track: Default value for 'track' if not specified in edit
 
         Returns:
             EditResult indicating success or failure
         """
         # Dispatch table mapping edit types to handler methods
         handlers = {
+            # Generic operations (use track field or default_track)
+            "insert": self._handle_insert,
+            "delete": self._handle_delete,
+            "replace": self._handle_replace,
+            # Legacy tracked operations (always tracked)
             "insert_tracked": self._handle_insert_tracked,
             "delete_tracked": self._handle_delete_tracked,
             "replace_tracked": self._handle_replace_tracked,
@@ -151,7 +167,7 @@ class BatchOperations:
             )
 
         try:
-            return handler(edit_type, edit)
+            return handler(edit_type, edit, default_track)
         except TextNotFoundError as e:
             return EditResult(
                 success=False,
@@ -171,8 +187,139 @@ class BatchOperations:
                 success=False, edit_type=edit_type, message=f"Error: {str(e)}", error=e
             )
 
-    def _handle_insert_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle insert_tracked edit type."""
+    def _get_track_value(self, edit: dict[str, Any], default_track: bool) -> bool:
+        """Get the track value for an edit, using per-edit or default.
+
+        Args:
+            edit: The edit dictionary
+            default_track: Default value if 'track' not in edit
+
+        Returns:
+            Boolean indicating whether to track the change
+        """
+        return edit.get("track", default_track)
+
+    def _handle_insert(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
+        """Handle generic insert edit type."""
+        text = edit.get("text")
+        after = edit.get("after")
+        before = edit.get("before")
+        author = edit.get("author")
+        scope = edit.get("scope")
+        regex = edit.get("regex", False)
+        occurrence = edit.get("occurrence", "first")
+        track = self._get_track_value(edit, default_track)
+
+        if not text:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'text'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        if not after and not before:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'after' or 'before'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        self._document.insert(
+            text,
+            after=after,
+            before=before,
+            author=author,
+            scope=scope,
+            regex=regex,
+            occurrence=occurrence,
+            track=track,
+        )
+        location = f"after '{after}'" if after else f"before '{before}'"
+        track_msg = " (tracked)" if track else ""
+        return EditResult(
+            success=True,
+            edit_type=edit_type,
+            message=f"Inserted '{text}' {location}{track_msg}",
+        )
+
+    def _handle_delete(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
+        """Handle generic delete edit type."""
+        text = edit.get("text")
+        author = edit.get("author")
+        scope = edit.get("scope")
+        regex = edit.get("regex", False)
+        occurrence = edit.get("occurrence", "first")
+        track = self._get_track_value(edit, default_track)
+
+        if not text:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'text'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        self._document.delete(
+            text,
+            author=author,
+            scope=scope,
+            regex=regex,
+            occurrence=occurrence,
+            track=track,
+        )
+        track_msg = " (tracked)" if track else ""
+        return EditResult(
+            success=True,
+            edit_type=edit_type,
+            message=f"Deleted '{text}'{track_msg}",
+        )
+
+    def _handle_replace(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
+        """Handle generic replace edit type."""
+        find = edit.get("find")
+        replace = edit.get("replace")
+        author = edit.get("author")
+        scope = edit.get("scope")
+        regex = edit.get("regex", False)
+        occurrence = edit.get("occurrence", "first")
+        track = self._get_track_value(edit, default_track)
+
+        if not find or replace is None:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="Missing required parameter: 'find' or 'replace'",
+                error=ValidationError("Missing required parameter"),
+            )
+
+        self._document.replace(
+            find,
+            replace,
+            author=author,
+            scope=scope,
+            regex=regex,
+            occurrence=occurrence,
+            track=track,
+        )
+        track_msg = " (tracked)" if track else ""
+        return EditResult(
+            success=True,
+            edit_type=edit_type,
+            message=f"Replaced '{find}' with '{replace}'{track_msg}",
+        )
+
+    def _handle_insert_tracked(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
+        """Handle insert_tracked edit type (always tracked)."""
         text = edit.get("text")
         after = edit.get("after")
         author = edit.get("author")
@@ -194,8 +341,10 @@ class BatchOperations:
             message=f"Inserted '{text}' after '{after}'",
         )
 
-    def _handle_delete_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle delete_tracked edit type."""
+    def _handle_delete_tracked(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
+        """Handle delete_tracked edit type (always tracked)."""
         text = edit.get("text")
         author = edit.get("author")
         scope = edit.get("scope")
@@ -212,8 +361,10 @@ class BatchOperations:
         self._document.delete_tracked(text, author=author, scope=scope, regex=regex)
         return EditResult(success=True, edit_type=edit_type, message=f"Deleted '{text}'")
 
-    def _handle_replace_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle replace_tracked edit type."""
+    def _handle_replace_tracked(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
+        """Handle replace_tracked edit type (always tracked)."""
         find = edit.get("find")
         replace = edit.get("replace")
         author = edit.get("author")
@@ -235,12 +386,16 @@ class BatchOperations:
             message=f"Replaced '{find}' with '{replace}'",
         )
 
-    def _handle_insert_paragraph(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+    def _handle_insert_paragraph(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
         """Handle insert_paragraph edit type."""
         text = edit.get("text")
         after = edit.get("after")
         before = edit.get("before")
         style = edit.get("style")
+        # For insert_paragraph, use per-edit track if specified, else use True for
+        # backwards compatibility (insert_paragraph historically defaults to tracked)
         track = edit.get("track", True)
         author = edit.get("author")
         scope = edit.get("scope")
@@ -277,12 +432,16 @@ class BatchOperations:
             message=f"Inserted paragraph '{text}' {location}",
         )
 
-    def _handle_insert_paragraphs(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+    def _handle_insert_paragraphs(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
         """Handle insert_paragraphs edit type."""
         texts = edit.get("texts")
         after = edit.get("after")
         before = edit.get("before")
         style = edit.get("style")
+        # For insert_paragraphs, use per-edit track if specified, else use True for
+        # backwards compatibility (insert_paragraphs historically defaults to tracked)
         track = edit.get("track", True)
         author = edit.get("author")
         scope = edit.get("scope")
@@ -319,9 +478,13 @@ class BatchOperations:
             message=f"Inserted {len(texts)} paragraphs {location}",
         )
 
-    def _handle_delete_section(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
+    def _handle_delete_section(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
         """Handle delete_section edit type."""
         heading = edit.get("heading")
+        # For delete_section, use per-edit track if specified, else use True for
+        # backwards compatibility (delete_section historically defaults to tracked)
         track = edit.get("track", True)
         update_toc = edit.get("update_toc", False)
         author = edit.get("author")
@@ -344,8 +507,10 @@ class BatchOperations:
             message=f"Deleted section '{heading}'",
         )
 
-    def _handle_format_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle format_tracked edit type."""
+    def _handle_format_tracked(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
+        """Handle format_tracked edit type (always tracked)."""
         text = edit.get("text")
         if not text:
             return EditResult(
@@ -378,8 +543,10 @@ class BatchOperations:
             message=f"Formatted '{text}' with {format_params}",
         )
 
-    def _handle_format_paragraph_tracked(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
-        """Handle format_paragraph_tracked edit type."""
+    def _handle_format_paragraph_tracked(
+        self, edit_type: str, edit: dict[str, Any], default_track: bool = False
+    ) -> EditResult:
+        """Handle format_paragraph_tracked edit type (always tracked)."""
         containing = edit.get("containing")
         starting_with = edit.get("starting_with")
         ending_with = edit.get("ending_with")
@@ -452,7 +619,11 @@ class BatchOperations:
         return {k: v for k, v in edit.items() if k in format_keys and v is not None}
 
     def apply_edit_file(
-        self, path: str | Path, format: str = "yaml", stop_on_error: bool = False
+        self,
+        path: str | Path,
+        format: str = "yaml",
+        stop_on_error: bool = False,
+        default_track: bool | None = None,
     ) -> list[EditResult]:
         """Apply edits from a YAML or JSON file.
 
@@ -463,6 +634,9 @@ class BatchOperations:
             path: Path to the edit specification file
             format: File format - "yaml" or "json" (default: "yaml")
             stop_on_error: If True, stop processing on first error
+            default_track: Default value for 'track' if not specified per-edit.
+                If None, uses file's default_track value (or False if not set).
+                If specified, overrides any default_track in the file.
 
         Returns:
             List of EditResult objects, one per edit
@@ -473,13 +647,18 @@ class BatchOperations:
 
         Example YAML file:
             ```yaml
+            default_track: false  # Global default for edits in this file
+
             edits:
-              - type: insert_tracked
+              - type: insert
                 text: "new text"
                 after: "anchor"
-              - type: replace_tracked
+                # Uses default_track: false
+
+              - type: replace
                 find: "old"
                 replace: "new"
+                track: true  # Override for this specific edit
             ```
 
         Example:
@@ -512,8 +691,19 @@ class BatchOperations:
             if not isinstance(edits, list):
                 raise ValidationError("'edits' must be a list")
 
+            # Determine default_track value:
+            # 1. If caller specified default_track, use it
+            # 2. Otherwise, use file's default_track if present
+            # 3. Fall back to False
+            if default_track is not None:
+                file_default_track = default_track
+            else:
+                file_default_track = data.get("default_track", False)
+
             # Apply the edits
-            return self.apply_edits(edits, stop_on_error=stop_on_error)
+            return self.apply_edits(
+                edits, stop_on_error=stop_on_error, default_track=file_default_track
+            )
 
         except yaml.YAMLError as e:
             raise ValidationError(f"Failed to parse YAML file: {e}") from e

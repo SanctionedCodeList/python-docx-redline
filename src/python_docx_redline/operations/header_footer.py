@@ -292,8 +292,9 @@ class HeaderFooterOperations:
         author: str | None = None,
         regex: bool = False,
         normalize_special_chars: bool = True,
+        track: bool = True,
     ) -> None:
-        """Replace text in a header with tracked changes.
+        """Replace text in a header with optional tracked changes.
 
         Args:
             find: Text to find
@@ -302,6 +303,7 @@ class HeaderFooterOperations:
             author: Optional author override
             regex: Whether to treat 'find' as a regex pattern
             normalize_special_chars: Auto-convert quotes for matching
+            track: If True, show as tracked change; if False, silent replace (default: True)
 
         Raises:
             TextNotFoundError: If 'find' text is not found
@@ -310,6 +312,7 @@ class HeaderFooterOperations:
 
         Example:
             >>> doc.replace_in_header("Draft", "Final", header_type="default")
+            >>> doc.replace_in_header("Draft", "Final", track=False)  # Silent replace
         """
         header = self._get_header_by_type(header_type)
         if header is None:
@@ -323,6 +326,7 @@ class HeaderFooterOperations:
             author=author,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=track,
         )
 
     def replace_in_footer(
@@ -333,8 +337,9 @@ class HeaderFooterOperations:
         author: str | None = None,
         regex: bool = False,
         normalize_special_chars: bool = True,
+        track: bool = True,
     ) -> None:
-        """Replace text in a footer with tracked changes.
+        """Replace text in a footer with optional tracked changes.
 
         Args:
             find: Text to find
@@ -343,6 +348,7 @@ class HeaderFooterOperations:
             author: Optional author override
             regex: Whether to treat 'find' as a regex pattern
             normalize_special_chars: Auto-convert quotes for matching
+            track: If True, show as tracked change; if False, silent replace (default: True)
 
         Raises:
             TextNotFoundError: If 'find' text is not found
@@ -351,6 +357,7 @@ class HeaderFooterOperations:
 
         Example:
             >>> doc.replace_in_footer("Page {PAGE}", "Page {PAGE} of {NUMPAGES}")
+            >>> doc.replace_in_footer("Draft", "Final", track=False)  # Silent replace
         """
         footer = self._get_footer_by_type(footer_type)
         if footer is None:
@@ -364,6 +371,7 @@ class HeaderFooterOperations:
             author=author,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=track,
         )
 
     def insert_in_header(
@@ -375,8 +383,9 @@ class HeaderFooterOperations:
         author: str | None = None,
         regex: bool = False,
         normalize_special_chars: bool = True,
+        track: bool = True,
     ) -> None:
-        """Insert text in a header with tracked changes.
+        """Insert text in a header with optional tracked changes.
 
         Args:
             text: Text to insert
@@ -386,6 +395,7 @@ class HeaderFooterOperations:
             author: Optional author override
             regex: Whether to treat anchor as a regex pattern
             normalize_special_chars: Auto-convert quotes for matching
+            track: If True, show as tracked change; if False, silent insert (default: True)
 
         Raises:
             TextNotFoundError: If anchor text is not found
@@ -395,6 +405,7 @@ class HeaderFooterOperations:
 
         Example:
             >>> doc.insert_in_header(" - Final", after="Document Title")
+            >>> doc.insert_in_header(" - v2", after="Title", track=False)  # Silent insert
         """
         if after is not None and before is not None:
             raise ValueError("Cannot specify both 'after' and 'before' parameters")
@@ -417,6 +428,7 @@ class HeaderFooterOperations:
             author=author,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=track,
         )
 
     def insert_in_footer(
@@ -428,8 +440,9 @@ class HeaderFooterOperations:
         author: str | None = None,
         regex: bool = False,
         normalize_special_chars: bool = True,
+        track: bool = True,
     ) -> None:
-        """Insert text in a footer with tracked changes.
+        """Insert text in a footer with optional tracked changes.
 
         Args:
             text: Text to insert
@@ -439,6 +452,7 @@ class HeaderFooterOperations:
             author: Optional author override
             regex: Whether to treat anchor as a regex pattern
             normalize_special_chars: Auto-convert quotes for matching
+            track: If True, show as tracked change; if False, silent insert (default: True)
 
         Raises:
             TextNotFoundError: If anchor text is not found
@@ -448,6 +462,7 @@ class HeaderFooterOperations:
 
         Example:
             >>> doc.insert_in_footer(" - Confidential", after="Page")
+            >>> doc.insert_in_footer(" v2", after="Page", track=False)  # Silent insert
         """
         if after is not None and before is not None:
             raise ValueError("Cannot specify both 'after' and 'before' parameters")
@@ -470,6 +485,7 @@ class HeaderFooterOperations:
             author=author,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=track,
         )
 
     def _replace_in_header_footer(
@@ -481,8 +497,9 @@ class HeaderFooterOperations:
         normalize_special_chars: bool = True,
         header: Header | None = None,
         footer: Footer | None = None,
+        track: bool = True,
     ) -> None:
-        """Replace text in a header or footer with tracked changes.
+        """Replace text in a header or footer with optional tracked changes.
 
         Args:
             find: Text to find
@@ -492,6 +509,7 @@ class HeaderFooterOperations:
             normalize_special_chars: Auto-convert quotes for matching
             header: Header object (if replacing in header)
             footer: Footer object (if replacing in footer)
+            track: If True, show as tracked change; if False, silent replace
         """
         # Get the element and file path
         if header is not None:
@@ -523,23 +541,32 @@ class HeaderFooterOperations:
 
         match = matches[0]
 
-        # Generate the replacement XML (deletion + insertion)
-        deletion_xml = self._document._xml_generator.create_deletion(find, author)
-        insertion_xml = self._document._xml_generator.create_insertion(replace, author)
+        if track:
+            # Generate the replacement XML (deletion + insertion)
+            deletion_xml = self._document._xml_generator.create_deletion(find, author)
+            insertion_xml = self._document._xml_generator.create_insertion(replace, author)
 
-        # Parse the XML elements
-        wrapped_deletion = f"""<?xml version="1.0" encoding="UTF-8"?>
+            # Parse the XML elements
+            wrapped_deletion = f"""<?xml version="1.0" encoding="UTF-8"?>
 <root xmlns:w="{WORD_NAMESPACE}"
       xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
       xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
     {deletion_xml}{insertion_xml}
 </root>"""
-        root = etree.fromstring(wrapped_deletion.encode("utf-8"))
-        deletion_element = root[0]
-        insertion_element = root[1]
+            root = etree.fromstring(wrapped_deletion.encode("utf-8"))
+            deletion_element = root[0]
+            insertion_element = root[1]
 
-        # Replace the match with deletion + insertion
-        self._document._replace_match_with_elements(match, [deletion_element, insertion_element])
+            # Replace the match with deletion + insertion
+            self._document._replace_match_with_elements(
+                match, [deletion_element, insertion_element]
+            )
+        else:
+            # Untracked replacement - create a plain run
+            new_run = self._document._xml_generator.create_plain_run(
+                replace, source_run=match.runs[0] if match.runs else None
+            )
+            self._document._replace_match_with_element(match, new_run)
 
         # Save the modified header/footer XML
         self._save_header_footer_xml(file_path, element)
@@ -554,8 +581,9 @@ class HeaderFooterOperations:
         normalize_special_chars: bool = True,
         header: Header | None = None,
         footer: Footer | None = None,
+        track: bool = True,
     ) -> None:
-        """Insert text in a header or footer with tracked changes.
+        """Insert text in a header or footer with optional tracked changes.
 
         Args:
             text: Text to insert
@@ -566,6 +594,7 @@ class HeaderFooterOperations:
             normalize_special_chars: Auto-convert quotes for matching
             header: Header object (if inserting in header)
             footer: Footer object (if inserting in footer)
+            track: If True, show as tracked change; if False, silent insert
         """
         # Get the element and file path
         if header is not None:
@@ -597,18 +626,25 @@ class HeaderFooterOperations:
 
         match = matches[0]
 
-        # Generate the insertion XML
-        insertion_xml = self._document._xml_generator.create_insertion(text, author)
+        if track:
+            # Generate the tracked insertion XML
+            insertion_xml = self._document._xml_generator.create_insertion(text, author)
 
-        # Parse the insertion XML
-        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+            # Parse the insertion XML
+            wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <root xmlns:w="{WORD_NAMESPACE}"
       xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
       xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
     {insertion_xml}
 </root>"""
-        root = etree.fromstring(wrapped_xml.encode("utf-8"))
-        insertion_element = root[0]
+            root = etree.fromstring(wrapped_xml.encode("utf-8"))
+            insertion_element = root[0]
+        else:
+            # Create a plain run for untracked insert
+            source_run = match.runs[0] if match.runs else None
+            insertion_element = self._document._xml_generator.create_plain_run(
+                text, source_run=source_run
+            )
 
         # Insert at the appropriate position
         if insert_after:

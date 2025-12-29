@@ -493,6 +493,155 @@ class TrackedXMLGenerator:
 
         return ppr_change, change_id
 
+    def create_plain_run(
+        self, text: str, source_run: etree._Element | None = None
+    ) -> etree._Element:
+        """Generate a plain <w:r> element without tracked change wrapper.
+
+        This method creates a standard Word run element that can be used for
+        untracked edits, preserving formatting from an optional source run.
+
+        Args:
+            text: The text content for the run
+            source_run: Optional run element to copy formatting (w:rPr) from
+
+        Returns:
+            lxml Element for the run (<w:r>)
+
+        Example:
+            >>> gen = TrackedXMLGenerator(author="Editor")
+            >>> run = gen.create_plain_run("new text")
+            >>> # Returns <w:r><w:t>new text</w:t></w:r>
+        """
+
+        # Create the run element
+        run = etree.Element(_w("r"))
+        run.set(_w("rsidR"), self.rsid)
+
+        # Copy run properties from source run if provided
+        if source_run is not None:
+            source_rpr = source_run.find(_w("rPr"))
+            if source_rpr is not None:
+                run.append(deepcopy(source_rpr))
+
+        # Create the text element
+        text_elem = etree.SubElement(run, _w("t"))
+
+        # Handle xml:space for leading/trailing whitespace
+        if text and (text[0].isspace() or text[-1].isspace()):
+            text_elem.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+
+        text_elem.text = text
+
+        return run
+
+    def create_plain_runs(
+        self, text: str, source_run: etree._Element | None = None
+    ) -> list[etree._Element]:
+        """Generate plain runs, handling markdown formatting.
+
+        This method parses markdown-formatted text and creates multiple runs
+        as needed to represent the formatting. Unlike create_insertion(), this
+        does not wrap the runs in a <w:ins> element.
+
+        Supports the same markdown as create_insertion:
+        - **bold** -> <w:b/>
+        - *italic* -> <w:i/>
+        - ++underline++ -> <w:u/>
+        - ~~strikethrough~~ -> <w:strike/>
+
+        Args:
+            text: The text content (may include markdown formatting)
+            source_run: Optional run element to copy base formatting from
+
+        Returns:
+            List of lxml Elements for the runs
+
+        Example:
+            >>> gen = TrackedXMLGenerator(author="Editor")
+            >>> runs = gen.create_plain_runs("This is **bold** text")
+            >>> # Returns 3 runs: "This is ", "bold" (with <w:b/>), " text"
+        """
+        from python_docx_redline.markdown_parser import parse_markdown
+
+        # Parse markdown to get formatted segments
+        segments = parse_markdown(text)
+
+        runs = []
+        for segment in segments:
+            run = self._create_plain_run_from_segment(segment, source_run)
+            runs.append(run)
+
+        return runs
+
+    def _create_plain_run_from_segment(
+        self,
+        segment: "TextSegment",
+        source_run: etree._Element | None = None,
+    ) -> etree._Element:
+        """Create a plain run element from a TextSegment.
+
+        Args:
+            segment: TextSegment with text and formatting flags
+            source_run: Optional run element to copy base formatting from
+
+        Returns:
+            lxml Element for the run
+        """
+        # Handle linebreak segments - emit <w:br/> instead of <w:t>
+        if segment.is_linebreak:
+            run = etree.Element(_w("r"))
+            run.set(_w("rsidR"), self.rsid)
+            etree.SubElement(run, _w("br"))
+            return run
+
+        text = segment.text
+
+        # Create the run element
+        run = etree.Element(_w("r"))
+        run.set(_w("rsidR"), self.rsid)
+
+        # Build run properties
+        rpr = None
+
+        # First, copy base formatting from source run if provided
+        if source_run is not None:
+            source_rpr = source_run.find(_w("rPr"))
+            if source_rpr is not None:
+                rpr = deepcopy(source_rpr)
+                run.append(rpr)
+
+        # Then add markdown formatting on top
+        if segment.has_formatting():
+            if rpr is None:
+                rpr = etree.SubElement(run, _w("rPr"))
+
+            if segment.bold:
+                # Only add if not already present
+                if rpr.find(_w("b")) is None:
+                    etree.SubElement(rpr, _w("b"))
+            if segment.italic:
+                if rpr.find(_w("i")) is None:
+                    etree.SubElement(rpr, _w("i"))
+            if segment.underline:
+                if rpr.find(_w("u")) is None:
+                    u_elem = etree.SubElement(rpr, _w("u"))
+                    u_elem.set(_w("val"), "single")
+            if segment.strikethrough:
+                if rpr.find(_w("strike")) is None:
+                    etree.SubElement(rpr, _w("strike"))
+
+        # Create the text element
+        text_elem = etree.SubElement(run, _w("t"))
+
+        # Handle xml:space for leading/trailing whitespace
+        if text and (text[0].isspace() or text[-1].isspace()):
+            text_elem.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+
+        text_elem.text = text
+
+        return run
+
     @staticmethod
     def _get_max_change_id(doc: Any) -> int:
         """Find the maximum change ID in the document.

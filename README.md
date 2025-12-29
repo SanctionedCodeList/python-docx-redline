@@ -1,21 +1,20 @@
 # python-docx-redline
 
-A high-level Python API for editing Word documents with tracked changes.
+A high-level Python API for editing Word documents, with optional tracked changes support.
 
 ## The Problem
 
-Making surgical edits to Word documents with tracked changes requires writing complex OOXML XML manipulation code—typically 30+ lines of namespace handling, element construction, and tree traversal.
+Editing Word documents programmatically is frustrating. Text is fragmented across XML runs, making even simple find-and-replace unreliable. Adding tracked changes requires 30+ lines of OOXML namespace handling.
 
-**Before** (raw OOXML):
+**Before** (raw python-docx):
 ```python
-from lxml import etree
-from datetime import datetime, timezone
+from docx import Document
 
-# Find the paragraph, handle namespaces, generate IDs, construct elements...
-paragraphs = root.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
-for p in paragraphs:
-    if 'Section 2.1' in ''.join(p.itertext()):
-        # 25+ more lines of XML construction...
+doc = Document("contract.docx")
+# This often fails - "Contract" might be split across runs as "Con" + "tract"
+for para in doc.paragraphs:
+    if "Contract" in para.text:
+        para.text = para.text.replace("Contract", "Agreement")  # Loses all formatting!
 ```
 
 **After** (python-docx-redline):
@@ -23,7 +22,7 @@ for p in paragraphs:
 from python_docx_redline import Document
 
 doc = Document("contract.docx")
-doc.insert_tracked(" (as amended)", after="Section 2.1")
+doc.replace("Contract", "Agreement")  # Handles run boundaries, preserves formatting
 doc.save("contract_edited.docx")
 ```
 
@@ -37,27 +36,45 @@ Requires Python 3.10+
 
 ## Quick Start
 
+### Untracked (Silent) Editing
+
+Make edits without revision marks - the document appears as if it was always that way:
+
+```python
+from python_docx_redline import Document
+
+doc = Document("template.docx")
+doc.replace("{{NAME}}", "John Doe")       # Silent replacement
+doc.replace("{{DATE}}", "2024-12-28")     # No revision marks
+doc.insert(" Inc.", after="Acme Corp")    # Append text silently
+doc.delete("DRAFT - ")                    # Remove text silently
+doc.save("output.docx")
+```
+
+### Tracked Editing
+
+Show changes as tracked revisions for review:
+
 ```python
 from python_docx_redline import Document
 
 doc = Document("contract.docx")
 
-# Insert text with tracked changes
-doc.insert_tracked(" (revised)", after="Exhibit A")
+# Use track=True for tracked changes
+doc.replace("30 days", "45 days", track=True)
+doc.insert(" (revised)", after="Exhibit A", track=True)
+doc.delete("unless otherwise agreed", track=True)
 
-# Replace text with tracked changes
+# Or use the explicit *_tracked methods
 doc.replace_tracked("the Contractor", "the Service Provider")
 
-# Delete text with tracked changes
-doc.delete_tracked("unless otherwise agreed")
-
-doc.save("contract_edited.docx")
+doc.save("contract_redlined.docx")
 ```
 
 ## Features
 
 ### Text Operations
-- **Insert, delete, replace** text with tracked changes
+- **Insert, delete, replace, move** text with or without tracked changes
 - **Smart text search** handles text fragmented across XML runs
 - **Regex support** with capture groups for pattern matching
 - **Fuzzy matching** for OCR'd or inconsistently formatted documents
@@ -98,11 +115,20 @@ doc.save("contract_edited.docx")
 
 ```yaml
 # edits.yaml
+default_track: false  # or true for all tracked
+
 edits:
-  - type: replace_tracked
+  - type: replace
+    find: "{{COMPANY}}"
+    replace: "Acme Inc."
+    # Uses default_track (false = untracked)
+
+  - type: replace
     find: "30 days"
     replace: "45 days"
-  - type: insert_tracked
+    track: true  # Override: this one is tracked
+
+  - type: insert
     text: " (as amended)"
     after: "Agreement dated"
 ```

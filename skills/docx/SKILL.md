@@ -1,11 +1,61 @@
 ---
 name: docx
-description: "Document creation, editing, and analysis with tracked changes and comments. Use for .docx files: creating documents, editing with tracked changes, adding comments, text extraction, or CriticMarkup round-trip workflows (export/import tracked changes as markdown)."
+description: "Document creation, editing, and analysis with tracked changes. Use for .docx files: creating documents, editing with or without tracked changes, adding comments, text extraction, template population, or CriticMarkup round-trip workflows (export/import tracked changes as markdown). python-docx-redline is the recommended tool for ALL editing tasks - it handles run fragmentation that breaks python-docx find/replace, with optional tracked changes via track=True."
 ---
 
-# DOCX Skill - Quick Reference
+# DOCX Skill
 
-## Installation
+This skill creates professional, persuasive documents that drive decisions. It combines design intelligence from elite business contexts (consulting, banking, legal) with robust technical workflows for DOCX manipulation.
+
+## Design Thinking
+
+Before creating or editing any document, understand the context:
+
+- **Purpose**: What decision or action should this document drive?
+- **Audience**: Who are they? What do they need? How much time do they have?
+- **Key Message**: If the reader remembers only ONE thing, what must it be?
+- **Tone**: Match the context — analytical (consulting), precise (legal), data-driven (banking)
+
+### The Non-Negotiables
+
+**1. Lead with the Answer**
+State your conclusion or recommendation in the first paragraph of the document and the first sentence of each section. Don't make executives hunt for your point.
+
+**2. Action Headings**
+Every section heading states the **takeaway**, not the topic.
+
+| Topic Heading (Weak) | Action Heading (Strong) |
+|----------------------|-------------------------|
+| "Q3 Results" | "Q3 revenue beat targets by 12%, driven by enterprise" |
+| "Market Analysis" | "Market consolidating—three players now control 70%" |
+
+See [references/action-headings.md](references/action-headings.md) for details.
+
+**3. Pyramid Structure**
+Organize content in a pyramid: main point at top, supporting arguments below, evidence below that.
+
+See [references/document-structure.md](references/document-structure.md) for frameworks.
+
+**4. Professional Formatting**
+Typography, spacing, and layout signal credibility before anyone reads a word.
+
+See [references/design-principles.md](references/design-principles.md) for guidelines.
+
+### Document Anti-Patterns
+
+**NEVER** produce generic documents. Avoid:
+
+- **Topic headings**: "Background", "Analysis" — say nothing. Use action headings
+- **Burying the lead**: Recommendation on page 20 means failure. Lead with conclusions
+- **Wall of text**: No headings, no structure, no scanability
+- **Hedge-everything language**: "We might consider potentially..." — take a position
+- **Inconsistent formatting**: Mixed fonts, random spacing signals carelessness
+
+---
+
+## Technical Workflows
+
+### Installation
 
 ```bash
 pip install python-docx                # Creating new documents
@@ -19,10 +69,13 @@ brew install pandoc                    # Text extraction (macOS)
 |------|------|-------|
 | **Read/extract text** | pandoc or python-docx-redline | [reading.md](./reading.md) |
 | **Create new document** | python-docx | See below |
-| **Edit with tracked changes** | python-docx-redline | [tracked-changes.md](./tracked-changes.md) |
+| **Edit existing document** | python-docx-redline | [editing.md](./editing.md) |
+| **Edit with tracked changes** | python-docx-redline (track=True) | [tracked-changes.md](./tracked-changes.md) |
 | **Add comments** | python-docx-redline | [comments.md](./comments.md) |
 | **CriticMarkup workflow** | python-docx-redline | [criticmarkup.md](./criticmarkup.md) |
 | **Complex XML manipulation** | Raw OOXML | [ooxml.md](./ooxml.md) |
+
+**Note:** python-docx-redline is recommended for ALL editing (not just tracked changes) because it handles run fragmentation that breaks python-docx find/replace.
 
 ## Quick Examples
 
@@ -40,14 +93,28 @@ doc.add_paragraph("Content here.")
 doc.save("new.docx")
 ```
 
+### Edit Existing Document (Silent)
+```python
+from python_docx_redline import Document
+
+doc = Document("existing.docx")
+doc.replace("OLD_VALUE", "new_value")         # Handles run boundaries
+doc.replace("{{NAME}}", "John Doe")           # Template population
+doc.insert(" Inc.", after="Acme Corp")        # Append text
+doc.delete("DRAFT - ")                        # Remove text
+doc.save("modified.docx")
+```
+
 ### Edit with Tracked Changes
 ```python
 from python_docx_redline import Document
 
 doc = Document("contract.docx")
-doc.replace_tracked("30 days", "45 days")
-doc.insert_tracked(" (amended)", after="Section 2.1")
-doc.delete_tracked("subject to approval")
+doc.replace("30 days", "45 days", track=True)     # With track parameter
+doc.insert(" (amended)", after="Section 2.1", track=True)
+doc.delete("subject to approval", track=True)
+# Or use explicit *_tracked methods:
+doc.replace_tracked("Contractor", "Service Provider")
 doc.save("contract_redlined.docx")
 ```
 
@@ -90,10 +157,11 @@ doc.replace_tracked("Defendant's motion", "party's motion")  # Just works
 ### Batch Operations
 ```python
 edits = [
-    {"type": "replace_tracked", "find": "old", "replace": "new"},
-    {"type": "delete_tracked", "text": "remove this"},
+    {"type": "replace", "find": "{{NAME}}", "replace": "John"},  # Untracked
+    {"type": "replace", "find": "old", "replace": "new", "track": True},  # Tracked
+    {"type": "delete", "text": "DRAFT", "track": False},  # Explicit untracked
 ]
-doc.apply_edits(edits)
+doc.apply_edits(edits, default_track=False)  # Set default for edits without track field
 ```
 
 ### CriticMarkup Round-Trip
@@ -108,10 +176,29 @@ doc.apply_criticmarkup("{++new clause++}", author="Reviewer")
 doc.save("updated.docx")
 ```
 
-## Detailed Guides
+---
 
-- **[reading.md](./reading.md)** - Text extraction, find_all(), document structure, tables
-- **[tracked-changes.md](./tracked-changes.md)** - Insert/delete/replace, regex, scopes, batch ops, formatting
-- **[comments.md](./comments.md)** - Adding comments, occurrence parameter, replies, resolution
-- **[criticmarkup.md](./criticmarkup.md)** - Export/import with CriticMarkup, round-trip workflows
-- **[ooxml.md](./ooxml.md)** - Raw XML manipulation for complex scenarios
+## Design References
+
+Guidance on creating effective, professional documents:
+
+- **[references/action-headings.md](references/action-headings.md)** — Writing insight-driven headings
+- **[references/document-structure.md](references/document-structure.md)** — Pyramid Principle, SCQA, IRAC frameworks
+- **[references/executive-summaries.md](references/executive-summaries.md)** — Crafting standalone summaries
+- **[references/industry-styles.md](references/industry-styles.md)** — Consulting, banking, legal, VC conventions
+- **[references/design-principles.md](references/design-principles.md)** — Typography, layout, visual hierarchy
+
+## Technical Guides
+
+Detailed workflows for document manipulation:
+
+- **[reading.md](./reading.md)** — Text extraction, find_all(), document structure, tables
+- **[editing.md](./editing.md)** — All editing with python-docx-redline (both tracked and untracked)
+- **[tracked-changes.md](./tracked-changes.md)** — Tracked changes details: insert/delete/replace, regex, scopes, batch ops
+- **[comments.md](./comments.md)** — Adding comments, occurrence parameter, replies, resolution
+- **[criticmarkup.md](./criticmarkup.md)** — Export/import with CriticMarkup, round-trip workflows
+- **[ooxml.md](./ooxml.md)** — Raw XML manipulation for complex scenarios
+
+---
+
+Remember: Claude is capable of creating documents that rival top-tier consulting and legal firms. Lead with your answer, use action headings, and execute every detail with intention. The goal isn't a "good enough" document—it's one that drives decisions.

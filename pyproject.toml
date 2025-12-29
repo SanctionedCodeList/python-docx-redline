@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "python-docx-redline"
-version = "0.1.0"
-description = "A high-level Python API for editing Word documents with tracked changes"
+version = "0.2.0"
+description = "High-level Python API for editing Word documents, with optional tracked changes support"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}

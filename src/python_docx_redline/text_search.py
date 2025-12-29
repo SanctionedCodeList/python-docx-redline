@@ -34,27 +34,53 @@ def _parse_tag(tag: str) -> str:
     return tag
 
 
-def _get_run_text(run: Any) -> str:
+def _get_run_text(run: Any, include_deleted: bool = True) -> str:
     """Extract text from a run, avoiding XML structural whitespace.
 
-    Extracts text from both w:t and w:delText elements to support searching
-    in deleted text (tracked changes). This allows adding comments on text
-    that has been marked for deletion.
+    Extracts text from w:t elements, and optionally w:delText elements to
+    support searching in deleted text (tracked changes). This allows adding
+    comments on text that has been marked for deletion.
+
+    Args:
+        run: A w:r (run) Element
+        include_deleted: Whether to include text from w:delText elements
+            (tracked deletions). Default True for backwards compatibility.
+
+    Returns:
+        Text content of the run
+    """
+    # Find all w:t elements within this run
+    text_elements = run.findall(f".//{{{WORD_NAMESPACE}}}t")
+
+    if include_deleted:
+        # Also find w:delText elements (deleted text in tracked changes)
+        deltext_elements = run.findall(f".//{{{WORD_NAMESPACE}}}delText")
+        # Combine both types of text elements
+        all_text_elements = text_elements + deltext_elements
+    else:
+        all_text_elements = text_elements
+
+    return "".join(elem.text or "" for elem in all_text_elements)
+
+
+def _is_run_in_deletion(run: Any) -> bool:
+    """Check if a run is inside a tracked deletion wrapper (w:del).
 
     Args:
         run: A w:r (run) Element
 
     Returns:
-        Text content of the run (includes both normal and deleted text)
+        True if the run is a descendant of a w:del element
     """
-    # Find all w:t elements within this run
-    text_elements = run.findall(f".//{{{WORD_NAMESPACE}}}t")
-    # Also find w:delText elements (deleted text in tracked changes)
-    deltext_elements = run.findall(f".//{{{WORD_NAMESPACE}}}delText")
-
-    # Combine both types of text elements
-    all_text_elements = text_elements + deltext_elements
-    return "".join(elem.text or "" for elem in all_text_elements)
+    parent = run.getparent()
+    while parent is not None:
+        if parent.tag == f"{{{WORD_NAMESPACE}}}del":
+            return True
+        # Also check for moveFrom which is semantically similar
+        if parent.tag == f"{{{WORD_NAMESPACE}}}moveFrom":
+            return True
+        parent = parent.getparent()
+    return False
 
 
 @dataclass
@@ -155,6 +181,7 @@ class TextSearch:
         regex: bool = False,
         normalize_special_chars: bool = False,
         fuzzy: dict[str, Any] | None = None,
+        include_deleted: bool = True,
     ) -> list[TextSpan]:
         """Find all occurrences of text in the given paragraphs.
 
@@ -176,6 +203,9 @@ class TextSearch:
                 - algorithm: Matching algorithm (ratio, partial_ratio, etc.)
                 - normalize_whitespace: Whether to normalize whitespace
                 (default: None for exact matching)
+            include_deleted: Whether to include text inside tracked deletions
+                (w:del, w:delText) in the search. When False, deleted text is
+                skipped. (default: True for backwards compatibility)
 
         Returns:
             List of TextSpan objects representing each match
@@ -227,7 +257,12 @@ class TextSearch:
             full_text_chars = []
 
             for run_idx, run in enumerate(runs):
-                run_text = _get_run_text(run)
+                # Skip runs inside deletion wrappers if include_deleted is False
+                if not include_deleted and _is_run_in_deletion(run):
+                    continue
+
+                # Extract text, optionally excluding delText elements
+                run_text = _get_run_text(run, include_deleted=include_deleted)
                 for char_idx, char in enumerate(run_text):
                     char_map.append((run_idx, char_idx))
                     full_text_chars.append(char)

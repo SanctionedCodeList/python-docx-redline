@@ -512,4 +512,483 @@ def test_apply_edits_delete_section_missing_params():
         doc_path.unlink()
 
 
+# Tests for Phase 5: Per-edit track support
+
+
+def test_apply_edits_generic_insert():
+    """Test generic insert edit type."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [{"type": "insert", "text": " inserted", "after": "target"}]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].edit_type == "insert"
+        assert "inserted" in results[0].message.lower()
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_generic_delete():
+    """Test generic delete edit type."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [{"type": "delete", "text": "to delete"}]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].edit_type == "delete"
+        assert "deleted" in results[0].message.lower()
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_generic_replace():
+    """Test generic replace edit type."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [{"type": "replace", "find": "old", "replace": "new"}]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].edit_type == "replace"
+        assert "replaced" in results[0].message.lower()
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_with_track_field():
+    """Test per-edit track field."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {"type": "replace", "find": "old", "replace": "new1", "track": False},
+            {"type": "replace", "find": "target", "replace": "target2", "track": True},
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 2
+        assert all(r.success for r in results)
+
+        # First edit should not be tracked (message should not say tracked)
+        assert "(tracked)" not in results[0].message
+
+        # Second edit should be tracked (message should say tracked)
+        assert "(tracked)" in results[1].message
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_default_track_true():
+    """Test default_track=True parameter."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {"type": "replace", "find": "old", "replace": "new"},  # No track field
+        ]
+
+        # With default_track=True
+        results = doc.apply_edits(edits, default_track=True)
+
+        assert len(results) == 1
+        assert results[0].success
+        # Should be tracked
+        assert "(tracked)" in results[0].message
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_default_track_false():
+    """Test default_track=False parameter (default behavior)."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {"type": "replace", "find": "old", "replace": "new"},  # No track field
+        ]
+
+        # With default_track=False (default)
+        results = doc.apply_edits(edits, default_track=False)
+
+        assert len(results) == 1
+        assert results[0].success
+        # Should NOT be tracked
+        assert "(tracked)" not in results[0].message
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_track_field_overrides_default():
+    """Test that per-edit track field overrides default_track."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {"type": "replace", "find": "old", "replace": "new", "track": True},
+        ]
+
+        # Even with default_track=False, explicit track=True should win
+        results = doc.apply_edits(edits, default_track=False)
+
+        assert len(results) == 1
+        assert results[0].success
+        assert "(tracked)" in results[0].message
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_backwards_compat():
+    """Test that existing edits still work without track field (backwards compat)."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        # These are the old-style tracked operations
+        edits = [
+            {"type": "insert_tracked", "text": " inserted", "after": "target"},
+            {"type": "replace_tracked", "find": "old", "replace": "new"},
+            {"type": "delete_tracked", "text": "to delete"},
+        ]
+
+        # Should work exactly as before
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 3
+        assert all(r.success for r in results)
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_mixed_types():
+    """Test mixing generic and tracked operations."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            # Generic with track=False
+            {"type": "insert", "text": " untracked", "after": "First"},
+            # Legacy tracked
+            {"type": "replace_tracked", "find": "old", "replace": "new"},
+            # Generic with track=True
+            {"type": "delete", "text": "paragraph", "track": True},
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 3
+        assert results[0].success
+        assert results[1].success
+        assert results[2].success
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_generic_insert_missing_params():
+    """Test generic insert with missing parameters."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {"type": "insert", "after": "target"},  # Missing text
+            {"type": "insert", "text": "new text"},  # Missing after/before
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 2
+        assert not any(r.success for r in results)
+        assert all("missing" in r.message.lower() for r in results)
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_generic_delete_missing_params():
+    """Test generic delete with missing parameters."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {"type": "delete"},  # Missing text
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert not results[0].success
+        assert "missing" in results[0].message.lower()
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_generic_replace_missing_params():
+    """Test generic replace with missing parameters."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {"type": "replace", "replace": "new"},  # Missing find
+            {"type": "replace", "find": "old"},  # Missing replace
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 2
+        assert not any(r.success for r in results)
+        assert all("missing" in r.message.lower() for r in results)
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edit_file_with_default_track():
+    """Test apply_edit_file with default_track in YAML."""
+    import tempfile
+
+    doc_path = create_test_document()
+    yaml_path = Path(tempfile.mktemp(suffix=".yaml"))
+
+    try:
+        # Create a YAML file with default_track
+        yaml_content = """
+default_track: true
+
+edits:
+  - type: replace
+    find: "old"
+    replace: "new"
+"""
+        yaml_path.write_text(yaml_content, encoding="utf-8")
+
+        doc = Document(doc_path)
+        results = doc.apply_edit_file(yaml_path)
+
+        assert len(results) == 1
+        assert results[0].success
+        # Should be tracked because default_track: true in file
+        assert "(tracked)" in results[0].message
+
+    finally:
+        doc_path.unlink()
+        yaml_path.unlink()
+
+
+def test_apply_edit_file_with_per_edit_track():
+    """Test apply_edit_file with per-edit track in YAML."""
+    import tempfile
+
+    doc_path = create_test_document()
+    yaml_path = Path(tempfile.mktemp(suffix=".yaml"))
+
+    try:
+        # Create a YAML file with per-edit track
+        yaml_content = """
+default_track: false
+
+edits:
+  - type: replace
+    find: "old"
+    replace: "new"
+    track: true
+"""
+        yaml_path.write_text(yaml_content, encoding="utf-8")
+
+        doc = Document(doc_path)
+        results = doc.apply_edit_file(yaml_path)
+
+        assert len(results) == 1
+        assert results[0].success
+        # Should be tracked because track: true overrides default_track: false
+        assert "(tracked)" in results[0].message
+
+    finally:
+        doc_path.unlink()
+        yaml_path.unlink()
+
+
+def test_apply_edit_file_caller_override():
+    """Test that caller-provided default_track overrides file default."""
+    import tempfile
+
+    doc_path = create_test_document()
+    yaml_path = Path(tempfile.mktemp(suffix=".yaml"))
+
+    try:
+        # Create a YAML file with default_track: false
+        yaml_content = """
+default_track: false
+
+edits:
+  - type: replace
+    find: "old"
+    replace: "new"
+"""
+        yaml_path.write_text(yaml_content, encoding="utf-8")
+
+        doc = Document(doc_path)
+        # Caller overrides with default_track=True
+        results = doc.apply_edit_file(yaml_path, default_track=True)
+
+        assert len(results) == 1
+        assert results[0].success
+        # Should be tracked because caller's default_track=True overrides file
+        assert "(tracked)" in results[0].message
+
+    finally:
+        doc_path.unlink()
+        yaml_path.unlink()
+
+
+def test_apply_edit_file_json_with_track():
+    """Test apply_edit_file with track fields in JSON."""
+    import json
+    import tempfile
+
+    doc_path = create_test_document()
+    json_path = Path(tempfile.mktemp(suffix=".json"))
+
+    try:
+        # Create a JSON file with track fields
+        json_content = {
+            "default_track": False,
+            "edits": [{"type": "replace", "find": "old", "replace": "new", "track": True}],
+        }
+        json_path.write_text(json.dumps(json_content), encoding="utf-8")
+
+        doc = Document(doc_path)
+        results = doc.apply_edit_file(json_path, format="json")
+
+        assert len(results) == 1
+        assert results[0].success
+        assert "(tracked)" in results[0].message
+
+    finally:
+        doc_path.unlink()
+        json_path.unlink()
+
+
+def test_apply_edit_file_no_default_track():
+    """Test apply_edit_file when no default_track is specified."""
+    import tempfile
+
+    doc_path = create_test_document()
+    yaml_path = Path(tempfile.mktemp(suffix=".yaml"))
+
+    try:
+        # Create a YAML file without default_track
+        yaml_content = """
+edits:
+  - type: replace
+    find: "old"
+    replace: "new"
+"""
+        yaml_path.write_text(yaml_content, encoding="utf-8")
+
+        doc = Document(doc_path)
+        results = doc.apply_edit_file(yaml_path)
+
+        assert len(results) == 1
+        assert results[0].success
+        # Should NOT be tracked (default is False)
+        assert "(tracked)" not in results[0].message
+
+    finally:
+        doc_path.unlink()
+        yaml_path.unlink()
+
+
+def test_apply_edits_insert_with_before():
+    """Test generic insert with 'before' parameter."""
+    doc_path = create_test_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [{"type": "insert", "text": "prefix ", "before": "First"}]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert results[0].success
+        assert "before" in results[0].message
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_insert_paragraph_track_false():
+    """Test insert_paragraph with track=False."""
+    doc_path = create_structured_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [
+            {
+                "type": "insert_paragraph",
+                "text": "New untracked paragraph",
+                "after": "Introduction content",
+                "track": False,
+            }
+        ]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].edit_type == "insert_paragraph"
+
+    finally:
+        doc_path.unlink()
+
+
+def test_apply_edits_delete_section_track_false():
+    """Test delete_section with track=False."""
+    doc_path = create_structured_document()
+    try:
+        doc = Document(doc_path)
+
+        edits = [{"type": "delete_section", "heading": "Methods", "track": False}]
+
+        results = doc.apply_edits(edits)
+
+        assert len(results) == 1
+        assert results[0].success
+        assert results[0].edit_type == "delete_section"
+
+    finally:
+        doc_path.unlink()
+
+
 # Run tests with: pytest tests/test_batch_operations.py -v

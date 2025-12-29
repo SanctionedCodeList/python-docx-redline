@@ -543,6 +543,7 @@ class Document:
         scope: str | dict | Any | None = None,
         context_chars: int = 40,
         fuzzy: float | dict[str, Any] | None = None,
+        include_deleted: bool = False,
     ) -> list[Match]:
         """Find all occurrences of text in the document with location metadata.
 
@@ -560,6 +561,8 @@ class Document:
                 - None: Exact matching (default)
                 - float: Similarity threshold (e.g., 0.9 for 90% similar)
                 - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
+            include_deleted: If True, include text inside tracked deletions when
+                searching. If False (default), skip text in w:del elements.
 
         Returns:
             List of Match objects with text, context, location, and metadata
@@ -593,6 +596,9 @@ class Document:
             >>>
             >>> # Fuzzy with custom algorithm
             >>> matches = doc.find_all("text", fuzzy={'threshold': 0.9, 'algorithm': 'levenshtein'})
+            >>>
+            >>> # Include text inside tracked deletions
+            >>> matches = doc.find_all("deleted text", include_deleted=True)
         """
         # Get all paragraphs, then filter by scope
         all_paragraphs = list(self.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
@@ -605,7 +611,12 @@ class Document:
 
         # Find all text spans using TextSearch
         spans = self._text_search.find_text(
-            text, paragraphs, case_sensitive=case_sensitive, regex=regex, fuzzy=fuzzy_config
+            text,
+            paragraphs,
+            case_sensitive=case_sensitive,
+            regex=regex,
+            fuzzy=fuzzy_config,
+            include_deleted=include_deleted,
         )
 
         # Convert TextSpans to Match objects with rich metadata
@@ -754,6 +765,263 @@ class Document:
 
         return context
 
+    # ========================================================================
+    # Generic edit methods (with optional tracking)
+    # ========================================================================
+
+    def insert(
+        self,
+        text: str,
+        after: str | None = None,
+        before: str | None = None,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+        occurrence: int | list[int] | str = "first",
+        regex: bool = False,
+        normalize_special_chars: bool = True,
+        track: bool = False,
+        fuzzy: float | dict[str, Any] | None = None,
+    ) -> None:
+        """Insert text after or before a specific location.
+
+        This method searches for the anchor text in the document and inserts
+        the new text either immediately after it or immediately before it.
+
+        Args:
+            text: The text to insert (supports markdown formatting: **bold**, *italic*,
+                ++underline++, ~~strikethrough~~)
+            after: Insert after this text (mutually exclusive with before)
+            before: Insert before this text (mutually exclusive with after)
+            author: Author for tracked changes (ignored if track=False)
+            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            occurrence: Which occurrence(s): 1, 2, "first", "last", "all", or [1,3,5]
+                (default: "first")
+            regex: Treat anchor as regex pattern (default: False)
+            normalize_special_chars: Auto-convert quotes for matching (default: True)
+            track: If True, insert as tracked change; if False, silent insert
+                (default: False)
+            fuzzy: Fuzzy matching configuration:
+                - None: Exact matching (default)
+                - float: Similarity threshold (e.g., 0.9 for 90% similar)
+                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
+
+        Raises:
+            ValueError: If both 'after' and 'before' specified, or neither specified
+            TextNotFoundError: If the anchor text is not found
+            AmbiguousTextError: If multiple occurrences found and occurrence not specified
+            re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
+
+        Example:
+            >>> doc.insert("new text", after="anchor")  # Untracked
+            >>> doc.insert("new text", after="anchor", track=True)  # Tracked
+        """
+        self._tracked_ops.insert(
+            text,
+            after=after,
+            before=before,
+            author=author,
+            scope=scope,
+            occurrence=occurrence,
+            regex=regex,
+            normalize_special_chars=normalize_special_chars,
+            track=track,
+            fuzzy=fuzzy,
+        )
+
+    def delete(
+        self,
+        text: str,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+        occurrence: int | list[int] | str = "first",
+        regex: bool = False,
+        normalize_special_chars: bool = True,
+        track: bool = False,
+        fuzzy: float | dict[str, Any] | None = None,
+    ) -> None:
+        """Delete text from the document.
+
+        This method searches for the specified text and removes it. When track=True,
+        the deletion is shown as a tracked change.
+
+        Args:
+            text: The text to delete (or regex pattern if regex=True)
+            author: Author for tracked changes (ignored if track=False)
+            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            occurrence: Which occurrence(s): 1, 2, "first", "last", "all", or [1,3,5]
+                (default: "first")
+            regex: Treat text as regex pattern (default: False)
+            normalize_special_chars: Auto-convert quotes for matching (default: True)
+            track: If True, show as tracked deletion; if False, silent delete
+                (default: False)
+            fuzzy: Fuzzy matching configuration:
+                - None: Exact matching (default)
+                - float: Similarity threshold (e.g., 0.9 for 90% similar)
+                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
+
+        Raises:
+            TextNotFoundError: If the text is not found
+            AmbiguousTextError: If multiple occurrences found and occurrence not specified
+            re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
+
+        Example:
+            >>> doc.delete("old text")  # Untracked
+            >>> doc.delete("old text", track=True)  # Tracked
+            >>> doc.delete("obsolete", occurrence="all")  # Delete all occurrences
+        """
+        self._tracked_ops.delete(
+            text,
+            author=author,
+            scope=scope,
+            occurrence=occurrence,
+            regex=regex,
+            normalize_special_chars=normalize_special_chars,
+            track=track,
+            fuzzy=fuzzy,
+        )
+
+    def replace(
+        self,
+        find: str,
+        replace_with: str,
+        author: str | None = None,
+        scope: str | dict | Any | None = None,
+        occurrence: int | list[int] | str = "first",
+        regex: bool = False,
+        normalize_special_chars: bool = True,
+        track: bool = False,
+        show_context: bool = False,
+        check_continuity: bool = False,
+        context_chars: int = 50,
+        fuzzy: float | dict[str, Any] | None = None,
+    ) -> None:
+        """Find and replace text in the document.
+
+        This method searches for text and replaces it with new text. When track=True,
+        the operation shows both the deletion of the old text and insertion of the
+        new text as tracked changes.
+
+        When regex=True, the replacement string can use capture groups:
+        - \\1, \\2, etc. for numbered groups
+        - \\g<name> for named groups
+
+        Args:
+            find: Text or regex pattern to find
+            replace_with: Replacement text (supports markdown: **bold**, *italic*, etc.)
+            author: Author for tracked changes (ignored if track=False)
+            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
+            occurrence: Which occurrence(s): 1, 2, "first", "last", "all", or [1,3,5]
+                (default: "first")
+            regex: Treat 'find' as regex pattern (default: False)
+            normalize_special_chars: Auto-convert quotes for matching (default: True)
+            track: If True, show as tracked change; if False, silent replace
+                (default: False)
+            show_context: Show text before/after the match for preview (default: False)
+            check_continuity: Check if replacement may create sentence fragments
+                (default: False)
+            context_chars: Number of characters to show when show_context=True
+                (default: 50)
+            fuzzy: Fuzzy matching configuration:
+                - None: Exact matching (default)
+                - float: Similarity threshold (e.g., 0.9 for 90% similar)
+                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
+
+        Raises:
+            TextNotFoundError: If the 'find' text is not found
+            AmbiguousTextError: If multiple occurrences found and occurrence not specified
+            re.error: If regex=True and the pattern is invalid
+            ImportError: If fuzzy matching requested but rapidfuzz not installed
+
+        Warnings:
+            ContinuityWarning: If check_continuity=True and potential fragment detected
+
+        Example:
+            >>> doc.replace("30 days", "45 days")  # Untracked
+            >>> doc.replace("30 days", "45 days", track=True)  # Tracked
+            >>> doc.replace("old", "new", occurrence="all")  # Replace all
+            >>> doc.replace(r"(\\d+) days", r"\\1 business days", regex=True)
+        """
+        self._tracked_ops.replace(
+            find,
+            replace_with,
+            author=author,
+            scope=scope,
+            occurrence=occurrence,
+            regex=regex,
+            normalize_special_chars=normalize_special_chars,
+            show_context=show_context,
+            check_continuity=check_continuity,
+            context_chars=context_chars,
+            track=track,
+            fuzzy=fuzzy,
+        )
+
+    def move(
+        self,
+        text: str,
+        after: str | None = None,
+        before: str | None = None,
+        author: str | None = None,
+        source_scope: str | dict | Any | None = None,
+        dest_scope: str | dict | Any | None = None,
+        regex: bool = False,
+        normalize_special_chars: bool = True,
+        track: bool = False,
+    ) -> None:
+        """Move text to a new location.
+
+        When track=True, creates linked move markers that show the text was
+        relocated rather than deleted and re-added. This provides better context
+        for document reviewers in Word.
+
+        In Word's track changes view (track=True):
+        - Source location shows text with strikethrough and "Moved" annotation
+        - Destination shows text with underline and "Moved" annotation
+        - Both locations are linked with matching move markers
+
+        When track=False, simply deletes from source and inserts at destination
+        without any tracking markers.
+
+        Args:
+            text: The text to move (or regex pattern if regex=True)
+            after: Move to after this text (at destination)
+            before: Move to before this text (at destination)
+            author: Author for tracked changes (ignored if track=False)
+            source_scope: Limit source text search scope
+            dest_scope: Limit destination anchor search scope
+            regex: Treat 'text' and anchor as regex patterns (default: False)
+            normalize_special_chars: Auto-convert quotes for matching (default: True)
+            track: If True, show as tracked move (linked markers); if False,
+                move text without tracking (default: False)
+
+        Raises:
+            ValueError: If both 'after' and 'before' specified, or neither specified
+            TextNotFoundError: If the source text or destination anchor is not found
+            AmbiguousTextError: If multiple occurrences found
+            re.error: If regex=True and a pattern is invalid
+
+        Example:
+            >>> doc.move("Section A", after="Table of Contents")  # Untracked
+            >>> doc.move("Section A", after="Table of Contents", track=True)  # Tracked
+        """
+        self._tracked_ops.move(
+            text,
+            after=after,
+            before=before,
+            author=author,
+            source_scope=source_scope,
+            dest_scope=dest_scope,
+            regex=regex,
+            normalize_special_chars=normalize_special_chars,
+            track=track,
+        )
+
+    # ========================================================================
+    # Tracked change aliases (backwards compatible)
+    # ========================================================================
+
     def insert_tracked(
         self,
         text: str,
@@ -768,48 +1036,13 @@ class Document:
     ) -> None:
         """Insert text with tracked changes after or before a specific location.
 
-        This method searches for the anchor text in the document and inserts
-        the new text either immediately after it or immediately before it as
-        a tracked insertion.
-
-        Args:
-            text: The text to insert
-            after: The text or regex pattern to insert after (optional)
-            before: The text or regex pattern to insert before (optional)
-            author: Optional author override (uses document author if None)
-            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
-            occurrence: Which occurrence(s) to use: 1 (first), 2 (second), "first", "last",
-                "all", or list of indices [1, 3, 5] (default: "first")
-            regex: Whether to treat anchor as a regex pattern (default: False)
-            normalize_special_chars: Auto-convert straight quotes to smart quotes for
-                matching (default: True)
-            fuzzy: Fuzzy matching configuration:
-                - None: Exact matching (default)
-                - float: Similarity threshold (e.g., 0.9 for 90% similar)
-                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
-
-        Raises:
-            ValueError: If both 'after' and 'before' are specified, or if neither is specified
-            TextNotFoundError: If the anchor text is not found
-            AmbiguousTextError: If multiple occurrences of anchor text are found and
-                occurrence not specified
-            re.error: If regex=True and the pattern is invalid
-            ImportError: If fuzzy matching requested but rapidfuzz not installed
+        This is an alias for ``insert(..., track=True)``.
+        See :meth:`insert` for full parameter documentation.
 
         Example:
-            >>> # Insert after first occurrence
             >>> doc.insert_tracked("new text", after="anchor")
-            >>>
-            >>> # Insert after all occurrences
-            >>> doc.insert_tracked("note:", after="Section", occurrence="all")
-            >>>
-            >>> # Insert after specific occurrences (1-indexed)
-            >>> doc.insert_tracked("text", after="marker", occurrence=[1, 3])
-            >>>
-            >>> # Insert with fuzzy matching
-            >>> doc.insert_tracked("new text", after="producti0n pr0ducts", fuzzy=0.85)
         """
-        self._tracked_ops.insert(
+        self.insert(
             text,
             after=after,
             before=before,
@@ -818,6 +1051,7 @@ class Document:
             occurrence=occurrence,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=True,
             fuzzy=fuzzy,
         )
 
@@ -958,44 +1192,13 @@ class Document:
     ) -> None:
         """Delete text with tracked changes.
 
-        This method searches for the specified text in the document and marks
-        it as a tracked deletion.
-
-        Args:
-            text: The text or regex pattern to delete
-            author: Optional author override (uses document author if None)
-            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
-            occurrence: Which occurrence(s) to delete: 1 (first), 2 (second), "first", "last",
-                "all", or list of indices [1, 3, 5] (default: "first")
-            regex: Whether to treat 'text' as a regex pattern (default: False)
-            normalize_special_chars: Auto-convert straight quotes to smart quotes for
-                matching (default: True)
-            fuzzy: Fuzzy matching configuration:
-                - None: Exact matching (default)
-                - float: Similarity threshold (e.g., 0.9 for 90% similar)
-                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
-
-        Raises:
-            TextNotFoundError: If the text is not found
-            AmbiguousTextError: If multiple occurrences of text are found and
-                occurrence not specified
-            re.error: If regex=True and the pattern is invalid
-            ImportError: If fuzzy matching requested but rapidfuzz not installed
+        This is an alias for ``delete(..., track=True)``.
+        See :meth:`delete` for full parameter documentation.
 
         Example:
-            >>> # Delete first occurrence
             >>> doc.delete_tracked("old text")
-            >>>
-            >>> # Delete all occurrences
-            >>> doc.delete_tracked("obsolete", occurrence="all")
-            >>>
-            >>> # Delete specific occurrences (1-indexed)
-            >>> doc.delete_tracked("text", occurrence=[1, 3])
-            >>>
-            >>> # Delete with fuzzy matching
-            >>> doc.delete_tracked("producti0n pr0ducts", fuzzy=0.85)
         """
-        self._tracked_ops.delete(
+        self.delete(
             text,
             author=author,
             scope=scope,
@@ -1003,6 +1206,7 @@ class Document:
             regex=regex,
             normalize_special_chars=normalize_special_chars,
             fuzzy=fuzzy,
+            track=True,  # Always tracked for delete_tracked
         )
 
     def replace_tracked(
@@ -1021,73 +1225,13 @@ class Document:
     ) -> None:
         """Find and replace text with tracked changes.
 
-        This method searches for text and replaces it with new text, showing
-        both the deletion of the old text and insertion of the new text as
-        tracked changes.
-
-        When regex=True, the replacement string can use capture groups:
-        - \\1, \\2, etc. for numbered groups
-        - \\g<name> for named groups
-
-        Args:
-            find: Text or regex pattern to find
-            replace: Replacement text (can include capture group references if regex=True)
-            author: Optional author override (uses document author if None)
-            scope: Limit search scope (None=all, str="text", dict={"contains": "text"})
-            occurrence: Which occurrence(s) to replace: 1 (first), 2 (second), "first",
-                "last", "all", or list of indices [1, 3, 5] (default: "first")
-            regex: Whether to treat 'find' as a regex pattern (default: False)
-            normalize_special_chars: Auto-convert straight quotes to smart quotes for
-                matching (default: True)
-            show_context: Show text before/after the match for preview (default: False)
-            check_continuity: Check if replacement may create sentence fragments (default: False)
-            context_chars: Number of characters to show before/after when show_context=True
-                (default: 50)
-            fuzzy: Fuzzy matching configuration:
-                - None: Exact matching (default)
-                - float: Similarity threshold (e.g., 0.9 for 90% similar)
-                - dict: Full config with 'threshold', 'algorithm', 'normalize_whitespace'
-
-        Raises:
-            TextNotFoundError: If the 'find' text is not found
-            AmbiguousTextError: If multiple occurrences of 'find' text are found and
-                occurrence not specified
-            re.error: If regex=True and the pattern is invalid
-            ImportError: If fuzzy matching requested but rapidfuzz not installed
-
-        Warnings:
-            ContinuityWarning: If check_continuity=True and potential sentence fragment detected
+        This is an alias for ``replace(..., track=True)``.
+        See :meth:`replace` for full parameter documentation.
 
         Example:
-            >>> # Simple replacement
             >>> doc.replace_tracked("30 days", "45 days")
-            >>>
-            >>> # Replace all occurrences
-            >>> doc.replace_tracked("old", "new", occurrence="all")
-            >>>
-            >>> # Replace specific occurrences (1-indexed)
-            >>> doc.replace_tracked("text", "updated", occurrence=[1, 3])
-            >>>
-            >>> # Regex with capture groups
-            >>> doc.replace_tracked(r"(\\d+) days", r"\\1 business days", regex=True)
-            >>>
-            >>> # With context preview
-            >>> doc.replace_tracked(
-            ...     "old text", "new text",
-            ...     show_context=True,
-            ...     context_chars=100
-            ... )
-            >>>
-            >>> # With continuity checking
-            >>> doc.replace_tracked(
-            ...     "sentence one.", "replacement.",
-            ...     check_continuity=True
-            ... )
-            >>>
-            >>> # With fuzzy matching
-            >>> doc.replace_tracked("producti0n pr0ducts", "production products", fuzzy=0.85)
         """
-        self._tracked_ops.replace(
+        self.replace(
             find,
             replace,
             author=author,
@@ -1095,6 +1239,7 @@ class Document:
             occurrence=occurrence,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=True,
             show_context=show_context,
             check_continuity=check_continuity,
             context_chars=context_chars,
@@ -1114,48 +1259,13 @@ class Document:
     ) -> None:
         """Move text to a new location with proper move tracking.
 
-        Unlike delete + insert, move tracking creates linked markers that show
-        the text was relocated rather than deleted and re-added. This provides
-        better context for document reviewers in Word.
-
-        In Word's track changes view:
-        - Source location shows text with strikethrough and "Moved" annotation
-        - Destination shows text with underline and "Moved" annotation
-        - Both locations are linked with matching move markers
-
-        Args:
-            text: The text to move (or regex pattern if regex=True)
-            after: Text to insert the moved content after (at destination)
-            before: Text to insert the moved content before (at destination)
-            author: Optional author override (uses document author if None)
-            source_scope: Limit source text search scope
-            dest_scope: Limit destination anchor search scope
-            regex: Whether to treat 'text' and anchor as regex patterns (default: False)
-            normalize_special_chars: Auto-convert straight quotes to smart quotes for
-                matching (default: True)
-
-        Raises:
-            ValueError: If both 'after' and 'before' are specified, or if neither is specified
-            TextNotFoundError: If the source text or destination anchor is not found
-            AmbiguousTextError: If multiple occurrences of source text or anchor are found
-            re.error: If regex=True and a pattern is invalid
+        This is an alias for ``move(..., track=True)``.
+        See :meth:`move` for full parameter documentation.
 
         Example:
-            >>> # Move "Section A" to after "Table of Contents"
-            >>> doc.move_tracked(
-            ...     "Section A: Introduction",
-            ...     after="Table of Contents",
-            ...     author="Editor"
-            ... )
-            >>>
-            >>> # Move text to before another location
-            >>> doc.move_tracked(
-            ...     "Important Note",
-            ...     before="Conclusion",
-            ...     source_scope="section:Appendix"
-            ... )
+            >>> doc.move_tracked("Section A", after="Table of Contents")
         """
-        self._tracked_ops.move(
+        self.move(
             text,
             after=after,
             before=before,
@@ -1164,6 +1274,7 @@ class Document:
             dest_scope=dest_scope,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=True,
         )
 
     def normalize_currency(
@@ -2300,26 +2411,27 @@ class Document:
         markup_text: str,
         author: str | None = None,
         stop_on_error: bool = False,
+        track: bool = True,
     ) -> "ApplyResult":
-        """Apply CriticMarkup changes to the document as tracked changes.
+        """Apply CriticMarkup changes to the document with optional tracking.
 
         Parses CriticMarkup syntax from the input text and applies each operation
-        to the document using tracked changes. This enables a plain-text editing
-        workflow where documents are exported to CriticMarkup, edited in any
-        text editor, then imported back with changes tracked.
+        to the document. When track=True (default), changes are shown as tracked
+        changes. When track=False, changes are applied silently.
 
-        CriticMarkup syntax is converted to Word tracked changes:
-        - {++text++} → tracked insertion
-        - {--text--} → tracked deletion
-        - {~~old~>new~~} → tracked replacement
-        - {>>comment<<} → Word comment
-        - {==text=={>>comment<<}} → Comment attached to text
+        CriticMarkup syntax is converted to Word changes:
+        - {++text++} → insertion (tracked or silent based on track param)
+        - {--text--} → deletion (tracked or silent based on track param)
+        - {~~old~>new~~} → replacement (tracked or silent based on track param)
+        - {>>comment<<} → Word comment (always visible)
+        - {==text=={>>comment<<}} → Comment attached to text (always visible)
 
         Args:
             markup_text: Markdown text with CriticMarkup annotations
             author: Author for tracked changes (uses document default if None)
             stop_on_error: If True, stop on first error. If False, continue
                 processing remaining operations.
+            track: If True, show as tracked changes; if False, apply silently (default: True)
 
         Returns:
             ApplyResult with success/failure counts and error details
@@ -2331,6 +2443,9 @@ class Document:
             >>> result = doc.apply_criticmarkup(markup, author="Reviewer")
             >>> print(f"Applied {result.successful}/{result.total} changes")
             >>> doc.save("contract_reviewed.docx")
+            >>>
+            >>> # Apply silently without tracked changes
+            >>> result = doc.apply_criticmarkup(markup, track=False)
 
         See Also:
             - to_criticmarkup(): Export document to CriticMarkup format
@@ -2338,7 +2453,7 @@ class Document:
         """
         from .criticmarkup import apply_criticmarkup
 
-        return apply_criticmarkup(self, markup_text, author, stop_on_error)
+        return apply_criticmarkup(self, markup_text, author, stop_on_error, track=track)
 
     def generate_change_report(
         self,
@@ -3134,7 +3249,10 @@ class Document:
             tmp_path.unlink(missing_ok=True)
 
     def apply_edits(
-        self, edits: list[dict[str, Any]], stop_on_error: bool = False
+        self,
+        edits: list[dict[str, Any]],
+        stop_on_error: bool = False,
+        default_track: bool = False,
     ) -> list[EditResult]:
         """Apply multiple edits in sequence.
 
@@ -3143,9 +3261,13 @@ class Document:
 
         Args:
             edits: List of edit dictionaries with keys:
-                - type: Edit operation ("insert_tracked", "replace_tracked", "delete_tracked")
+                - type: Edit operation ("insert", "delete", "replace",
+                    "insert_tracked", "replace_tracked", "delete_tracked")
+                - track: Optional boolean to control tracking per-edit
                 - Other parameters specific to the edit type
             stop_on_error: If True, stop processing on first error
+            default_track: Default value for 'track' if not specified per-edit
+                (default: False). Note: *_tracked operations always track regardless.
 
         Returns:
             List of EditResult objects, one per edit
@@ -3153,24 +3275,31 @@ class Document:
         Example:
             >>> edits = [
             ...     {
-            ...         "type": "insert_tracked",
+            ...         "type": "insert",
             ...         "text": "new text",
             ...         "after": "anchor",
-            ...         "scope": "section:Introduction"
+            ...         "track": True,  # This edit is tracked
             ...     },
             ...     {
-            ...         "type": "replace_tracked",
+            ...         "type": "replace",
             ...         "find": "old",
-            ...         "replace": "new"
+            ...         "replace": "new",
+            ...         # Uses default_track value
             ...     }
             ... ]
-            >>> results = doc.apply_edits(edits)
+            >>> results = doc.apply_edits(edits, default_track=False)
             >>> print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")
         """
-        return self._batch_ops.apply_edits(edits, stop_on_error=stop_on_error)
+        return self._batch_ops.apply_edits(
+            edits, stop_on_error=stop_on_error, default_track=default_track
+        )
 
     def apply_edit_file(
-        self, path: str | Path, format: str = "yaml", stop_on_error: bool = False
+        self,
+        path: str | Path,
+        format: str = "yaml",
+        stop_on_error: bool = False,
+        default_track: bool | None = None,
     ) -> list[EditResult]:
         """Apply edits from a YAML or JSON file.
 
@@ -3181,6 +3310,9 @@ class Document:
             path: Path to the edit specification file
             format: File format - "yaml" or "json" (default: "yaml")
             stop_on_error: If True, stop processing on first error
+            default_track: Default value for 'track' if not specified per-edit.
+                If None, uses file's default_track value (or False if not set).
+                If specified, overrides any default_track in the file.
 
         Returns:
             List of EditResult objects, one per edit
@@ -3191,20 +3323,27 @@ class Document:
 
         Example YAML file:
             ```yaml
+            default_track: false  # Global default for edits in this file
+
             edits:
-              - type: insert_tracked
+              - type: insert
                 text: "new text"
                 after: "anchor"
-              - type: replace_tracked
+                # Uses default_track: false
+
+              - type: replace
                 find: "old"
                 replace: "new"
+                track: true  # Override for this specific edit
             ```
 
         Example:
             >>> results = doc.apply_edit_file("edits.yaml")
             >>> print(f"Applied {sum(r.success for r in results)}/{len(results)} edits")
         """
-        return self._batch_ops.apply_edit_file(path, format=format, stop_on_error=stop_on_error)
+        return self._batch_ops.apply_edit_file(
+            path, format=format, stop_on_error=stop_on_error, default_track=default_track
+        )
 
     def compare_to(
         self,
@@ -3377,8 +3516,9 @@ class Document:
         author: str | None = None,
         regex: bool = False,
         normalize_special_chars: bool = True,
+        track: bool = True,
     ) -> None:
-        """Replace text in a header with tracked changes.
+        """Replace text in a header with optional tracked changes.
 
         Args:
             find: Text to find
@@ -3387,6 +3527,7 @@ class Document:
             author: Optional author override
             regex: Whether to treat 'find' as a regex pattern
             normalize_special_chars: Auto-convert quotes for matching
+            track: If True, show as tracked change; if False, silent replace (default: True)
 
         Raises:
             TextNotFoundError: If 'find' text is not found
@@ -3395,6 +3536,7 @@ class Document:
 
         Example:
             >>> doc.replace_in_header("Draft", "Final", header_type="default")
+            >>> doc.replace_in_header("Draft", "Final", track=False)  # Silent replace
         """
         self._header_footer_ops.replace_in_header(
             find=find,
@@ -3403,6 +3545,7 @@ class Document:
             author=author,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=track,
         )
 
     def replace_in_footer(
@@ -3413,8 +3556,9 @@ class Document:
         author: str | None = None,
         regex: bool = False,
         normalize_special_chars: bool = True,
+        track: bool = True,
     ) -> None:
-        """Replace text in a footer with tracked changes.
+        """Replace text in a footer with optional tracked changes.
 
         Args:
             find: Text to find
@@ -3423,6 +3567,7 @@ class Document:
             author: Optional author override
             regex: Whether to treat 'find' as a regex pattern
             normalize_special_chars: Auto-convert quotes for matching
+            track: If True, show as tracked change; if False, silent replace (default: True)
 
         Raises:
             TextNotFoundError: If 'find' text is not found
@@ -3431,6 +3576,7 @@ class Document:
 
         Example:
             >>> doc.replace_in_footer("Page {PAGE}", "Page {PAGE} of {NUMPAGES}")
+            >>> doc.replace_in_footer("Draft", "Final", track=False)  # Silent replace
         """
         self._header_footer_ops.replace_in_footer(
             find=find,
@@ -3439,6 +3585,7 @@ class Document:
             author=author,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=track,
         )
 
     def insert_in_header(
@@ -3450,8 +3597,9 @@ class Document:
         author: str | None = None,
         regex: bool = False,
         normalize_special_chars: bool = True,
+        track: bool = True,
     ) -> None:
-        """Insert text in a header with tracked changes.
+        """Insert text in a header with optional tracked changes.
 
         Args:
             text: Text to insert
@@ -3461,6 +3609,7 @@ class Document:
             author: Optional author override
             regex: Whether to treat anchor as a regex pattern
             normalize_special_chars: Auto-convert quotes for matching
+            track: If True, show as tracked change; if False, silent insert (default: True)
 
         Raises:
             TextNotFoundError: If anchor text is not found
@@ -3470,6 +3619,7 @@ class Document:
 
         Example:
             >>> doc.insert_in_header(" - Final", after="Document Title")
+            >>> doc.insert_in_header(" v2", after="Title", track=False)  # Silent insert
         """
         self._header_footer_ops.insert_in_header(
             text=text,
@@ -3479,6 +3629,7 @@ class Document:
             author=author,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=track,
         )
 
     def insert_in_footer(
@@ -3490,8 +3641,9 @@ class Document:
         author: str | None = None,
         regex: bool = False,
         normalize_special_chars: bool = True,
+        track: bool = True,
     ) -> None:
-        """Insert text in a footer with tracked changes.
+        """Insert text in a footer with optional tracked changes.
 
         Args:
             text: Text to insert
@@ -3501,6 +3653,7 @@ class Document:
             author: Optional author override
             regex: Whether to treat anchor as a regex pattern
             normalize_special_chars: Auto-convert quotes for matching
+            track: If True, show as tracked change; if False, silent insert (default: True)
 
         Raises:
             TextNotFoundError: If anchor text is not found
@@ -3510,6 +3663,7 @@ class Document:
 
         Example:
             >>> doc.insert_in_footer(" - Confidential", after="Page")
+            >>> doc.insert_in_footer(" v2", after="Page", track=False)  # Silent insert
         """
         self._header_footer_ops.insert_in_footer(
             text=text,
@@ -3519,6 +3673,7 @@ class Document:
             author=author,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=track,
         )
 
     def __del__(self) -> None:

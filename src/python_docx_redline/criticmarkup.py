@@ -594,15 +594,18 @@ def apply_criticmarkup(
     markup_text: str,
     author: str | None = None,
     stop_on_error: bool = False,
+    track: bool = True,
 ) -> ApplyResult:
-    """Apply CriticMarkup changes to document as tracked changes.
+    """Apply CriticMarkup changes to document with optional tracked changes.
 
     Parses CriticMarkup syntax from the input text and applies each operation
-    to the document using the appropriate tracked change method:
+    to the document. When track=True (default), changes are shown as tracked:
     - {++text++} → tracked insertion
     - {--text--} → tracked deletion
     - {~~old~>new~~} → tracked replacement (delete old + insert new)
     - {>>comment<<} → Word comment (requires context to attach)
+
+    When track=False, changes are applied silently without revision marks.
 
     Args:
         doc: Document to modify
@@ -610,6 +613,7 @@ def apply_criticmarkup(
         author: Author for tracked changes (uses document default if None)
         stop_on_error: If True, stop on first error. If False, continue
             processing remaining operations.
+        track: If True, show as tracked changes; if False, apply silently (default: True)
 
     Returns:
         ApplyResult with success/failure counts and error details
@@ -621,6 +625,9 @@ def apply_criticmarkup(
         ...     author="Review Bot"
         ... )
         >>> print(f"Applied {result.successful} of {result.total} changes")
+        >>>
+        >>> # Apply silently without tracked changes
+        >>> result = doc.apply_criticmarkup(markup, track=False)
 
     Note:
         Operations are applied in document order. For insertions, the
@@ -634,7 +641,7 @@ def apply_criticmarkup(
 
     for op in operations:
         try:
-            _apply_operation(doc, op, author)
+            _apply_operation(doc, op, author, track=track)
             successful += 1
         except Exception as e:
             failed += 1
@@ -650,13 +657,16 @@ def apply_criticmarkup(
     )
 
 
-def _apply_operation(doc: Document, op: CriticOperation, author: str | None) -> None:
+def _apply_operation(
+    doc: Document, op: CriticOperation, author: str | None, track: bool = True
+) -> None:
     """Apply a single CriticMarkup operation to the document.
 
     Args:
         doc: Document to modify
         op: The operation to apply
         author: Author for tracked changes
+        track: If True, show as tracked change; if False, apply silently
 
     Raises:
         TextNotFoundError: If the anchor text cannot be found
@@ -666,7 +676,7 @@ def _apply_operation(doc: Document, op: CriticOperation, author: str | None) -> 
         # For insertions, we need to find where to insert using context
         anchor = _find_insertion_anchor(op)
         if anchor:
-            doc.insert_tracked(op.text, after=anchor, author=author)
+            doc.insert(op.text, after=anchor, author=author, track=track)
         else:
             # No context - try inserting at start of document
             # This is a fallback for insertions at the very beginning
@@ -675,13 +685,14 @@ def _apply_operation(doc: Document, op: CriticOperation, author: str | None) -> 
             )
 
     elif op.type == OperationType.DELETION:
-        doc.delete_tracked(op.text, author=author)
+        doc.delete(op.text, author=author, track=track)
 
     elif op.type == OperationType.SUBSTITUTION:
-        doc.replace_tracked(op.text, op.replacement or "", author=author)
+        doc.replace(op.text, op.replacement or "", author=author, track=track)
 
     elif op.type == OperationType.COMMENT:
         # Standalone comments need context to attach to
+        # Comments are not affected by track parameter - they're always visible
         anchor = op.context_before.strip()[-50:] if op.context_before else None
         if anchor:
             doc.add_comment(op.comment or "", on=anchor, author=author)
@@ -690,6 +701,7 @@ def _apply_operation(doc: Document, op: CriticOperation, author: str | None) -> 
 
     elif op.type == OperationType.HIGHLIGHT:
         # Highlights with comments become attached comments
+        # Comments are not affected by track parameter
         if op.comment:
             doc.add_comment(op.comment, on=op.text, author=author)
         # Highlights without comments are just markers - nothing to do in DOCX
