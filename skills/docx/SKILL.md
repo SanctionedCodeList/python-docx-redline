@@ -68,14 +68,20 @@ brew install pandoc                    # Text extraction (macOS)
 | Task | Tool | Guide |
 |------|------|-------|
 | **Read/extract text** | pandoc or python-docx-redline | [reading.md](./reading.md) |
-| **Create new document** | python-docx | See below |
+| **Structured document view (YAML)** | AccessibilityTree | [accessibility.md](./accessibility.md) |
+| **Large document navigation** | OutlineTree | [accessibility.md](./accessibility.md) |
+| **Ref-based precise editing** | python-docx-redline refs | [accessibility.md](./accessibility.md) |
+| **Create new document** | python-docx | [creation.md](./creation.md) |
 | **Edit existing document** | python-docx-redline | [editing.md](./editing.md) |
 | **Edit with tracked changes** | python-docx-redline (track=True) | [tracked-changes.md](./tracked-changes.md) |
 | **Add comments** | python-docx-redline | [comments.md](./comments.md) |
+| **Footnotes/endnotes** | python-docx-redline | [footnotes.md](./footnotes.md) |
 | **CriticMarkup workflow** | python-docx-redline | [criticmarkup.md](./criticmarkup.md) |
 | **Complex XML manipulation** | Raw OOXML | [ooxml.md](./ooxml.md) |
 
 **Note:** python-docx-redline is recommended for ALL editing (not just tracked changes) because it handles run fragmentation that breaks python-docx find/replace.
+
+**For LLM/Agent workflows:** Use the AccessibilityTree for structured YAML output that fits in context windows, with stable refs for unambiguous element targeting. See [accessibility.md](./accessibility.md).
 
 ## Quick Examples
 
@@ -87,7 +93,9 @@ pandoc --track-changes=all document.docx -o output.md
 ### Create New Document
 ```python
 from docx import Document
-doc = Document()
+
+# Use a style template for custom styles (see creation.md)
+doc = Document("styles/corporate.docx")
 doc.add_heading("Title", 0)
 doc.add_paragraph("Content here.")
 doc.save("new.docx")
@@ -137,6 +145,26 @@ doc.replace_tracked("payment", "Payment", occurrence=2)
 ### Scoped Edits
 ```python
 doc.replace_tracked("Client", "Customer", scope="section:Payment Terms")
+```
+
+### Footnotes and Endnotes
+```python
+# Insert footnotes
+doc.insert_footnote("See Smith (2020) for details", at="original study")
+doc.insert_footnote(["First paragraph.", "Second with **bold**."], at="citation")
+
+# Get, edit, delete footnotes
+footnote = doc.get_footnote(1)
+footnote.edit("Updated citation")
+footnote.delete()
+
+# Tracked changes inside footnotes
+doc.insert_tracked_in_footnote(1, " [revised]", after="citation")
+doc.replace_tracked_in_footnote(1, "2020", "2024")
+
+# Search in footnotes
+matches = doc.find_all("reference", scope="footnotes")
+matches = doc.find_all("citation", include_footnotes=True)
 ```
 
 ## Common Patterns
@@ -192,10 +220,13 @@ Guidance on creating effective, professional documents:
 
 Detailed workflows for document manipulation:
 
+- **[accessibility.md](./accessibility.md)** — DocTree accessibility layer: YAML output, refs, OutlineTree for large docs
+- **[creation.md](./creation.md)** — Creating new documents with style templates
 - **[reading.md](./reading.md)** — Text extraction, find_all(), document structure, tables
 - **[editing.md](./editing.md)** — All editing with python-docx-redline (both tracked and untracked)
 - **[tracked-changes.md](./tracked-changes.md)** — Tracked changes details: insert/delete/replace, regex, scopes, batch ops
 - **[comments.md](./comments.md)** — Adding comments, occurrence parameter, replies, resolution
+- **[footnotes.md](./footnotes.md)** — Footnotes/endnotes: CRUD, tracked changes, rich content, search
 - **[criticmarkup.md](./criticmarkup.md)** — Export/import with CriticMarkup, round-trip workflows
 - **[ooxml.md](./ooxml.md)** — Raw XML manipulation for complex scenarios
 

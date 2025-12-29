@@ -85,6 +85,13 @@ doc.save("contract_redlined.docx")
 - **Delete sections** by heading with tracked changes
 - **Section/Paragraph wrappers** for document navigation
 
+### Footnotes & Endnotes
+- **Full CRUD operations** — insert, get, edit, delete notes
+- **Tracked changes inside notes** — insert, delete, replace with revision marks
+- **Rich content** — markdown formatting (`**bold**`, `*italic*`, `++underline++`)
+- **Search integration** — find text in footnotes with scope parameters
+- **Auto-renumbering** — remaining notes renumber when one is deleted
+
 ### Document Viewing
 - **Read paragraphs** with text, style, and heading info
 - **Parse sections** via heading structure
