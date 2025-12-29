@@ -1722,3 +1722,132 @@ class TestStyleManagerRoundTrip:
             assert code is not None
             assert code.run_formatting.font_name == "Courier New"
             assert code.run_formatting.font_size == 10.0
+
+
+class TestDocumentStylesProperty:
+    """Tests for Document.styles property integration."""
+
+    def test_styles_property_exists(self):
+        """Test that Document.styles property is accessible."""
+        from python_docx_redline import Document
+
+        doc = Document(FIXTURES_DIR / "simple_document.docx")
+        assert hasattr(doc, "styles")
+
+    def test_styles_returns_style_manager(self):
+        """Test that Document.styles returns a StyleManager instance."""
+        from python_docx_redline import Document
+
+        doc = Document(FIXTURES_DIR / "simple_document.docx")
+        assert isinstance(doc.styles, StyleManager)
+
+    def test_styles_get_works(self):
+        """Test that doc.styles.get() works correctly."""
+        from python_docx_redline import Document
+
+        doc = Document(FIXTURES_DIR / "simple_document.docx")
+        normal = doc.styles.get("Normal")
+        assert normal is not None
+        assert normal.style_id == "Normal"
+        assert normal.style_type == StyleType.PARAGRAPH
+
+    def test_styles_list_works(self):
+        """Test that doc.styles.list() works correctly."""
+        from python_docx_redline import Document
+
+        doc = Document(FIXTURES_DIR / "simple_document.docx")
+        para_styles = doc.styles.list(style_type=StyleType.PARAGRAPH)
+        assert len(para_styles) > 0
+        for style in para_styles:
+            assert style.style_type == StyleType.PARAGRAPH
+
+    def test_styles_ensure_style_works(self):
+        """Test that doc.styles.ensure_style() works correctly."""
+        from python_docx_redline import Document
+        from python_docx_redline.models.style import RunFormatting
+
+        doc = Document(FIXTURES_DIR / "simple_document.docx")
+        style = doc.styles.ensure_style(
+            style_id="DocTestStyle",
+            name="Doc Test Style",
+            style_type=StyleType.CHARACTER,
+            run_formatting=RunFormatting(bold=True),
+        )
+        assert style.style_id == "DocTestStyle"
+        assert "DocTestStyle" in doc.styles
+
+    def test_styles_lazy_initialization(self):
+        """Test that styles property is lazily initialized."""
+        from python_docx_redline import Document
+
+        doc = Document(FIXTURES_DIR / "simple_document.docx")
+        # Before accessing styles, no _style_manager_instance
+        assert not hasattr(doc, "_style_manager_instance")
+
+        # Access styles
+        _ = doc.styles
+
+        # Now _style_manager_instance exists
+        assert hasattr(doc, "_style_manager_instance")
+
+    def test_styles_cached_across_calls(self):
+        """Test that styles property returns the same instance on multiple calls."""
+        from python_docx_redline import Document
+
+        doc = Document(FIXTURES_DIR / "simple_document.docx")
+        styles1 = doc.styles
+        styles2 = doc.styles
+        assert styles1 is styles2
+
+    def test_styles_persist_after_save(self):
+        """Test that styles added via doc.styles persist after save."""
+        import tempfile
+
+        from python_docx_redline import Document
+        from python_docx_redline.models.style import RunFormatting
+
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            # Add style and save
+            doc = Document(FIXTURES_DIR / "simple_document.docx")
+            doc.styles.ensure_style(
+                style_id="PersistTest",
+                name="Persist Test",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(bold=True, color="#FF0000"),
+            )
+            doc.save(tmp_path, validate=False)
+
+            # Reload and verify
+            doc2 = Document(tmp_path)
+            reloaded = doc2.styles.get("PersistTest")
+            assert reloaded is not None
+            assert reloaded.run_formatting.bold is True
+            assert reloaded.run_formatting.color == "#FF0000"
+        finally:
+            import os
+
+            os.unlink(tmp_path)
+
+    def test_styles_persist_after_save_to_bytes(self):
+        """Test that styles added via doc.styles persist after save_to_bytes."""
+        from python_docx_redline import Document
+        from python_docx_redline.models.style import RunFormatting
+
+        # Add style and save to bytes
+        doc = Document(FIXTURES_DIR / "simple_document.docx")
+        doc.styles.ensure_style(
+            style_id="BytesPersistTest",
+            name="Bytes Persist Test",
+            style_type=StyleType.CHARACTER,
+            run_formatting=RunFormatting(italic=True),
+        )
+        doc_bytes = doc.save_to_bytes(validate=False)
+
+        # Reload from bytes and verify
+        doc2 = Document(doc_bytes)
+        reloaded = doc2.styles.get("BytesPersistTest")
+        assert reloaded is not None
+        assert reloaded.run_formatting.italic is True

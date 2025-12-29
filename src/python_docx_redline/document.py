@@ -41,6 +41,7 @@ from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
 from .results import ComparisonStats, EditResult, FormatResult
 from .scope import NoteScope, ScopeEvaluator, parse_note_scope
+from .styles import StyleManager
 from .text_search import TextSearch, TextSpan
 from .tracked_xml import TrackedXMLGenerator
 from .validation import ValidationError
@@ -370,6 +371,42 @@ class Document:
         if not hasattr(self, "_comparison_ops_instance"):
             self._comparison_ops_instance = ComparisonOperations(self)
         return self._comparison_ops_instance
+
+    @property
+    def styles(self) -> StyleManager:
+        """Get the style manager for this document.
+
+        Provides access to document styles for reading and modifying style
+        definitions. The StyleManager is lazily initialized on first access.
+
+        Returns:
+            StyleManager for reading and modifying styles
+
+        Raises:
+            ValidationError: If the document is not a .docx package
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> for style in doc.styles.list(style_type=StyleType.PARAGRAPH):
+            ...     print(f"{style.style_id}: {style.name}")
+            >>>
+            >>> # Ensure a style exists
+            >>> doc.styles.ensure_style(
+            ...     style_id="MyStyle",
+            ...     name="My Style",
+            ...     style_type=StyleType.CHARACTER,
+            ...     run_formatting=RunFormatting(bold=True)
+            ... )
+            >>> doc.save("output.docx")  # Style changes saved automatically
+        """
+        if not hasattr(self, "_style_manager_instance"):
+            if self._package is None:
+                raise ValidationError(
+                    "StyleManager requires a .docx package. "
+                    "Raw XML files do not have a styles.xml component."
+                )
+            self._style_manager_instance = StyleManager(self._package)
+        return self._style_manager_instance
 
     # View capabilities (Phase 3)
 
@@ -3317,6 +3354,10 @@ class Document:
 
         try:
             if self._package is not None:
+                # Save style changes if the StyleManager was accessed and modified
+                if hasattr(self, "_style_manager_instance"):
+                    self._style_manager_instance.save()
+
                 # Write the modified XML back to the package
                 self._package.set_part("word/document.xml", self.xml_root)
 
@@ -3418,6 +3459,10 @@ class Document:
             raise ValidationError("save_to_bytes only supported for .docx files")
 
         try:
+            # Save style changes if the StyleManager was accessed and modified
+            if hasattr(self, "_style_manager_instance"):
+                self._style_manager_instance.save()
+
             # Write the modified XML back to the package
             self._package.set_part("word/document.xml", self.xml_root)
 
