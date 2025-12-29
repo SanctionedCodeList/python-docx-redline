@@ -325,8 +325,25 @@ class HyperlinkOperations:
             NoteNotFoundError: If footnote not found
             ValueError: If both url and anchor specified, or neither specified
             TextNotFoundError: If anchor text not found in footnote
+
+        Example:
+            >>> doc.insert_hyperlink_in_footnote(
+            ...     note_id=3,
+            ...     url='https://law.cornell.edu/uscode/text/28/1782',
+            ...     text='28 U.S.C. section 1782',
+            ...     after='See'
+            ... )
         """
-        raise NotImplementedError("insert_hyperlink_in_footnote not yet implemented")
+        return self._insert_hyperlink_in_note(
+            note_type="footnote",
+            note_id=note_id,
+            url=url,
+            anchor=anchor,
+            text=text,
+            after=after,
+            before=before,
+            track=track,
+        )
 
     def insert_hyperlink_in_endnote(
         self,
@@ -356,8 +373,25 @@ class HyperlinkOperations:
             NoteNotFoundError: If endnote not found
             ValueError: If both url and anchor specified, or neither specified
             TextNotFoundError: If anchor text not found in endnote
+
+        Example:
+            >>> doc.insert_hyperlink_in_endnote(
+            ...     note_id=1,
+            ...     url='https://example.com/reference',
+            ...     text='online reference',
+            ...     after='see the'
+            ... )
         """
-        raise NotImplementedError("insert_hyperlink_in_endnote not yet implemented")
+        return self._insert_hyperlink_in_note(
+            note_type="endnote",
+            note_id=note_id,
+            url=url,
+            anchor=anchor,
+            text=text,
+            after=after,
+            before=before,
+            track=track,
+        )
 
     # ==================== Read Hyperlinks ====================
 
@@ -511,7 +545,43 @@ class HyperlinkOperations:
         Example:
             >>> doc.edit_hyperlink_anchor("lnk:3", "NewBookmarkName")
         """
-        raise NotImplementedError("edit_hyperlink_anchor not yet implemented")
+        # Validate new_anchor
+        if not new_anchor or not new_anchor.strip():
+            raise ValueError("new_anchor cannot be empty")
+
+        # Find the hyperlink element
+        hyperlink_elem, r_id = self._find_hyperlink_by_ref(ref)
+
+        if hyperlink_elem is None:
+            raise ValueError(f"Hyperlink not found: {ref}")
+
+        # Check if this is an internal link (has w:anchor, no r:id)
+        if r_id is not None:
+            raise ValueError(
+                f"Cannot edit anchor of external hyperlink '{ref}' - "
+                "use edit_hyperlink_url() for external links"
+            )
+
+        # Verify the hyperlink has an existing anchor (is truly internal)
+        ns_w = f"{{{WORD_NAMESPACE}}}"
+        current_anchor = hyperlink_elem.get(f"{ns_w}anchor")
+        if current_anchor is None:
+            raise ValueError(
+                f"Hyperlink '{ref}' has no anchor attribute - "
+                "cannot determine if it is an internal link"
+            )
+
+        # Warn if the new bookmark doesn't exist
+        bookmark_registry = BookmarkRegistry.from_xml(self._document.xml_root)
+        if not bookmark_registry.get_bookmark(new_anchor):
+            warnings.warn(
+                f"Bookmark '{new_anchor}' does not exist. Internal hyperlink will be broken.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        # Update the anchor attribute
+        hyperlink_elem.set(f"{ns_w}anchor", new_anchor)
 
     # ==================== Remove Hyperlinks ====================
 

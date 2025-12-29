@@ -97,6 +97,47 @@ def create_document_with_duplicate_text() -> Path:
     return doc_path
 
 
+def create_document_with_bookmark() -> Path:
+    """Create a document with a bookmark for testing internal hyperlinks."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>
+<w:p>
+  <w:r><w:t>This is a test document with some text.</w:t></w:r>
+</w:p>
+<w:p>
+  <w:bookmarkStart w:id="0" w:name="TestBookmark"/>
+  <w:r><w:t>This paragraph contains a bookmark.</w:t></w:r>
+  <w:bookmarkEnd w:id="0"/>
+</w:p>
+<w:p>
+  <w:r><w:t>More content after the bookmark.</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+    content_types_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types_xml)
+        docx.writestr("_rels/.rels", root_rels)
+        docx.writestr("word/document.xml", document_xml)
+
+    return doc_path
+
+
 def create_document_with_hyperlinks() -> Path:
     """Create a document that already contains hyperlinks."""
     doc_path = Path(tempfile.mktemp(suffix=".docx"))
@@ -722,6 +763,235 @@ class TestHyperlinkPersistence:
             doc_path.unlink()
             if output_path.exists():
                 output_path.unlink()
+
+
+class TestInternalHyperlinks:
+    """Tests for Phase 2 internal hyperlink functionality."""
+
+    def test_insert_internal_hyperlink_with_anchor_parameter(self) -> None:
+        """Test inserting hyperlink to bookmark using anchor parameter."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+
+            # Insert internal link to bookmark
+            r_id = doc.insert_hyperlink(
+                anchor="SectionOne",
+                text="Jump to Section One",
+                after="test document",
+            )
+
+            # Internal links should return None (no relationship ID)
+            assert r_id is None
+
+            # Verify hyperlink element was created
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            hyperlink = hyperlinks[0]
+
+            # Verify display text
+            text_elements = hyperlink.findall(f".//{{{WORD_NS}}}t")
+            text = "".join(t.text or "" for t in text_elements)
+            assert "Jump to Section One" in text
+
+        finally:
+            doc_path.unlink()
+
+    def test_internal_hyperlink_has_anchor_attribute_not_rid(self) -> None:
+        """Test that internal hyperlinks use w:anchor attribute, not r:id."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+
+            doc.insert_hyperlink(
+                anchor="MyBookmark",
+                text="Internal Link",
+                after="some text",
+            )
+
+            # Find the hyperlink
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            hyperlink = hyperlinks[0]
+
+            # Verify w:anchor attribute is set
+            anchor_attr = hyperlink.get(f"{{{WORD_NS}}}anchor")
+            assert anchor_attr == "MyBookmark"
+
+            # Verify r:id is NOT set
+            r_id_attr = hyperlink.get(f"{{{REL_NS}}}id")
+            assert r_id_attr is None
+
+        finally:
+            doc_path.unlink()
+
+    def test_internal_hyperlink_missing_bookmark_warning(self) -> None:
+        """Test warning issued when bookmark doesn't exist."""
+        import warnings
+
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                doc.insert_hyperlink(
+                    anchor="NonExistentBookmark",
+                    text="Broken Link",
+                    after="some text",
+                )
+
+                # Should have issued exactly one warning
+                assert len(w) == 1
+                assert issubclass(w[0].category, UserWarning)
+                assert "NonExistentBookmark" in str(w[0].message)
+                assert "does not exist" in str(w[0].message)
+
+            # Link should still be created (just broken)
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+        finally:
+            doc_path.unlink()
+
+    def test_internal_hyperlink_existing_bookmark_no_warning(self) -> None:
+        """Test no warning when bookmark exists."""
+        import warnings
+
+        doc_path = create_document_with_bookmark()
+        try:
+            doc = Document(doc_path)
+
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                doc.insert_hyperlink(
+                    anchor="TestBookmark",
+                    text="Valid Link",
+                    after="some text",
+                )
+
+                # Should NOT have issued any warning
+                assert len(w) == 0
+
+            # Link should be created successfully
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+        finally:
+            doc_path.unlink()
+
+    def test_internal_hyperlink_no_relationship_in_saved_file(self) -> None:
+        """Test that internal hyperlinks don't create relationship entries after save."""
+        doc_path = create_simple_document()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            doc.insert_hyperlink(
+                anchor="InternalTarget",
+                text="Internal Link",
+                after="some text",
+            )
+
+            doc.save(output_path)
+
+            # Check relationships file
+            with zipfile.ZipFile(output_path, "r") as docx:
+                rels_content = docx.read("word/_rels/document.xml.rels").decode("utf-8")
+
+            # Parse and check for hyperlink relationships
+            rels_tree = etree.fromstring(rels_content.encode())
+            relationships = rels_tree.findall(f".//{{{PKG_REL_NS}}}Relationship")
+
+            # Count hyperlink relationships
+            hyperlink_count = sum(
+                1 for rel in relationships if "hyperlink" in rel.get("Type", "").lower()
+            )
+
+            # Should be no hyperlink relationships for internal links
+            assert hyperlink_count == 0
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_hyperlinks_property_identifies_internal_vs_external(self) -> None:
+        """Test that hyperlinks property correctly identifies internal vs external links."""
+        doc_path = create_document_with_hyperlinks()
+        try:
+            doc = Document(doc_path)
+
+            # hyperlinks property currently raises NotImplementedError
+            # This test documents expected behavior once implemented
+            with pytest.raises(NotImplementedError):
+                _ = doc.hyperlinks
+
+            # Future implementation should return list with is_external flag
+            # distinguishing internal (anchor) from external (URL) links
+
+        finally:
+            doc_path.unlink()
+
+    def test_internal_hyperlink_with_tooltip(self) -> None:
+        """Test inserting internal hyperlink with tooltip."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+
+            doc.insert_hyperlink(
+                anchor="MySection",
+                text="See Section",
+                after="test document",
+                tooltip="Jump to My Section",
+            )
+
+            # Verify tooltip attribute
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            hyperlink = hyperlinks[0]
+            tooltip = hyperlink.get(f"{{{WORD_NS}}}tooltip")
+            assert tooltip == "Jump to My Section"
+
+        finally:
+            doc_path.unlink()
+
+    def test_internal_hyperlink_applies_style(self) -> None:
+        """Test that internal hyperlinks also get Hyperlink character style."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+
+            doc.insert_hyperlink(
+                anchor="BookmarkTarget",
+                text="Styled Internal Link",
+                after="test document",
+            )
+
+            # Find hyperlink element
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            # Find run inside hyperlink
+            hyperlink = hyperlinks[0]
+            runs = hyperlink.findall(f".//{{{WORD_NS}}}r")
+            assert len(runs) > 0
+
+            # Check for rStyle with Hyperlink value
+            run = runs[0]
+            rpr = run.find(f"{{{WORD_NS}}}rPr")
+            assert rpr is not None
+
+            rstyle = rpr.find(f"{{{WORD_NS}}}rStyle")
+            assert rstyle is not None
+            assert rstyle.get(f"{{{WORD_NS}}}val") == "Hyperlink"
+
+        finally:
+            doc_path.unlink()
 
 
 class TestHyperlinkStyleCreation:

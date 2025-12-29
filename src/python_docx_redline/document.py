@@ -4597,6 +4597,24 @@ class Document:
         """
         return self._hyperlink_ops.edit_hyperlink_url(ref=ref, new_url=new_url)
 
+    def edit_hyperlink_anchor(self, ref: str, new_anchor: str) -> None:
+        """Change the target bookmark of an internal hyperlink.
+
+        Only works for internal hyperlinks (not external URLs).
+
+        Args:
+            ref: Hyperlink ref (e.g., "lnk:5")
+            new_anchor: The new bookmark name to link to
+
+        Raises:
+            ValueError: If hyperlink not found or is an external link
+            ValueError: If new_anchor is empty
+
+        Example:
+            >>> doc.edit_hyperlink_anchor("lnk:3", "NewBookmarkName")
+        """
+        return self._hyperlink_ops.edit_hyperlink_anchor(ref=ref, new_anchor=new_anchor)
+
     def remove_hyperlink(
         self,
         ref: str,
