@@ -154,12 +154,6 @@ class HyperlinkOperations:
         if after is None and before is None:
             raise ValueError("Must specify either 'after' or 'before' parameter")
 
-        # For now, only external URLs are supported (anchor= is a separate task)
-        if anchor is not None:
-            raise NotImplementedError(
-                "Internal hyperlinks (anchor=) not yet implemented. Use url= for external links."
-            )
-
         # Ensure we have a valid package
         if not self._document._is_zip or not self._document._temp_dir:
             raise ValueError("Cannot add hyperlinks to non-ZIP documents")
@@ -185,29 +179,41 @@ class HyperlinkOperations:
 
         match = matches[0]
 
-        # Add hyperlink relationship with External target mode
-        package = self._document._package
-        if not package:
-            raise ValueError("Cannot add hyperlinks: package not available")
-
-        rel_mgr = RelationshipManager(package, "word/document.xml")
-        r_id = rel_mgr.add_unique_relationship(
-            RelationshipTypes.HYPERLINK,
-            url,  # type: ignore[arg-type]  # url is not None here
-            target_mode="External",
-        )
-        rel_mgr.save()
-
         # Ensure Hyperlink style exists
         self._ensure_hyperlink_style()
 
-        # Create hyperlink element
-        hyperlink_elem = self._create_hyperlink_element(
-            text=text,
-            r_id=r_id,
-            anchor=None,
-            tooltip=tooltip,
-        )
+        # Handle external links (url) vs internal links (anchor)
+        r_id: str | None = None
+        if url is not None:
+            # External link: add hyperlink relationship
+            package = self._document._package
+            if not package:
+                raise ValueError("Cannot add hyperlinks: package not available")
+
+            rel_mgr = RelationshipManager(package, "word/document.xml")
+            r_id = rel_mgr.add_unique_relationship(
+                RelationshipTypes.HYPERLINK,
+                url,
+                target_mode="External",
+            )
+            rel_mgr.save()
+
+            # Create hyperlink element with r:id
+            hyperlink_elem = self._create_hyperlink_element(
+                text=text,
+                r_id=r_id,
+                anchor=None,
+                tooltip=tooltip,
+            )
+        else:
+            # Internal link: no relationship needed, just w:anchor attribute
+            # Note: anchor is not None here due to earlier validation
+            hyperlink_elem = self._create_hyperlink_element(
+                text=text,
+                r_id=None,
+                anchor=anchor,
+                tooltip=tooltip,
+            )
 
         # Insert the hyperlink at the match location
         if insert_after:
