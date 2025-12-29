@@ -4597,6 +4597,39 @@ class Document:
         """
         return self._hyperlink_ops.edit_hyperlink_url(ref=ref, new_url=new_url)
 
+    def edit_hyperlink_text(
+        self,
+        ref: str,
+        new_text: str,
+        track: bool = False,
+        author: str | None = None,
+    ) -> None:
+        """Change the display text of a hyperlink.
+
+        Replaces the visible text of the hyperlink while keeping the
+        same target URL or bookmark.
+
+        Args:
+            ref: Hyperlink ref (e.g., "lnk:5")
+            new_text: The new display text
+            track: If True, show text change as tracked change
+            author: Optional author for tracked change
+
+        Raises:
+            ValueError: If hyperlink not found
+            ValueError: If new_text is empty
+
+        Example:
+            >>> doc.edit_hyperlink_text("lnk:5", "Updated link text")
+            >>> doc.edit_hyperlink_text("lnk:5", "New Text", track=True)
+        """
+        return self._hyperlink_ops.edit_hyperlink_text(
+            ref=ref,
+            new_text=new_text,
+            track=track,
+            author=author,
+        )
+
     def edit_hyperlink_anchor(self, ref: str, new_anchor: str) -> None:
         """Change the target bookmark of an internal hyperlink.
 

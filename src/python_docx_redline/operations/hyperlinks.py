@@ -264,7 +264,111 @@ class HyperlinkOperations:
             ValueError: If invalid header_type specified
             TextNotFoundError: If anchor text not found in header
         """
-        raise NotImplementedError("insert_hyperlink_in_header not yet implemented")
+        # Validate url/anchor parameters
+        if url is not None and anchor is not None:
+            raise ValueError("Cannot specify both 'url' and 'anchor' parameters")
+        if url is None and anchor is None:
+            raise ValueError("Must specify either 'url' or 'anchor' parameter")
+
+        # Validate after/before parameters
+        if after is not None and before is not None:
+            raise ValueError("Cannot specify both 'after' and 'before' parameters")
+        if after is None and before is None:
+            raise ValueError("Must specify either 'after' or 'before' parameter")
+
+        # Validate header_type
+        valid_types = {"default", "first", "even"}
+        if header_type not in valid_types:
+            raise ValueError(
+                f"Invalid header_type '{header_type}'. Must be one of: {', '.join(valid_types)}"
+            )
+
+        # Ensure we have a valid package
+        if not self._document._is_zip or not self._document._temp_dir:
+            raise ValueError("Cannot add hyperlinks to non-ZIP documents")
+
+        # Get the header
+        header = self._document._header_footer_ops._get_header_by_type(header_type)
+        if header is None:
+            raise ValueError(f"No header of type '{header_type}' found in document")
+
+        # Find location for hyperlink insertion
+        anchor_text = after if after is not None else before
+        insert_after = after is not None
+
+        paragraphs = list(header.element.iter(f"{{{WORD_NAMESPACE}}}p"))
+
+        matches = self._document._text_search.find_text(
+            anchor_text,
+            paragraphs,  # type: ignore[arg-type]
+        )
+
+        if not matches:
+            raise TextNotFoundError(anchor_text)  # type: ignore[arg-type]
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(anchor_text, matches)  # type: ignore[arg-type]
+
+        match = matches[0]
+
+        # Ensure Hyperlink style exists
+        self._ensure_hyperlink_style()
+
+        # Handle external links (url) vs internal links (anchor)
+        r_id: str | None = None
+        if url is not None:
+            # External link: add hyperlink relationship to the header's .rels file
+            package = self._document._package
+            if not package:
+                raise ValueError("Cannot add hyperlinks: package not available")
+
+            # The part name for the header is "word/header1.xml" (or similar)
+            # file_path is the relative path from word/ (e.g., "header1.xml")
+            header_part_name = f"word/{header.file_path}"
+
+            rel_mgr = RelationshipManager(package, header_part_name)
+            r_id = rel_mgr.add_unique_relationship(
+                RelationshipTypes.HYPERLINK,
+                url,
+                target_mode="External",
+            )
+            rel_mgr.save()
+
+            # Create hyperlink element with r:id
+            hyperlink_elem = self._create_hyperlink_element(
+                text=text,
+                r_id=r_id,
+                anchor=None,
+                tooltip=None,
+            )
+        else:
+            # Internal link: no relationship needed, just w:anchor attribute
+            # Validate that the bookmark exists (warn if not, but allow the link)
+            bookmark_registry = BookmarkRegistry.from_xml(self._document.xml_root)
+            if not bookmark_registry.get_bookmark(anchor):
+                warnings.warn(
+                    f"Bookmark '{anchor}' does not exist. Internal hyperlink will be broken.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+            hyperlink_elem = self._create_hyperlink_element(
+                text=text,
+                r_id=None,
+                anchor=anchor,
+                tooltip=None,
+            )
+
+        # Insert the hyperlink at the match location
+        if insert_after:
+            self._insert_after_match(match, hyperlink_elem)
+        else:
+            self._insert_before_match(match, hyperlink_elem)
+
+        # Save the modified header XML
+        self._document._header_footer_ops._save_header_footer_xml(header.file_path, header.element)
+
+        return r_id
 
     def insert_hyperlink_in_footer(
         self,
@@ -295,7 +399,111 @@ class HyperlinkOperations:
             ValueError: If invalid footer_type specified
             TextNotFoundError: If anchor text not found in footer
         """
-        raise NotImplementedError("insert_hyperlink_in_footer not yet implemented")
+        # Validate url/anchor parameters
+        if url is not None and anchor is not None:
+            raise ValueError("Cannot specify both 'url' and 'anchor' parameters")
+        if url is None and anchor is None:
+            raise ValueError("Must specify either 'url' or 'anchor' parameter")
+
+        # Validate after/before parameters
+        if after is not None and before is not None:
+            raise ValueError("Cannot specify both 'after' and 'before' parameters")
+        if after is None and before is None:
+            raise ValueError("Must specify either 'after' or 'before' parameter")
+
+        # Validate footer_type
+        valid_types = {"default", "first", "even"}
+        if footer_type not in valid_types:
+            raise ValueError(
+                f"Invalid footer_type '{footer_type}'. Must be one of: {', '.join(valid_types)}"
+            )
+
+        # Ensure we have a valid package
+        if not self._document._is_zip or not self._document._temp_dir:
+            raise ValueError("Cannot add hyperlinks to non-ZIP documents")
+
+        # Get the footer
+        footer = self._document._header_footer_ops._get_footer_by_type(footer_type)
+        if footer is None:
+            raise ValueError(f"No footer of type '{footer_type}' found in document")
+
+        # Find location for hyperlink insertion
+        anchor_text = after if after is not None else before
+        insert_after = after is not None
+
+        paragraphs = list(footer.element.iter(f"{{{WORD_NAMESPACE}}}p"))
+
+        matches = self._document._text_search.find_text(
+            anchor_text,
+            paragraphs,  # type: ignore[arg-type]
+        )
+
+        if not matches:
+            raise TextNotFoundError(anchor_text)  # type: ignore[arg-type]
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(anchor_text, matches)  # type: ignore[arg-type]
+
+        match = matches[0]
+
+        # Ensure Hyperlink style exists
+        self._ensure_hyperlink_style()
+
+        # Handle external links (url) vs internal links (anchor)
+        r_id: str | None = None
+        if url is not None:
+            # External link: add hyperlink relationship to the footer's .rels file
+            package = self._document._package
+            if not package:
+                raise ValueError("Cannot add hyperlinks: package not available")
+
+            # The part name for the footer is "word/footer1.xml" (or similar)
+            # file_path is the relative path from word/ (e.g., "footer1.xml")
+            footer_part_name = f"word/{footer.file_path}"
+
+            rel_mgr = RelationshipManager(package, footer_part_name)
+            r_id = rel_mgr.add_unique_relationship(
+                RelationshipTypes.HYPERLINK,
+                url,
+                target_mode="External",
+            )
+            rel_mgr.save()
+
+            # Create hyperlink element with r:id
+            hyperlink_elem = self._create_hyperlink_element(
+                text=text,
+                r_id=r_id,
+                anchor=None,
+                tooltip=None,
+            )
+        else:
+            # Internal link: no relationship needed, just w:anchor attribute
+            # Validate that the bookmark exists (warn if not, but allow the link)
+            bookmark_registry = BookmarkRegistry.from_xml(self._document.xml_root)
+            if not bookmark_registry.get_bookmark(anchor):
+                warnings.warn(
+                    f"Bookmark '{anchor}' does not exist. Internal hyperlink will be broken.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+            hyperlink_elem = self._create_hyperlink_element(
+                text=text,
+                r_id=None,
+                anchor=anchor,
+                tooltip=None,
+            )
+
+        # Insert the hyperlink at the match location
+        if insert_after:
+            self._insert_after_match(match, hyperlink_elem)
+        else:
+            self._insert_before_match(match, hyperlink_elem)
+
+        # Save the modified footer XML
+        self._document._header_footer_ops._save_header_footer_xml(footer.file_path, footer.element)
+
+        return r_id
 
     def insert_hyperlink_in_footnote(
         self,
@@ -527,7 +735,85 @@ class HyperlinkOperations:
         Example:
             >>> doc.edit_hyperlink_text("lnk:5", "Updated link text")
         """
-        raise NotImplementedError("edit_hyperlink_text not yet implemented")
+        # Validate new_text
+        if not new_text:
+            raise ValueError("new_text cannot be empty")
+
+        # Find the hyperlink element
+        hyperlink_elem, _ = self._find_hyperlink_by_ref(ref)
+        if hyperlink_elem is None:
+            raise ValueError(f"Hyperlink not found: {ref}")
+
+        # Get the current text content
+        old_text = self._get_hyperlink_text(hyperlink_elem)
+
+        # Find all runs inside the hyperlink
+        runs = list(hyperlink_elem.findall(f"{{{WORD_NAMESPACE}}}r"))
+
+        if not runs:
+            raise ValueError(f"Hyperlink has no runs to edit: {ref}")
+
+        if track:
+            # Create tracked deletion for old text and insertion for new text
+            # Replace all runs with deletion + insertion
+            deletion_xml = self._document._xml_generator.create_deletion(old_text, author)
+            insertion_xml = self._document._xml_generator.create_insertion(new_text, author)
+
+            # Parse both elements
+            deletion_elements = self._parse_xml_elements(deletion_xml)
+            insertion_elements = self._parse_xml_elements(insertion_xml)
+
+            # Get first run position
+            first_run_index = list(hyperlink_elem).index(runs[0])
+
+            # Remove all existing runs
+            for run in runs:
+                hyperlink_elem.remove(run)
+
+            # Insert deletion and insertion elements at the first run position
+            insert_pos = first_run_index
+            for elem in deletion_elements:
+                hyperlink_elem.insert(insert_pos, elem)
+                insert_pos += 1
+            for elem in insertion_elements:
+                hyperlink_elem.insert(insert_pos, elem)
+                insert_pos += 1
+        else:
+            # Untracked edit: simply replace text content in runs
+            # Strategy: clear all runs except the first, then set new text in the first
+            # while preserving the Hyperlink style
+
+            # Keep the first run and remove the rest
+            first_run = runs[0]
+            for run in runs[1:]:
+                hyperlink_elem.remove(run)
+
+            # Find or create the text element in the first run
+            t_elem = first_run.find(f"{{{WORD_NAMESPACE}}}t")
+            if t_elem is None:
+                t_elem = etree.SubElement(first_run, f"{{{WORD_NAMESPACE}}}t")
+
+            # Set the new text
+            t_elem.text = new_text
+
+            # Handle xml:space for leading/trailing whitespace
+            if new_text and (new_text[0].isspace() or new_text[-1].isspace()):
+                t_elem.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+            else:
+                # Remove the attribute if it exists and is not needed
+                if "{http://www.w3.org/XML/1998/namespace}space" in t_elem.attrib:
+                    del t_elem.attrib["{http://www.w3.org/XML/1998/namespace}space"]
+
+            # Ensure the Hyperlink style is applied
+            rpr = first_run.find(f"{{{WORD_NAMESPACE}}}rPr")
+            if rpr is None:
+                rpr = etree.Element(f"{{{WORD_NAMESPACE}}}rPr")
+                first_run.insert(0, rpr)
+
+            rstyle = rpr.find(f"{{{WORD_NAMESPACE}}}rStyle")
+            if rstyle is None:
+                rstyle = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}rStyle")
+            rstyle.set(f"{{{WORD_NAMESPACE}}}val", "Hyperlink")
 
     def edit_hyperlink_anchor(self, ref: str, new_anchor: str) -> None:
         """Change the target bookmark of an internal hyperlink.
