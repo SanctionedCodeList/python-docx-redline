@@ -11,16 +11,22 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from lxml import etree
 
 from ..constants import WORD_NAMESPACE, w
+from .bookmarks import BookmarkRegistry
+from .images import ImageExtractor
 from .registry import RefRegistry
 from .types import (
     AccessibilityNode,
+    BookmarkInfo,
     ElementType,
+    HyperlinkInfo,
+    ImageInfo,
     Ref,
+    ReferenceValidationResult,
     ViewMode,
 )
 
@@ -37,12 +43,18 @@ class DocumentStats:
         tables: Number of tables in the body
         tracked_changes: Number of tracked changes
         comments: Number of comments
+        images: Number of images and embedded objects
+        bookmarks: Number of bookmarks
+        hyperlinks: Number of hyperlinks
     """
 
     paragraphs: int = 0
     tables: int = 0
     tracked_changes: int = 0
     comments: int = 0
+    images: int = 0
+    bookmarks: int = 0
+    hyperlinks: int = 0
 
 
 class AccessibilityTree:
@@ -72,6 +84,7 @@ class AccessibilityTree:
         view_mode: ViewMode | None = None,
         stats: DocumentStats | None = None,
         document_path: str | Path | None = None,
+        bookmark_registry: BookmarkRegistry | None = None,
     ) -> None:
         """Initialize an AccessibilityTree.
 
@@ -81,12 +94,80 @@ class AccessibilityTree:
             view_mode: View configuration (defaults to standard)
             stats: Document statistics
             document_path: Path to source document
+            bookmark_registry: BookmarkRegistry for bookmarks and hyperlinks
         """
         self.root = root
         self.registry = registry
         self.view_mode = view_mode or ViewMode()
         self.stats = stats or DocumentStats()
         self.document_path = document_path
+        self.bookmark_registry = bookmark_registry or BookmarkRegistry()
+
+    @property
+    def bookmarks(self) -> dict[str, BookmarkInfo]:
+        """Get all bookmarks in the document.
+
+        Returns:
+            Dictionary of bookmark name to BookmarkInfo
+        """
+        return self.bookmark_registry.bookmarks
+
+    @property
+    def hyperlinks(self) -> list[HyperlinkInfo]:
+        """Get all hyperlinks in the document.
+
+        Returns:
+            List of HyperlinkInfo objects
+        """
+        return self.bookmark_registry.hyperlinks
+
+    def get_bookmark(self, name: str) -> BookmarkInfo | None:
+        """Get a bookmark by name.
+
+        Args:
+            name: Bookmark name
+
+        Returns:
+            BookmarkInfo or None if not found
+        """
+        return self.bookmark_registry.get_bookmark(name)
+
+    def validate_references(self) -> ReferenceValidationResult:
+        """Validate all document references.
+
+        Checks for broken links and orphan bookmarks.
+
+        Returns:
+            ReferenceValidationResult with validation details
+        """
+        return self.bookmark_registry.validate_references()
+
+    def get_images(self) -> list[ImageInfo]:
+        """Get all images in the document.
+
+        Returns:
+            List of ImageInfo objects for all images in the document
+        """
+        images: list[ImageInfo] = []
+        for node in self.iter_nodes():
+            if node.has_images:
+                images.extend(node.images)
+        return images
+
+    def get_image(self, ref: str) -> ImageInfo | None:
+        """Get an image by its ref.
+
+        Args:
+            ref: Image ref string (e.g., "img:5/0")
+
+        Returns:
+            ImageInfo or None if not found
+        """
+        for node in self.iter_nodes():
+            for image in node.images:
+                if image.ref == ref:
+                    return image
+        return None
 
     @classmethod
     def from_document(
@@ -112,12 +193,18 @@ class AccessibilityTree:
         root = builder.build()
         stats = builder.stats
 
+        # Extract bookmarks and hyperlinks
+        bookmark_registry = BookmarkRegistry.from_xml(xml_root, registry)
+        stats.bookmarks = len(bookmark_registry.bookmarks)
+        stats.hyperlinks = len(bookmark_registry.hyperlinks)
+
         return cls(
             root=root,
             registry=registry,
             view_mode=view_mode,
             stats=stats,
             document_path=getattr(document, "path", None),
+            bookmark_registry=bookmark_registry,
         )
 
     @classmethod
@@ -144,12 +231,18 @@ class AccessibilityTree:
         root = builder.build()
         stats = builder.stats
 
+        # Extract bookmarks and hyperlinks
+        bookmark_registry = BookmarkRegistry.from_xml(xml_root, registry)
+        stats.bookmarks = len(bookmark_registry.bookmarks)
+        stats.hyperlinks = len(bookmark_registry.hyperlinks)
+
         return cls(
             root=root,
             registry=registry,
             view_mode=view_mode,
             stats=stats,
             document_path=document_path,
+            bookmark_registry=bookmark_registry,
         )
 
     def find_by_ref(self, ref: str | Ref) -> AccessibilityNode | None:
@@ -246,12 +339,467 @@ class AccessibilityTree:
         writer = _YamlWriter(verbosity, self.view_mode)
         return writer.write(self)
 
+    # =========================================================================
+    # Large Document Handling Methods
+    # =========================================================================
+
+    def expand_section(
+        self,
+        section_ref: str,
+        mode: Literal["content", "styling"] = "content",
+    ) -> SectionTree:
+        """Expand a single section to full content.
+
+        Args:
+            section_ref: Section reference (e.g., "sec:2")
+            mode: Content mode ("content" for text, "styling" for run-level)
+
+        Returns:
+            SectionTree with expanded section content
+        """
+        from ..errors import RefNotFoundError
+        from .outline import SectionTree
+
+        if not section_ref.startswith("sec:"):
+            raise RefNotFoundError(section_ref, "Expected section ref (sec:N)")
+
+        try:
+            section_index = int(section_ref.split(":")[1])
+        except (ValueError, IndexError):
+            raise RefNotFoundError(section_ref, "Invalid section ref format")
+
+        body = self.registry.xml_root.find(f".//{w('body')}")
+        if body is None:
+            raise RefNotFoundError(section_ref, "Document body not found")
+
+        sections = self._find_section_boundaries(body)
+        if section_index >= len(sections):
+            raise RefNotFoundError(
+                section_ref,
+                f"Section index {section_index} out of bounds (found {len(sections)} sections)",
+            )
+
+        start_idx, end_idx, heading = sections[section_index]
+        content_nodes: list[AccessibilityNode] = []
+        view = ViewMode(
+            verbosity="full" if mode == "styling" else "standard",
+            include_formatting=(mode == "styling"),
+        )
+
+        paragraph_count = 0
+        table_count = 0
+        current_p_idx = 0
+        current_tbl_idx = 0
+
+        for child in body:
+            if child.tag == w("p"):
+                if start_idx <= current_p_idx < end_idx:
+                    node = self._build_node_for_element(child, f"p:{current_p_idx}", view)
+                    if node:
+                        content_nodes.append(node)
+                        paragraph_count += 1
+                current_p_idx += 1
+            elif child.tag == w("tbl"):
+                if current_p_idx >= start_idx and current_p_idx < end_idx:
+                    node = self._build_table_node_static(child, f"tbl:{current_tbl_idx}")
+                    if node:
+                        content_nodes.append(node)
+                        table_count += 1
+                current_tbl_idx += 1
+
+        return SectionTree(
+            section_ref=Ref(path=section_ref),
+            heading=heading,
+            content=content_nodes,
+            paragraph_count=paragraph_count,
+            table_count=table_count,
+        )
+
+    def expand_refs(
+        self,
+        refs: list[str],
+        mode: Literal["content", "styling"] = "content",
+    ) -> RefTree:
+        """Expand specific refs to full content.
+
+        Args:
+            refs: List of refs to expand
+            mode: Content mode
+        """
+        from ..errors import RefNotFoundError
+        from .outline import RefTree
+
+        view = ViewMode(
+            verbosity="full" if mode == "styling" else "standard",
+            include_formatting=(mode == "styling"),
+        )
+
+        nodes: dict[str, AccessibilityNode] = {}
+        not_found: list[str] = []
+
+        for ref_str in refs:
+            try:
+                element = self.registry.resolve_ref(ref_str)
+                node = self._build_node_for_element(element, ref_str, view)
+                if node:
+                    nodes[ref_str] = node
+                else:
+                    not_found.append(ref_str)
+            except RefNotFoundError:
+                not_found.append(ref_str)
+
+        return RefTree(refs=refs, nodes=nodes, not_found=not_found)
+
+    def get_table(
+        self,
+        table_ref: str,
+        max_rows: int | None = None,
+        page: int = 1,
+    ) -> TableTree:
+        """Get table content with optional pagination."""
+        from ..errors import RefNotFoundError
+        from .outline import TableTree
+
+        try:
+            tbl_elem = self.registry.resolve_ref(table_ref)
+        except Exception as e:
+            raise RefNotFoundError(table_ref, str(e))
+
+        if tbl_elem.tag != w("tbl"):
+            raise RefNotFoundError(table_ref, "Not a table")
+
+        all_rows = list(tbl_elem.findall(f"./{w('tr')}"))
+        total_rows = len(all_rows)
+        total_cols = 0
+
+        if all_rows:
+            first_row = all_rows[0]
+            total_cols = len(list(first_row.findall(f"./{w('tc')}")))
+
+        if max_rows is None:
+            start_idx = 0
+            end_idx = total_rows
+            has_more = False
+        else:
+            start_idx = (page - 1) * max_rows
+            end_idx = min(start_idx + max_rows, total_rows)
+            has_more = end_idx < total_rows
+
+        row_nodes: list[AccessibilityNode] = []
+        for i, tr_elem in enumerate(all_rows[start_idx:end_idx]):
+            row_idx = start_idx + i
+            row_ref = Ref(path=f"{table_ref}/row:{row_idx}")
+            row_node = self._build_table_row_node_static(tr_elem, row_ref, row_idx == 0)
+            row_nodes.append(row_node)
+
+        return TableTree(
+            table_ref=Ref(path=table_ref),
+            total_rows=total_rows,
+            total_cols=total_cols,
+            rows=row_nodes,
+            page=page,
+            page_size=max_rows or total_rows,
+            has_more=has_more,
+        )
+
+    def search(
+        self,
+        pattern: str,
+        max_results: int = 20,
+        case_sensitive: bool = False,
+    ) -> SearchResults:
+        """Search document for text patterns."""
+        import re as re_module
+
+        from .outline import SearchResult, SearchResults
+
+        flags = 0 if case_sensitive else re_module.IGNORECASE
+        try:
+            regex = re_module.compile(pattern, flags)
+        except re_module.error:
+            regex = re_module.compile(re_module.escape(pattern), flags)
+
+        results: list[SearchResult] = []
+        total_matches = 0
+
+        for node in self.iter_nodes():
+            if node.element_type != ElementType.PARAGRAPH:
+                continue
+
+            matches = list(regex.finditer(node.text))
+            total_matches += len(matches)
+
+            for match in matches:
+                if len(results) >= max_results:
+                    break
+
+                start = max(0, match.start() - 30)
+                end = min(len(node.text), match.end() + 30)
+                context = node.text[start:end]
+                if start > 0:
+                    context = "..." + context
+                if end < len(node.text):
+                    context = context + "..."
+
+                results.append(
+                    SearchResult(
+                        ref=node.ref,
+                        text=match.group(),
+                        context=context,
+                    )
+                )
+
+            if len(results) >= max_results:
+                break
+
+        return SearchResults(
+            query=pattern,
+            results=results,
+            total_matches=total_matches,
+            truncated=(total_matches > max_results),
+        )
+
+    def _find_section_boundaries(self, body: etree._Element) -> list[tuple[int, int, str]]:
+        """Find section boundaries based on headings."""
+        sections: list[tuple[int, int, str]] = []
+        heading_indices: list[tuple[int, str]] = []
+
+        para_idx = 0
+        for child in body:
+            if child.tag == w("p"):
+                style = self._get_paragraph_style_static(child)
+                if style and self._is_heading_style(style):
+                    text = self._extract_text_static(child)
+                    heading_indices.append((para_idx, text))
+                para_idx += 1
+
+        for i, (start_idx, heading) in enumerate(heading_indices):
+            if i + 1 < len(heading_indices):
+                end_idx = heading_indices[i + 1][0]
+            else:
+                end_idx = para_idx
+
+            sections.append((start_idx, end_idx, heading))
+
+        if not sections and para_idx > 0:
+            sections.append((0, para_idx, "(Document Content)"))
+
+        return sections
+
+    def _is_heading_style(self, style: str) -> bool:
+        """Check if a style name indicates a heading."""
+        style_lower = style.lower()
+        return style_lower.startswith("heading") or style_lower == "title"
+
+    def _build_node_for_element(
+        self,
+        element: etree._Element,
+        ref_str: str,
+        view_mode: ViewMode,
+    ) -> AccessibilityNode | None:
+        """Build a node for a specific element."""
+        if element.tag == w("p"):
+            return self._build_paragraph_node_static(element, ref_str, view_mode)
+        elif element.tag == w("tbl"):
+            return self._build_table_node_static(element, ref_str)
+        return None
+
+    def _build_paragraph_node_static(
+        self,
+        p_elem: etree._Element,
+        ref_str: str,
+        view_mode: ViewMode,
+    ) -> AccessibilityNode:
+        """Build node for a paragraph."""
+        ref = Ref(path=ref_str)
+        text = self._extract_text_static(p_elem)
+        style = self._get_paragraph_style_static(p_elem)
+        level = self._get_heading_level_static(style)
+
+        node = AccessibilityNode(
+            ref=ref,
+            element_type=ElementType.PARAGRAPH,
+            text=text,
+            style=style,
+            level=level,
+            _element=p_elem,
+        )
+
+        if view_mode.include_formatting or view_mode.verbosity == "full":
+            node.children = self._build_run_nodes_static(p_elem, ref)
+
+        return node
+
+    def _build_table_node_static(
+        self,
+        tbl_elem: etree._Element,
+        ref_str: str,
+    ) -> AccessibilityNode:
+        """Build node for a table."""
+        ref = Ref(path=ref_str)
+        rows: list[AccessibilityNode] = []
+        row_index = 0
+
+        for tr_elem in tbl_elem.findall(f"./{w('tr')}"):
+            row_ref = Ref(path=f"{ref_str}/row:{row_index}")
+            row_node = self._build_table_row_node_static(tr_elem, row_ref, row_index == 0)
+            rows.append(row_node)
+            row_index += 1
+
+        num_rows = len(rows)
+        num_cols = len(rows[0].children) if rows else 0
+
+        return AccessibilityNode(
+            ref=ref,
+            element_type=ElementType.TABLE,
+            children=rows,
+            properties={"rows": str(num_rows), "cols": str(num_cols)},
+            _element=tbl_elem,
+        )
+
+    def _build_table_row_node_static(
+        self,
+        tr_elem: etree._Element,
+        ref: Ref,
+        is_header: bool = False,
+    ) -> AccessibilityNode:
+        """Build node for a table row."""
+        cells: list[AccessibilityNode] = []
+        cell_index = 0
+
+        for tc_elem in tr_elem.findall(f"./{w('tc')}"):
+            cell_ref = Ref(path=f"{ref.path}/cell:{cell_index}")
+            cell_node = self._build_table_cell_node_static(tc_elem, cell_ref)
+            cells.append(cell_node)
+            cell_index += 1
+
+        properties: dict[str, str] = {}
+        if is_header:
+            properties["header"] = "true"
+
+        return AccessibilityNode(
+            ref=ref,
+            element_type=ElementType.TABLE_ROW,
+            children=cells,
+            properties=properties,
+            _element=tr_elem,
+        )
+
+    def _build_table_cell_node_static(
+        self,
+        tc_elem: etree._Element,
+        ref: Ref,
+    ) -> AccessibilityNode:
+        """Build node for a table cell."""
+        text_parts = []
+        for p_elem in tc_elem.findall(f"./{w('p')}"):
+            text_parts.append(self._extract_text_static(p_elem))
+        text = " ".join(text_parts).strip()
+
+        return AccessibilityNode(
+            ref=ref,
+            element_type=ElementType.TABLE_CELL,
+            text=text,
+            _element=tc_elem,
+        )
+
+    def _build_run_nodes_static(
+        self,
+        p_elem: etree._Element,
+        parent_ref: Ref,
+    ) -> list[AccessibilityNode]:
+        """Build nodes for runs within a paragraph."""
+        runs: list[AccessibilityNode] = []
+        run_index = 0
+
+        for r_elem in p_elem.iter(w("r")):
+            text = self._extract_run_text_static(r_elem)
+            if not text:
+                continue
+
+            ref = Ref(path=f"{parent_ref.path}/r:{run_index}")
+            run_index += 1
+
+            properties: dict[str, str] = {}
+            run_props = r_elem.find(w("rPr"))
+            if run_props is not None:
+                if run_props.find(w("b")) is not None:
+                    properties["bold"] = "true"
+                if run_props.find(w("i")) is not None:
+                    properties["italic"] = "true"
+                if run_props.find(w("u")) is not None:
+                    properties["underline"] = "true"
+
+            runs.append(
+                AccessibilityNode(
+                    ref=ref,
+                    element_type=ElementType.RUN,
+                    text=text,
+                    properties=properties,
+                    _element=r_elem,
+                )
+            )
+
+        return runs
+
+    @staticmethod
+    def _extract_text_static(elem: etree._Element) -> str:
+        """Extract all text from an element."""
+        text_parts = []
+        for t_elem in elem.iter(w("t")):
+            if t_elem.text:
+                text_parts.append(t_elem.text)
+        return "".join(text_parts)
+
+    @staticmethod
+    def _extract_run_text_static(r_elem: etree._Element) -> str:
+        """Extract text from a single run."""
+        text_parts = []
+        for t_elem in r_elem.findall(f"./{w('t')}"):
+            if t_elem.text:
+                text_parts.append(t_elem.text)
+        return "".join(text_parts)
+
+    @staticmethod
+    def _get_paragraph_style_static(p_elem: etree._Element) -> str | None:
+        """Get the style name for a paragraph."""
+        para_props = p_elem.find(f"./{w('pPr')}")
+        if para_props is not None:
+            para_style = para_props.find(f"./{w('pStyle')}")
+            if para_style is not None:
+                return para_style.get(f"{{{WORD_NAMESPACE}}}val")
+        return None
+
+    @staticmethod
+    def _get_heading_level_static(style: str | None) -> int | None:
+        """Determine heading level from style name."""
+        if not style:
+            return None
+
+        style_lower = style.lower()
+        if style_lower.startswith("heading"):
+            suffix = style_lower[7:].strip()
+            if suffix.isdigit():
+                return int(suffix)
+
+        if style_lower == "title":
+            return 1
+
+        return None
+
     def __repr__(self) -> str:
         return (
             f"AccessibilityTree(paragraphs={self.stats.paragraphs}, "
             f"tables={self.stats.tables}, "
             f"tracked_changes={self.stats.tracked_changes})"
         )
+
+
+# Forward type references
+SectionTree = "SectionTree"
+RefTree = "RefTree"
+TableTree = "TableTree"
+SearchResults = "SearchResults"
 
 
 class _TreeBuilder:
@@ -271,6 +819,9 @@ class _TreeBuilder:
         # Track indices for building refs
         self._paragraph_index = 0
         self._table_index = 0
+
+        # Image extractor
+        self._image_extractor = ImageExtractor(xml_root)
 
     def build(self) -> AccessibilityNode:
         """Build the tree and return the root node."""
@@ -326,6 +877,11 @@ class _TreeBuilder:
         if changes:
             self.stats.tracked_changes += len(changes)
 
+        # Extract images
+        images = self._image_extractor.extract_from_paragraph(p_elem, idx)
+        if images:
+            self.stats.images += len(images)
+
         # Create the node
         node = AccessibilityNode(
             ref=ref,
@@ -333,6 +889,7 @@ class _TreeBuilder:
             text=text,
             style=style,
             level=level,
+            images=images,
             _element=p_elem,
         )
 
@@ -343,6 +900,11 @@ class _TreeBuilder:
 
             # Store change details for YAML output
             node.properties["_changes"] = changes  # type: ignore[assignment]
+
+        # Add images info to properties if present
+        if images:
+            node.properties["has_images"] = "true"
+            node.properties["image_count"] = str(len(images))
 
         # Build runs if full verbosity
         if self.view_mode.verbosity == "full" or self.view_mode.include_formatting:
@@ -594,6 +1156,10 @@ class _YamlWriter:
         if tree.stats.tracked_changes > 0 and self.view_mode.include_tracked_changes:
             self._write_tracked_changes_summary(tree)
 
+        # Write bookmarks and links summary
+        if tree.stats.bookmarks > 0 or tree.stats.hyperlinks > 0:
+            self._write_bookmarks_and_links(tree)
+
         return self.buffer.getvalue()
 
     def _write_header(self, tree: AccessibilityTree) -> str:
@@ -615,6 +1181,12 @@ class _YamlWriter:
         self._write_line(f"tracked_changes: {tree.stats.tracked_changes}")
         if tree.stats.comments > 0:
             self._write_line(f"comments: {tree.stats.comments}")
+        if tree.stats.bookmarks > 0:
+            self._write_line(f"bookmarks: {tree.stats.bookmarks}")
+        if tree.stats.hyperlinks > 0:
+            self._write_line(f"hyperlinks: {tree.stats.hyperlinks}")
+        if tree.stats.images > 0:
+            self._write_line(f"images: {tree.stats.images}")
         self._indent -= 1
 
         self._indent -= 1
@@ -684,6 +1256,10 @@ class _YamlWriter:
             if changes and isinstance(changes, list):
                 self._write_changes(changes)
 
+        # Images
+        if node.has_images:
+            self._write_images(node.images)
+
         self._indent -= 1
 
     def _write_paragraph_full(self, node: AccessibilityNode) -> None:
@@ -717,6 +1293,10 @@ class _YamlWriter:
             changes = node.properties.get("_changes")
             if changes and isinstance(changes, list):
                 self._write_changes(changes)
+
+        # Images
+        if node.has_images:
+            self._write_images(node.images, full=True)
 
         self._indent -= 1
 
@@ -794,6 +1374,54 @@ class _YamlWriter:
 
         self._indent -= 1
 
+    def _write_images(self, images: list[ImageInfo], full: bool = False) -> None:
+        """Write images list.
+
+        Args:
+            images: List of ImageInfo objects
+            full: If True, include more details
+        """
+        self._write_line("images:")
+        self._indent += 1
+
+        for img in images:
+            self._write_line(f"- ref: {img.ref}")
+            self._indent += 1
+
+            self._write_line(f"type: {img.image_type.name.lower()}")
+            pos_type = "inline" if img.is_inline else "floating"
+            self._write_line(f"position: {pos_type}")
+
+            if img.name:
+                self._write_line(f"name: {img.name}")
+
+            if img.alt_text:
+                alt = self._escape_yaml_string(img.alt_text)
+                self._write_line(f'alt_text: "{alt}"')
+
+            if img.size:
+                self._write_line(f"size: {img.size.to_display_string()}")
+
+            if full:
+                if img.relationship_id:
+                    self._write_line(f"relationship_id: {img.relationship_id}")
+                if img.position and img.is_floating:
+                    self._write_line("floating_position:")
+                    self._indent += 1
+                    if img.position.horizontal:
+                        self._write_line(f"horizontal: {img.position.horizontal}")
+                    if img.position.vertical:
+                        self._write_line(f"vertical: {img.position.vertical}")
+                    if img.position.relative_to:
+                        self._write_line(f"relative_to: {img.position.relative_to}")
+                    if img.position.wrap_type:
+                        self._write_line(f"wrap: {img.position.wrap_type}")
+                    self._indent -= 1
+
+            self._indent -= 1
+
+        self._indent -= 1
+
     def _write_tracked_changes_summary(self, tree: AccessibilityTree) -> None:
         """Write summary of tracked changes at the end."""
         self._write_line("")
@@ -831,6 +1459,90 @@ class _YamlWriter:
                     change_index += 1
 
         self._indent -= 1
+
+    def _write_bookmarks_and_links(self, tree: AccessibilityTree) -> None:
+        """Write bookmarks and links summary."""
+        bookmark_data = tree.bookmark_registry.to_yaml_dict()
+
+        # Write bookmarks section
+        if "bookmarks" in bookmark_data:
+            self._write_line("")
+            self._write_line("bookmarks:")
+            self._indent += 1
+
+            for bk in bookmark_data["bookmarks"]:
+                self._write_line(f"- ref: {bk['ref']}")
+                self._indent += 1
+                self._write_line(f"name: {bk['name']}")
+                self._write_line(f"location: {bk['location']}")
+                if bk.get("text_preview"):
+                    preview = self._escape_yaml_string(bk["text_preview"])
+                    self._write_line(f'text_preview: "{preview}"')
+                if bk.get("referenced_by"):
+                    refs = bk["referenced_by"]
+                    self._write_line("referenced_by:")
+                    self._indent += 1
+                    for ref in refs:
+                        self._write_line(f"- {ref}")
+                    self._indent -= 1
+                self._indent -= 1
+
+            self._indent -= 1
+
+        # Write links section
+        if "links" in bookmark_data:
+            self._write_line("")
+            self._write_line("links:")
+            self._indent += 1
+
+            links_data = bookmark_data["links"]
+
+            # Internal links
+            if "internal" in links_data and links_data["internal"]:
+                self._write_line("internal:")
+                self._indent += 1
+                for link in links_data["internal"]:
+                    self._write_line(f"- ref: {link['ref']}")
+                    self._indent += 1
+                    self._write_line(f"from: {link['from']}")
+                    self._write_line(f"to: {link['to']}")
+                    if link.get("text"):
+                        text = self._escape_yaml_string(link["text"])
+                        self._write_line(f'text: "{text}"')
+                    self._indent -= 1
+                self._indent -= 1
+
+            # External links
+            if "external" in links_data and links_data["external"]:
+                self._write_line("external:")
+                self._indent += 1
+                for link in links_data["external"]:
+                    self._write_line(f"- ref: {link['ref']}")
+                    self._indent += 1
+                    self._write_line(f"from: {link['from']}")
+                    self._write_line(f'url: "{link["url"]}"')
+                    if link.get("text"):
+                        text = self._escape_yaml_string(link["text"])
+                        self._write_line(f'text: "{text}"')
+                    self._indent -= 1
+                self._indent -= 1
+
+            # Broken links
+            if "broken" in links_data and links_data["broken"]:
+                self._write_line("broken:")
+                self._indent += 1
+                for link in links_data["broken"]:
+                    self._write_line(f"- ref: {link['ref']}")
+                    self._indent += 1
+                    self._write_line(f"from: {link['from']}")
+                    target = link.get("target", "")
+                    if target:
+                        self._write_line(f'target: "{target}"')
+                    self._write_line(f'error: "{link["error"]}"')
+                    self._indent -= 1
+                self._indent -= 1
+
+            self._indent -= 1
 
     def _write_line(self, text: str) -> None:
         """Write a line with current indentation."""

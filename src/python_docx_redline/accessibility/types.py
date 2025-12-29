@@ -47,11 +47,15 @@ class ElementType(Enum):
     # Annotations
     COMMENT = auto()
     BOOKMARK = auto()
+    HYPERLINK = auto()
 
     # Drawing elements
     IMAGE = auto()
     CHART = auto()
     SHAPE = auto()
+    DIAGRAM = auto()  # SmartArt
+    OLE_OBJECT = auto()  # OLE embedded objects
+    VML = auto()  # Legacy VML graphics
 
     # Section (logical grouping)
     SECTION = auto()
@@ -72,9 +76,13 @@ ELEMENT_TYPE_TO_PREFIX: dict[ElementType, str] = {
     ElementType.DELETION: "del",
     ElementType.COMMENT: "cmt",
     ElementType.BOOKMARK: "bk",
+    ElementType.HYPERLINK: "lnk",
     ElementType.IMAGE: "img",
     ElementType.CHART: "chart",
     ElementType.SHAPE: "shape",
+    ElementType.DIAGRAM: "diagram",
+    ElementType.OLE_OBJECT: "obj",
+    ElementType.VML: "vml",
     ElementType.SECTION: "sec",
 }
 
@@ -130,6 +138,258 @@ class CommentInfo:
     date: datetime | None = None
     resolved: bool = False
     replies: list[CommentInfo] = field(default_factory=list)
+
+
+class LinkType(Enum):
+    """Types of hyperlinks in a document."""
+
+    INTERNAL = auto()  # Link to bookmark within the document
+    EXTERNAL = auto()  # Link to external URL
+
+
+@dataclass
+class BookmarkInfo:
+    """Information about a bookmark in the document.
+
+    Bookmarks are named locations in a document that can be referenced
+    by hyperlinks and cross-references. They support bidirectional
+    reference tracking.
+
+    Attributes:
+        ref: Reference to this bookmark (e.g., "bk:DefinitionsSection")
+        name: Bookmark name identifier
+        location: Ref of the element containing the bookmark start
+        text_preview: Preview of the bookmarked text (first 100 chars)
+        bookmark_id: Internal OOXML bookmark ID
+        span_end_location: Optional ref where bookmark ends (for range bookmarks)
+        referenced_by: List of refs that reference this bookmark (links, xrefs)
+    """
+
+    ref: str
+    name: str
+    location: str
+    text_preview: str = ""
+    bookmark_id: str | None = None
+    span_end_location: str | None = None
+    referenced_by: list[str] = field(default_factory=list)
+
+
+@dataclass
+class HyperlinkInfo:
+    """Information about a hyperlink in the document.
+
+    Hyperlinks can be internal (pointing to a bookmark) or external
+    (pointing to a URL). Internal links support bidirectional tracking.
+
+    Attributes:
+        ref: Reference to this hyperlink (e.g., "lnk:0")
+        link_type: Whether the link is internal or external
+        from_location: Ref of the paragraph containing this link
+        text: Display text of the hyperlink
+        target: Target bookmark name (for internal) or URL (for external)
+        target_location: For internal links, the resolved location ref
+        anchor: Optional bookmark anchor within the target
+        relationship_id: OOXML relationship ID (rId)
+        is_broken: Whether this link points to a missing target
+        error: Error message if link is broken
+    """
+
+    ref: str
+    link_type: LinkType
+    from_location: str
+    text: str = ""
+    target: str = ""
+    target_location: str | None = None
+    anchor: str | None = None
+    relationship_id: str | None = None
+    is_broken: bool = False
+    error: str | None = None
+
+
+@dataclass
+class ReferenceValidationResult:
+    """Result of validating document references.
+
+    This captures broken links, orphan bookmarks, and other reference issues.
+
+    Attributes:
+        is_valid: Whether all references are valid
+        broken_links: List of hyperlinks with invalid targets
+        orphan_bookmarks: Bookmarks not referenced by any link
+        missing_bookmarks: Bookmark names that are referenced but don't exist
+        warnings: List of warning messages
+    """
+
+    is_valid: bool = True
+    broken_links: list[HyperlinkInfo] = field(default_factory=list)
+    orphan_bookmarks: list[BookmarkInfo] = field(default_factory=list)
+    missing_bookmarks: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+class ImageType(Enum):
+    """Types of embedded images and graphics.
+
+    These distinguish between different DrawingML element types.
+    """
+
+    IMAGE = auto()  # Standard image (w:drawing with pic:pic)
+    CHART = auto()  # Chart (c:chart)
+    DIAGRAM = auto()  # SmartArt/diagram (dgm:relIds)
+    SHAPE = auto()  # AutoShape (wps:wsp)
+    VML = auto()  # Legacy VML (w:pict)
+    OLE_OBJECT = auto()  # OLE embedded object (w:object)
+
+
+class ImagePositionType(Enum):
+    """Position type for images."""
+
+    INLINE = auto()  # Positioned inline with text (wp:inline)
+    FLOATING = auto()  # Floating, anchored to page/paragraph (wp:anchor)
+
+
+@dataclass
+class ImageSize:
+    """Image dimensions.
+
+    Attributes:
+        width_emu: Width in EMUs (English Metric Units)
+        height_emu: Height in EMUs
+    """
+
+    width_emu: int
+    height_emu: int
+
+    # EMU per inch constant
+    EMU_PER_INCH = 914400
+    EMU_PER_CM = 360000
+
+    @property
+    def width_inches(self) -> float:
+        """Get width in inches."""
+        return self.width_emu / self.EMU_PER_INCH
+
+    @property
+    def height_inches(self) -> float:
+        """Get height in inches."""
+        return self.height_emu / self.EMU_PER_INCH
+
+    @property
+    def width_cm(self) -> float:
+        """Get width in centimeters."""
+        return self.width_emu / self.EMU_PER_CM
+
+    @property
+    def height_cm(self) -> float:
+        """Get height in centimeters."""
+        return self.height_emu / self.EMU_PER_CM
+
+    def to_display_string(self) -> str:
+        """Return human-readable size string."""
+        return f"{self.width_inches:.1f}in x {self.height_inches:.1f}in"
+
+
+@dataclass
+class ImagePosition:
+    """Position information for floating images.
+
+    Attributes:
+        horizontal: Horizontal position ("left", "center", "right", or offset)
+        vertical: Vertical position ("top", "center", "bottom", or offset)
+        relative_to: What the position is relative to ("page", "column", "paragraph", etc.)
+        wrap_type: Text wrapping type ("none", "square", "tight", "topAndBottom", etc.)
+    """
+
+    horizontal: str = ""
+    vertical: str = ""
+    relative_to: str = ""
+    wrap_type: str = ""
+
+
+@dataclass
+class ImageInfo:
+    """Information about an embedded image or graphic.
+
+    Attributes:
+        ref: Reference path for this image (e.g., "img:5/0", "chart:12/0")
+        image_type: Type of image (IMAGE, CHART, DIAGRAM, etc.)
+        position_type: Whether inline or floating
+        name: Display name for the image
+        alt_text: Accessibility description
+        size: Image dimensions
+        format: Image format (png, jpeg, etc.) if known
+        relationship_id: The r:embed or r:id value linking to the media file
+        paragraph_ref: Ref of the paragraph containing this image
+        position: Position info for floating images
+        _element: Internal reference to the XML element
+    """
+
+    ref: str
+    image_type: ImageType
+    position_type: ImagePositionType
+    name: str = ""
+    alt_text: str = ""
+    size: ImageSize | None = None
+    format: str = ""
+    relationship_id: str = ""
+    paragraph_ref: str = ""
+    position: ImagePosition | None = None
+    _element: etree._Element | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def is_inline(self) -> bool:
+        """Check if image is inline."""
+        return self.position_type == ImagePositionType.INLINE
+
+    @property
+    def is_floating(self) -> bool:
+        """Check if image is floating."""
+        return self.position_type == ImagePositionType.FLOATING
+
+    def to_yaml_dict(self, mode: str = "content") -> dict:
+        """Convert to YAML-friendly dictionary.
+
+        Args:
+            mode: "content" for basic info, "styling" for full details
+
+        Returns:
+            Dictionary suitable for YAML serialization
+        """
+        result: dict = {
+            "ref": self.ref,
+            "type": self.image_type.name.lower(),
+            "position_type": "inline" if self.is_inline else "floating",
+        }
+
+        if self.name:
+            result["name"] = self.name
+
+        if self.alt_text:
+            result["alt_text"] = self.alt_text
+
+        if self.size:
+            if mode == "styling":
+                result["size"] = {
+                    "width_emu": self.size.width_emu,
+                    "height_emu": self.size.height_emu,
+                }
+            else:
+                result["size"] = self.size.to_display_string()
+
+        if mode == "styling":
+            if self.format:
+                result["format"] = self.format
+            if self.relationship_id:
+                result["relationship_id"] = self.relationship_id
+            if self.position and self.is_floating:
+                result["position"] = {
+                    "horizontal": self.position.horizontal,
+                    "vertical": self.position.vertical,
+                    "relative_to": self.position.relative_to,
+                    "wrap": self.position.wrap_type,
+                }
+
+        return result
 
 
 @dataclass
@@ -372,6 +632,7 @@ class AccessibilityNode:
         level: Heading level (1-9) for heading elements
         change: Tracked change information if this element is part of a change
         comments: Comments attached to this element
+        images: Images and embedded objects in this element
         properties: Additional element-specific properties
         _element: Reference to underlying lxml element (for internal use)
     """
@@ -384,6 +645,7 @@ class AccessibilityNode:
     level: int | None = None
     change: ChangeInfo | None = None
     comments: list[CommentInfo] = field(default_factory=list)
+    images: list[ImageInfo] = field(default_factory=list)
     properties: dict[str, str] = field(default_factory=dict)
     _element: etree._Element | None = field(default=None, repr=False, compare=False)
 
@@ -401,6 +663,11 @@ class AccessibilityNode:
     def has_comments(self) -> bool:
         """Check if this node has comments."""
         return len(self.comments) > 0
+
+    @property
+    def has_images(self) -> bool:
+        """Check if this node has images."""
+        return len(self.images) > 0
 
     def find_by_ref(self, ref: str | Ref) -> AccessibilityNode | None:
         """Find a descendant node by ref.

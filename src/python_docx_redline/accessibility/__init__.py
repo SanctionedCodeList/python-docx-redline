@@ -5,7 +5,23 @@ This module provides a semantic accessibility layer inspired by browser ARIA tre
 enabling structured navigation and ref-based editing of Word documents.
 """
 
+from .bookmarks import BookmarkRegistry, add_bookmark, rename_bookmark
 from .images import ImageExtractor, get_images_from_document
+from .outline import (
+    DocumentSizeInfo,
+    OutlineTree,
+    RefTree,
+    SearchResult,
+    SearchResults,
+    SectionInfo,
+    SectionTree,
+    TableTree,
+    estimate_tokens,
+    truncate_to_token_budget,
+)
+from .outline import (
+    SectionDetectionConfig as OutlineSectionDetectionConfig,
+)
 from .registry import RefRegistry
 from .sections import (
     DetectedSection,
@@ -42,6 +58,7 @@ __all__ = [
     "AccessibilityNode",
     "AccessibilityTree",
     "BookmarkInfo",
+    "BookmarkRegistry",
     "ChangeInfo",
     "ChangeType",
     "CommentInfo",
@@ -49,6 +66,7 @@ __all__ = [
     "DetectionConfidence",
     "DetectionMetadata",
     "DetectionMethod",
+    "DocumentSizeInfo",
     "DocumentStats",
     "ElementType",
     "HeuristicConfig",
@@ -60,13 +78,25 @@ __all__ = [
     "ImageSize",
     "ImageType",
     "LinkType",
+    "OutlineSectionDetectionConfig",
+    "OutlineTree",
     "Ref",
     "ReferenceValidationResult",
     "RefRegistry",
+    "RefTree",
+    "SearchResult",
+    "SearchResults",
     "SectionDetectionConfig",
     "SectionDetector",
+    "SectionInfo",
+    "SectionTree",
+    "TableTree",
     "ViewMode",
+    "add_bookmark",
     "create_section_nodes",
     "detect_sections",
+    "estimate_tokens",
     "get_images_from_document",
+    "rename_bookmark",
+    "truncate_to_token_budget",
 ]
