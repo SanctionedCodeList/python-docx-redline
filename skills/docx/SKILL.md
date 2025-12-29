@@ -76,6 +76,7 @@ brew install pandoc                    # Text extraction (macOS)
 | **Edit with tracked changes** | python-docx-redline (track=True) | [tracked-changes.md](./tracked-changes.md) |
 | **Add comments** | python-docx-redline | [comments.md](./comments.md) |
 | **Footnotes/endnotes** | python-docx-redline | [footnotes.md](./footnotes.md) |
+| **Create or manage styles** | python-docx-redline StyleManager | [styles.md](./styles.md) |
 | **CriticMarkup workflow** | python-docx-redline | [criticmarkup.md](./criticmarkup.md) |
 | **Use both libraries together** | from_python_docx / to_python_docx | [integration.md](./integration.md) |
 | **Complex XML manipulation** | Raw OOXML | [ooxml.md](./ooxml.md) |
@@ -228,6 +229,7 @@ Detailed workflows for document manipulation:
 - **[tracked-changes.md](./tracked-changes.md)** — Tracked changes details: insert/delete/replace, regex, scopes, batch ops
 - **[comments.md](./comments.md)** — Adding comments, occurrence parameter, replies, resolution
 - **[footnotes.md](./footnotes.md)** — Footnotes/endnotes: CRUD, tracked changes, rich content, search
+- **[styles.md](./styles.md)** — Style management: reading, creating, ensuring styles exist, formatting options
 - **[criticmarkup.md](./criticmarkup.md)** — Export/import with CriticMarkup, round-trip workflows
 - **[integration.md](./integration.md)** — python-docx integration: from_python_docx, to_python_docx, workflows
 - **[ooxml.md](./ooxml.md)** — Raw XML manipulation for complex scenarios
