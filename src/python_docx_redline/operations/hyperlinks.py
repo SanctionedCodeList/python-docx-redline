@@ -18,6 +18,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from lxml import etree
+
+from ..constants import OFFICE_RELATIONSHIPS_NAMESPACE, WORD_NAMESPACE
+from ..errors import AmbiguousTextError, TextNotFoundError
+from ..relationships import RelationshipManager, RelationshipTypes
+from ..scope import ScopeEvaluator
+from ..style_templates import ensure_standard_styles
+from ..text_search import TextSpan
+
 if TYPE_CHECKING:
     from ..document import Document
 
@@ -133,7 +142,80 @@ class HyperlinkOperations:
             ... )
             None
         """
-        raise NotImplementedError("insert_hyperlink not yet implemented")
+        # Validate url/anchor parameters
+        if url is not None and anchor is not None:
+            raise ValueError("Cannot specify both 'url' and 'anchor' parameters")
+        if url is None and anchor is None:
+            raise ValueError("Must specify either 'url' or 'anchor' parameter")
+
+        # Validate after/before parameters
+        if after is not None and before is not None:
+            raise ValueError("Cannot specify both 'after' and 'before' parameters")
+        if after is None and before is None:
+            raise ValueError("Must specify either 'after' or 'before' parameter")
+
+        # For now, only external URLs are supported (anchor= is a separate task)
+        if anchor is not None:
+            raise NotImplementedError(
+                "Internal hyperlinks (anchor=) not yet implemented. Use url= for external links."
+            )
+
+        # Ensure we have a valid package
+        if not self._document._is_zip or not self._document._temp_dir:
+            raise ValueError("Cannot add hyperlinks to non-ZIP documents")
+
+        # Find location for hyperlink insertion
+        anchor_text = after if after is not None else before
+        insert_after = after is not None
+
+        all_paragraphs = list(self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}p"))
+        paragraphs = ScopeEvaluator.filter_paragraphs(all_paragraphs, scope)
+
+        matches = self._document._text_search.find_text(
+            anchor_text,
+            paragraphs,  # type: ignore[arg-type]
+        )
+
+        if not matches:
+            scope_str = str(scope) if scope is not None and not isinstance(scope, str) else scope
+            raise TextNotFoundError(anchor_text, scope_str)  # type: ignore[arg-type]
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(anchor_text, matches)  # type: ignore[arg-type]
+
+        match = matches[0]
+
+        # Add hyperlink relationship with External target mode
+        package = self._document._package
+        if not package:
+            raise ValueError("Cannot add hyperlinks: package not available")
+
+        rel_mgr = RelationshipManager(package, "word/document.xml")
+        r_id = rel_mgr.add_unique_relationship(
+            RelationshipTypes.HYPERLINK,
+            url,  # type: ignore[arg-type]  # url is not None here
+            target_mode="External",
+        )
+        rel_mgr.save()
+
+        # Ensure Hyperlink style exists
+        self._ensure_hyperlink_style()
+
+        # Create hyperlink element
+        hyperlink_elem = self._create_hyperlink_element(
+            text=text,
+            r_id=r_id,
+            anchor=None,
+            tooltip=tooltip,
+        )
+
+        # Insert the hyperlink at the match location
+        if insert_after:
+            self._insert_after_match(match, hyperlink_elem)
+        else:
+            self._insert_before_match(match, hyperlink_elem)
+
+        return r_id
 
     def insert_hyperlink_in_header(
         self,
@@ -444,7 +526,45 @@ class HyperlinkOperations:
         Raises:
             ValueError: If both r_id and anchor specified, or neither specified
         """
-        raise NotImplementedError("_create_hyperlink_element not yet implemented")
+        # Validate r_id/anchor
+        if r_id is not None and anchor is not None:
+            raise ValueError("Cannot specify both 'r_id' and 'anchor' for hyperlink element")
+        if r_id is None and anchor is None:
+            raise ValueError("Must specify either 'r_id' or 'anchor' for hyperlink element")
+
+        # Create w:hyperlink element with proper namespace
+        nsmap = {
+            "w": WORD_NAMESPACE,
+            "r": OFFICE_RELATIONSHIPS_NAMESPACE,
+        }
+        hyperlink = etree.Element(f"{{{WORD_NAMESPACE}}}hyperlink", nsmap=nsmap)
+
+        # Set r:id for external links or w:anchor for internal links
+        if r_id is not None:
+            hyperlink.set(f"{{{OFFICE_RELATIONSHIPS_NAMESPACE}}}id", r_id)
+        else:
+            hyperlink.set(f"{{{WORD_NAMESPACE}}}anchor", anchor)  # type: ignore[arg-type]
+
+        # Set optional tooltip
+        if tooltip:
+            hyperlink.set(f"{{{WORD_NAMESPACE}}}tooltip", tooltip)
+
+        # Create inner run with Hyperlink style
+        run = etree.SubElement(hyperlink, f"{{{WORD_NAMESPACE}}}r")
+
+        # Add run properties with Hyperlink character style
+        rpr = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}rPr")
+        rstyle = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}rStyle")
+        rstyle.set(f"{{{WORD_NAMESPACE}}}val", "Hyperlink")
+
+        # Add display text
+        t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+        # Preserve whitespace if text has leading/trailing spaces
+        if text and (text[0].isspace() or text[-1].isspace()):
+            t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        t.text = text
+
+        return hyperlink
 
     def _ensure_hyperlink_style(self) -> None:
         """Ensure the Hyperlink character style exists in the document.
@@ -455,8 +575,6 @@ class HyperlinkOperations:
 
         Also ensures the styles.xml relationship and content type exist.
         """
-        from ..style_templates import ensure_standard_styles
-
         ensure_standard_styles(self._document.styles, "Hyperlink")
         # Ensure styles.xml is properly registered if it was created
         self._ensure_styles_relationship()
@@ -465,8 +583,6 @@ class HyperlinkOperations:
 
     def _ensure_styles_relationship(self) -> None:
         """Ensure styles.xml relationship exists in document.xml.rels."""
-        from ..relationships import RelationshipManager, RelationshipTypes
-
         package = self._document._package
         if not package:
             return
@@ -494,3 +610,41 @@ class HyperlinkOperations:
             Integer index for generating unique hyperlink refs
         """
         raise NotImplementedError("_get_next_hyperlink_index not yet implemented")
+
+    def _insert_after_match(self, match: TextSpan, element: Any) -> None:
+        """Insert an XML element after a matched text span.
+
+        The element is inserted as a sibling after the last run of the match,
+        within the same paragraph.
+
+        Args:
+            match: TextSpan object representing where to insert
+            element: The lxml Element to insert
+        """
+        paragraph = match.paragraph
+        end_run = match.runs[match.end_run_index]
+
+        # Find position of end_run in the paragraph
+        run_index = list(paragraph).index(end_run)
+
+        # Insert element after the end_run
+        paragraph.insert(run_index + 1, element)
+
+    def _insert_before_match(self, match: TextSpan, element: Any) -> None:
+        """Insert an XML element before a matched text span.
+
+        The element is inserted as a sibling before the first run of the match,
+        within the same paragraph.
+
+        Args:
+            match: TextSpan object representing where to insert
+            element: The lxml Element to insert
+        """
+        paragraph = match.paragraph
+        start_run = match.runs[match.start_run_index]
+
+        # Find position of start_run in the paragraph
+        run_index = list(paragraph).index(start_run)
+
+        # Insert element before the start_run
+        paragraph.insert(run_index, element)
