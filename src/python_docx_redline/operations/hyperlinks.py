@@ -450,9 +450,42 @@ class HyperlinkOperations:
         """Ensure the Hyperlink character style exists in the document.
 
         Creates the standard Hyperlink style if it doesn't already exist.
-        This style provides the typical blue underlined text appearance.
+        This style provides the typical blue underlined text appearance
+        (blue color #0563C1 with single underline).
+
+        Also ensures the styles.xml relationship and content type exist.
         """
-        raise NotImplementedError("_ensure_hyperlink_style not yet implemented")
+        from ..style_templates import ensure_standard_styles
+
+        ensure_standard_styles(self._document.styles, "Hyperlink")
+        # Ensure styles.xml is properly registered if it was created
+        self._ensure_styles_relationship()
+        self._ensure_styles_content_type()
+        self._document.styles.save()
+
+    def _ensure_styles_relationship(self) -> None:
+        """Ensure styles.xml relationship exists in document.xml.rels."""
+        from ..relationships import RelationshipManager, RelationshipTypes
+
+        package = self._document._package
+        if not package:
+            return
+
+        rel_mgr = RelationshipManager(package, "word/document.xml")
+        rel_mgr.add_relationship(RelationshipTypes.STYLES, "styles.xml")
+        rel_mgr.save()
+
+    def _ensure_styles_content_type(self) -> None:
+        """Ensure styles.xml content type exists in [Content_Types].xml."""
+        from ..content_types import ContentTypeManager, ContentTypes
+
+        package = self._document._package
+        if not package:
+            return
+
+        ct_mgr = ContentTypeManager(package)
+        ct_mgr.add_override("/word/styles.xml", ContentTypes.STYLES)
+        ct_mgr.save()
 
     def _get_next_hyperlink_index(self) -> int:
         """Get the next available hyperlink index for generating refs.
