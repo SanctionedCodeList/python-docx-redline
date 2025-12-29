@@ -23,7 +23,7 @@ from lxml import etree
 
 from ..accessibility.bookmarks import BookmarkRegistry
 from ..constants import OFFICE_RELATIONSHIPS_NAMESPACE, WORD_NAMESPACE
-from ..errors import AmbiguousTextError, TextNotFoundError
+from ..errors import AmbiguousTextError, NoteNotFoundError, TextNotFoundError
 from ..relationships import RelationshipManager, RelationshipTypes
 from ..scope import ScopeEvaluator
 from ..style_templates import ensure_standard_styles
@@ -1201,3 +1201,174 @@ class HyperlinkOperations:
 </root>"""
         root = etree.fromstring(wrapped_xml.encode("utf-8"))
         return list(root)
+
+    def _insert_hyperlink_in_note(
+        self,
+        note_type: str,
+        note_id: str | int,
+        url: str | None,
+        anchor: str | None,
+        text: str,
+        after: str | None,
+        before: str | None,
+        track: bool,
+    ) -> str | None:
+        """Internal implementation for inserting hyperlinks in footnotes/endnotes.
+
+        This method handles the common logic for both footnote and endnote hyperlinks.
+        Footnotes use word/footnotes.xml with rels in word/_rels/footnotes.xml.rels.
+        Endnotes use word/endnotes.xml with rels in word/_rels/endnotes.xml.rels.
+
+        Args:
+            note_type: Either "footnote" or "endnote"
+            note_id: The note ID to edit
+            url: External URL (mutually exclusive with anchor)
+            anchor: Internal bookmark name (mutually exclusive with url)
+            text: Display text for the hyperlink
+            after: Text to insert after within the note
+            before: Text to insert before within the note
+            track: If True, track the insertion (not yet implemented)
+
+        Returns:
+            Relationship ID for external links, None for internal
+
+        Raises:
+            NoteNotFoundError: If note not found
+            ValueError: If parameters are invalid
+            TextNotFoundError: If anchor text not found in note
+            AmbiguousTextError: If anchor text found multiple times
+        """
+        # Validate url/anchor parameters
+        if url is not None and anchor is not None:
+            raise ValueError("Cannot specify both 'url' and 'anchor' parameters")
+        if url is None and anchor is None:
+            raise ValueError("Must specify either 'url' or 'anchor' parameter")
+
+        # Validate after/before parameters
+        if after is not None and before is not None:
+            raise ValueError("Cannot specify both 'after' and 'before' parameters")
+        if after is None and before is None:
+            raise ValueError("Must specify either 'after' or 'before' parameter")
+
+        # Ensure we have a valid package
+        if not self._document._is_zip or not self._document._temp_dir:
+            raise ValueError("Cannot add hyperlinks to non-ZIP documents")
+
+        temp_dir = self._document._temp_dir
+        package = self._document._package
+        if not package:
+            raise ValueError("Cannot add hyperlinks: package not available")
+
+        # Determine file paths based on note type
+        if note_type == "footnote":
+            xml_path = temp_dir / "word" / "footnotes.xml"
+            rels_part = "word/footnotes.xml"
+            tag_name = "footnote"
+        else:
+            xml_path = temp_dir / "word" / "endnotes.xml"
+            rels_part = "word/endnotes.xml"
+            tag_name = "endnote"
+
+        # Find the note element
+        note_id_str = str(note_id)
+
+        if not xml_path.exists():
+            raise NoteNotFoundError(note_type, note_id_str, [])
+
+        tree = etree.parse(str(xml_path))
+        root = tree.getroot()
+
+        # Find the note element by ID
+        note_elem = None
+        available_ids: list[str] = []
+        for elem in root.findall(f"{{{WORD_NAMESPACE}}}{tag_name}"):
+            elem_id = elem.get(f"{{{WORD_NAMESPACE}}}id")
+            if elem.get(f"{{{WORD_NAMESPACE}}}type") is None:  # Skip separators
+                if elem_id:
+                    available_ids.append(elem_id)
+                if elem_id == note_id_str:
+                    note_elem = elem
+
+        if note_elem is None:
+            raise NoteNotFoundError(note_type, note_id_str, available_ids)
+
+        # Get paragraphs from the note for text search
+        paragraphs = list(note_elem.findall(f"{{{WORD_NAMESPACE}}}p"))
+        if not paragraphs:
+            anchor_text = after if after is not None else before
+            raise TextNotFoundError(anchor_text)  # type: ignore[arg-type]
+
+        # Find location for hyperlink insertion
+        anchor_text = after if after is not None else before
+        insert_after = after is not None
+
+        matches = self._document._text_search.find_text(
+            anchor_text,
+            paragraphs,  # type: ignore[arg-type]
+        )
+
+        if not matches:
+            raise TextNotFoundError(anchor_text)  # type: ignore[arg-type]
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(anchor_text, matches)  # type: ignore[arg-type]
+
+        match = matches[0]
+
+        # Ensure Hyperlink style exists
+        self._ensure_hyperlink_style()
+
+        # Handle external links (url) vs internal links (anchor)
+        r_id: str | None = None
+        if url is not None:
+            # External link: add hyperlink relationship to the notes rels file
+            rel_mgr = RelationshipManager(package, rels_part)
+            r_id = rel_mgr.add_unique_relationship(
+                RelationshipTypes.HYPERLINK,
+                url,
+                target_mode="External",
+            )
+            rel_mgr.save()
+
+            # Create hyperlink element with r:id
+            hyperlink_elem = self._create_hyperlink_element(
+                text=text,
+                r_id=r_id,
+                anchor=None,
+                tooltip=None,
+            )
+        else:
+            # Internal link: no relationship needed, just w:anchor attribute
+            # Note: anchor is not None here due to earlier validation
+
+            # Validate that the bookmark exists (warn if not, but allow the link)
+            bookmark_registry = BookmarkRegistry.from_xml(self._document.xml_root)
+            if not bookmark_registry.get_bookmark(anchor):
+                warnings.warn(
+                    f"Bookmark '{anchor}' does not exist. Internal hyperlink will be broken.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+
+            hyperlink_elem = self._create_hyperlink_element(
+                text=text,
+                r_id=None,
+                anchor=anchor,
+                tooltip=None,
+            )
+
+        # Insert the hyperlink at the match location
+        if insert_after:
+            self._insert_after_match(match, hyperlink_elem)
+        else:
+            self._insert_before_match(match, hyperlink_elem)
+
+        # Save the modified XML
+        tree.write(
+            str(xml_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
+
+        return r_id
