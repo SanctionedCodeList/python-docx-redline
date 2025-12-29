@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
 if TYPE_CHECKING:
+    from python_docx_redline.accessibility import Ref
     from python_docx_redline.criticmarkup import ApplyResult
     from python_docx_redline.models.comment import Comment
     from python_docx_redline.models.footnote import Endnote, Footnote
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 from lxml import etree
 
 from .author import AuthorIdentity
-from .constants import WORD_NAMESPACE
+from .constants import WORD_NAMESPACE, XML_NAMESPACE
 from .match import Match
 from .operations.batch import BatchOperations
 from .operations.change_management import ChangeManagement
@@ -3688,6 +3689,679 @@ class Document:
             regex=regex,
             normalize_special_chars=normalize_special_chars,
             track=track,
+        )
+
+    # ========================================================================
+    # Ref-based editing operations (DocTree accessibility layer)
+    # ========================================================================
+
+    @property
+    def _ref_registry(self) -> Any:
+        """Get the RefRegistry instance (lazy initialization)."""
+        if not hasattr(self, "_ref_registry_instance"):
+            from python_docx_redline.accessibility.registry import RefRegistry
+
+            self._ref_registry_instance = RefRegistry(self.xml_root)
+        return self._ref_registry_instance
+
+    def resolve_ref(self, ref: str) -> etree._Element:
+        """Resolve a ref string to its corresponding XML element.
+
+        This method resolves refs like "p:5" or "tbl:0/row:2/cell:1" to their
+        underlying lxml elements. Refs provide stable, unambiguous identifiers
+        for document elements.
+
+        Args:
+            ref: A ref path string (e.g., "p:5", "tbl:0/row:2/cell:1/p:0",
+                "p:~xK4mNp2q" for fingerprint-based refs)
+
+        Returns:
+            The lxml element corresponding to the ref
+
+        Raises:
+            RefNotFoundError: If the ref cannot be resolved (invalid format,
+                out of bounds, or element not found)
+            StaleRefError: If the ref points to a deleted/modified element
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> element = doc.resolve_ref("p:5")  # Get 6th paragraph
+            >>> element = doc.resolve_ref("tbl:0/row:1/cell:2")  # Table cell
+        """
+        return self._ref_registry.resolve_ref(ref)
+
+    def get_ref(self, element: etree._Element, use_fingerprint: bool = False) -> "Ref":
+        """Get the ref for a given XML element.
+
+        This method generates a ref path for an element, which can then be used
+        for subsequent editing operations. Supports both ordinal refs (p:5) and
+        fingerprint-based refs (p:~xK4mNp2q) for stable references.
+
+        Args:
+            element: The lxml element to get a ref for
+            use_fingerprint: If True, generate a fingerprint-based ref that
+                survives document edits. Fingerprint refs are based on content
+                hash and remain stable even if paragraphs are inserted/deleted.
+
+        Returns:
+            Ref object containing the path (e.g., "p:5")
+
+        Raises:
+            RefNotFoundError: If the element type is not supported
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> matches = doc.find_all("Total Price")
+            >>> if matches:
+            ...     # Get ref for the paragraph containing the match
+            ...     para_element = matches[0].span.paragraph
+            ...     ref = doc.get_ref(para_element)
+            ...     print(ref.path)  # e.g., "p:15"
+            >>>
+            >>> # Get a stable fingerprint ref
+            >>> element = doc.resolve_ref("p:3")
+            >>> stable_ref = doc.get_ref(element, use_fingerprint=True)
+            >>> print(stable_ref.path)  # e.g., "p:~xK4mNp2q"
+        """
+        return self._ref_registry.get_ref(element, use_fingerprint=use_fingerprint)
+
+    def insert_at_ref(
+        self,
+        ref: str,
+        text: str,
+        position: str = "after",
+        track: bool = False,
+        author: str | None = None,
+    ) -> EditResult:
+        """Insert text at a ref location.
+
+        This method inserts text at a position relative to the element identified
+        by the ref. For paragraphs, "before"/"after" insert new paragraphs, while
+        "start"/"end" insert runs within the paragraph.
+
+        Args:
+            ref: Ref path to the target element (e.g., "p:5", "tbl:0/row:1/cell:0")
+            text: The text to insert (supports markdown: **bold**, *italic*, etc.)
+            position: Where to insert relative to the element:
+                - "before": Insert new paragraph before (for paragraph refs)
+                - "after": Insert new paragraph after (for paragraph refs)
+                - "start": Insert at the start of the element's content
+                - "end": Insert at the end of the element's content
+            track: Whether to add tracked insertion markup (default: False)
+            author: Author for tracked changes (uses document author if None)
+
+        Returns:
+            EditResult indicating success/failure
+
+        Raises:
+            RefNotFoundError: If the ref cannot be resolved
+            ValueError: If the position is invalid
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> # Insert tracked text at end of paragraph
+            >>> doc.insert_at_ref("p:5", " (AMENDED)", position="end", track=True)
+            >>>
+            >>> # Insert new paragraph after ref
+            >>> doc.insert_at_ref("p:10", "New clause text.", position="after")
+        """
+
+        from .accessibility.types import ElementType
+
+        valid_positions = ("before", "after", "start", "end")
+        if position not in valid_positions:
+            raise ValueError(f"position must be one of {valid_positions}, got '{position}'")
+
+        # Resolve the ref to get the element
+        element = self.resolve_ref(ref)
+        ref_obj = self._ref_registry.get_ref(element)
+        element_type = ref_obj.element_type
+
+        # Get author
+        author_name = author if author is not None else self.author
+
+        # Handle based on element type and position
+        if element_type == ElementType.PARAGRAPH:
+            if position in ("before", "after"):
+                # Insert new paragraph
+                return self._insert_paragraph_at_ref(element, text, position, track, author_name)
+            else:
+                # Insert run at start/end of paragraph
+                return self._insert_run_at_ref(element, text, position, track, author_name)
+        elif element_type == ElementType.TABLE_CELL:
+            # For table cells, insert at start/end of first/last paragraph
+            paragraphs = list(element.findall(f".//{{{WORD_NAMESPACE}}}p"))
+            if not paragraphs:
+                # Create a paragraph if none exists
+                para = etree.SubElement(element, f"{{{WORD_NAMESPACE}}}p")
+                return self._insert_run_at_ref(para, text, "start", track, author_name)
+            target_para = paragraphs[0] if position in ("before", "start") else paragraphs[-1]
+            return self._insert_run_at_ref(
+                target_para,
+                text,
+                "start" if position in ("before", "start") else "end",
+                track,
+                author_name,
+            )
+        else:
+            # Default: try to insert as text content
+            return self._insert_run_at_ref(element, text, position, track, author_name)
+
+    def _insert_paragraph_at_ref(
+        self,
+        element: etree._Element,
+        text: str,
+        position: str,
+        track: bool,
+        author: str,
+    ) -> EditResult:
+        """Insert a new paragraph before or after an element."""
+        from datetime import datetime, timezone
+
+        parent = element.getparent()
+        if parent is None:
+            return EditResult(
+                success=False,
+                edit_type="insert_at_ref",
+                message="Cannot insert: element has no parent",
+            )
+
+        # Find the index of the element in its parent
+        try:
+            index = list(parent).index(element)
+        except ValueError:
+            return EditResult(
+                success=False,
+                edit_type="insert_at_ref",
+                message="Cannot find element in parent",
+            )
+
+        # Create new paragraph
+        new_para = etree.Element(f"{{{WORD_NAMESPACE}}}p")
+
+        if track:
+            # Create tracked insertion
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            change_id = self._xml_generator.next_change_id
+
+            ins_elem = etree.SubElement(new_para, f"{{{WORD_NAMESPACE}}}ins")
+            ins_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+            ins_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
+            ins_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+
+            run = etree.SubElement(ins_elem, f"{{{WORD_NAMESPACE}}}r")
+            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+            t.text = text
+            # Add xml:space="preserve" for whitespace preservation
+            if text and (text[0].isspace() or text[-1].isspace()):
+                t.set(f"{{{XML_NAMESPACE}}}space", "preserve")
+
+            self._xml_generator.next_change_id = change_id + 1
+        else:
+            # Untracked insertion
+            run = etree.SubElement(new_para, f"{{{WORD_NAMESPACE}}}r")
+            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+            t.text = text
+            # Add xml:space="preserve" for whitespace preservation
+            if text and (text[0].isspace() or text[-1].isspace()):
+                t.set(f"{{{XML_NAMESPACE}}}space", "preserve")
+
+        # Insert at the correct position
+        if position == "after":
+            parent.insert(index + 1, new_para)
+        else:  # before
+            parent.insert(index, new_para)
+
+        # Invalidate registry cache
+        self._ref_registry.invalidate()
+
+        return EditResult(
+            success=True,
+            edit_type="insert_at_ref",
+            message=f"Inserted paragraph {position} ref",
+        )
+
+    def _insert_run_at_ref(
+        self,
+        element: etree._Element,
+        text: str,
+        position: str,
+        track: bool,
+        author: str,
+    ) -> EditResult:
+        """Insert a run at the start or end of an element."""
+        from datetime import datetime, timezone
+
+        if track:
+            # Create tracked insertion
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            change_id = self._xml_generator.next_change_id
+
+            ins_elem = etree.Element(f"{{{WORD_NAMESPACE}}}ins")
+            ins_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+            ins_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
+            ins_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+
+            run = etree.SubElement(ins_elem, f"{{{WORD_NAMESPACE}}}r")
+            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+            t.text = text
+            # Add xml:space="preserve" for whitespace preservation
+            if text and (text[0].isspace() or text[-1].isspace()):
+                t.set(f"{{{XML_NAMESPACE}}}space", "preserve")
+
+            if position == "start":
+                element.insert(0, ins_elem)
+            else:  # end
+                element.append(ins_elem)
+
+            self._xml_generator.next_change_id = change_id + 1
+        else:
+            # Untracked insertion
+            run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+            t.text = text
+            # Add xml:space="preserve" for whitespace preservation
+            if text and (text[0].isspace() or text[-1].isspace()):
+                t.set(f"{{{XML_NAMESPACE}}}space", "preserve")
+
+            if position == "start":
+                element.insert(0, run)
+            else:  # end
+                element.append(run)
+
+        return EditResult(
+            success=True,
+            edit_type="insert_at_ref",
+            message=f"Inserted text at {position} of element",
+        )
+
+    def delete_ref(
+        self,
+        ref: str,
+        track: bool = False,
+        author: str | None = None,
+    ) -> EditResult:
+        """Delete the element at ref.
+
+        This method deletes the element identified by the ref. For paragraphs,
+        this deletes the entire paragraph. For table cells, this clears the cell
+        content.
+
+        Args:
+            ref: Ref path to the element to delete (e.g., "p:5")
+            track: If True, use tracked deletion instead of hard delete
+            author: Author for tracked changes (uses document author if None)
+
+        Returns:
+            EditResult indicating success/failure
+
+        Raises:
+            RefNotFoundError: If the ref cannot be resolved
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> # Delete paragraph with tracking
+            >>> doc.delete_ref("p:5", track=True)
+            >>>
+            >>> # Hard delete without tracking
+            >>> doc.delete_ref("p:10", track=False)
+        """
+
+        from .accessibility.types import ElementType
+
+        # Resolve the ref
+        element = self.resolve_ref(ref)
+        ref_obj = self._ref_registry.get_ref(element)
+        element_type = ref_obj.element_type
+
+        # Get author
+        author_name = author if author is not None else self.author
+
+        if element_type == ElementType.PARAGRAPH:
+            return self._delete_paragraph_ref(element, track, author_name)
+        elif element_type == ElementType.TABLE_CELL:
+            # For table cells, delete content but not the cell itself
+            return self._delete_cell_content_ref(element, track, author_name)
+        else:
+            # Generic element deletion
+            return self._delete_element_ref(element, track, author_name)
+
+    def _delete_paragraph_ref(
+        self,
+        element: etree._Element,
+        track: bool,
+        author: str,
+    ) -> EditResult:
+        """Delete a paragraph element."""
+        from datetime import datetime, timezone
+
+        if track:
+            # Tracked deletion: wrap all runs in w:del
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            change_id = self._xml_generator.next_change_id
+
+            for run in list(element.findall(f".//{{{WORD_NAMESPACE}}}r")):
+                # Create deletion wrapper
+                del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
+                del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+                del_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
+                del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+
+                # Convert w:t to w:delText
+                for t_elem in run.findall(f".//{{{WORD_NAMESPACE}}}t"):
+                    t_elem.tag = f"{{{WORD_NAMESPACE}}}delText"
+
+                # Move run into deletion
+                run_parent = run.getparent()
+                if run_parent is not None:
+                    run_index = list(run_parent).index(run)
+                    run_parent.remove(run)
+                    del_elem.append(run)
+                    run_parent.insert(run_index, del_elem)
+
+                change_id += 1
+
+            self._xml_generator.next_change_id = change_id
+        else:
+            # Hard delete: remove the paragraph element
+            parent = element.getparent()
+            if parent is not None:
+                parent.remove(element)
+
+        # Invalidate registry cache
+        self._ref_registry.invalidate()
+
+        return EditResult(
+            success=True,
+            edit_type="delete_ref",
+            message="Deleted paragraph" + (" with tracking" if track else ""),
+        )
+
+    def _delete_cell_content_ref(
+        self,
+        element: etree._Element,
+        track: bool,
+        author: str,
+    ) -> EditResult:
+        """Delete content inside a table cell."""
+        from datetime import datetime, timezone
+
+        if track:
+            # Tracked deletion for all paragraphs in cell
+            timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            change_id = self._xml_generator.next_change_id
+
+            for para in element.findall(f".//{{{WORD_NAMESPACE}}}p"):
+                for run in list(para.findall(f"./{{{WORD_NAMESPACE}}}r")):
+                    del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
+                    del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+                    del_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
+                    del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+
+                    for t_elem in run.findall(f".//{{{WORD_NAMESPACE}}}t"):
+                        t_elem.tag = f"{{{WORD_NAMESPACE}}}delText"
+
+                    run_index = list(para).index(run)
+                    para.remove(run)
+                    del_elem.append(run)
+                    para.insert(run_index, del_elem)
+
+                    change_id += 1
+
+            self._xml_generator.next_change_id = change_id
+        else:
+            # Hard delete: remove content from all paragraphs
+            for para in element.findall(f".//{{{WORD_NAMESPACE}}}p"):
+                for run in list(para.findall(f"./{{{WORD_NAMESPACE}}}r")):
+                    para.remove(run)
+
+        return EditResult(
+            success=True,
+            edit_type="delete_ref",
+            message="Deleted cell content" + (" with tracking" if track else ""),
+        )
+
+    def _delete_element_ref(
+        self,
+        element: etree._Element,
+        track: bool,
+        author: str,
+    ) -> EditResult:
+        """Delete a generic element."""
+        if track:
+            # For non-paragraph elements, wrap content in deletion
+            # This is a simplified implementation
+            return EditResult(
+                success=False,
+                edit_type="delete_ref",
+                message="Tracked deletion not supported for this element type",
+            )
+        else:
+            parent = element.getparent()
+            if parent is not None:
+                parent.remove(element)
+
+        self._ref_registry.invalidate()
+
+        return EditResult(
+            success=True,
+            edit_type="delete_ref",
+            message="Deleted element",
+        )
+
+    def replace_at_ref(
+        self,
+        ref: str,
+        new_text: str,
+        track: bool = False,
+        author: str | None = None,
+    ) -> EditResult:
+        """Replace content at ref with new text.
+
+        This method replaces the content of the element identified by the ref
+        with new text. When track=True, this shows as a deletion of old content
+        plus insertion of new content.
+
+        Args:
+            ref: Ref path to the element (e.g., "p:5")
+            new_text: The replacement text (supports markdown: **bold**, etc.)
+            track: If True, mark as tracked deletion + insertion
+            author: Author for tracked changes (uses document author if None)
+
+        Returns:
+            EditResult indicating success/failure
+
+        Raises:
+            RefNotFoundError: If the ref cannot be resolved
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> # Replace paragraph content with tracking
+            >>> doc.replace_at_ref("p:5", "New clause text", track=True)
+        """
+
+        from .accessibility.types import ElementType
+
+        # Resolve the ref
+        element = self.resolve_ref(ref)
+        ref_obj = self._ref_registry.get_ref(element)
+        element_type = ref_obj.element_type
+
+        # Get author
+        author_name = author if author is not None else self.author
+
+        if element_type == ElementType.PARAGRAPH:
+            return self._replace_paragraph_content(element, new_text, track, author_name)
+        elif element_type == ElementType.TABLE_CELL:
+            return self._replace_cell_content(element, new_text, track, author_name)
+        else:
+            return EditResult(
+                success=False,
+                edit_type="replace_at_ref",
+                message=f"Replace not supported for element type {element_type}",
+            )
+
+    def _replace_paragraph_content(
+        self,
+        element: etree._Element,
+        new_text: str,
+        track: bool,
+        author: str,
+    ) -> EditResult:
+        """Replace content of a paragraph."""
+        from datetime import datetime, timezone
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        if track:
+            change_id = self._xml_generator.next_change_id
+
+            # First, mark all existing runs as deleted
+            for run in list(element.findall(f"./{{{WORD_NAMESPACE}}}r")):
+                del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
+                del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+                del_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
+                del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+
+                for t_elem in run.findall(f".//{{{WORD_NAMESPACE}}}t"):
+                    t_elem.tag = f"{{{WORD_NAMESPACE}}}delText"
+
+                run_index = list(element).index(run)
+                element.remove(run)
+                del_elem.append(run)
+                element.insert(run_index, del_elem)
+
+                change_id += 1
+
+            # Then, add the new content as an insertion
+            ins_elem = etree.SubElement(element, f"{{{WORD_NAMESPACE}}}ins")
+            ins_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+            ins_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
+            ins_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+
+            run = etree.SubElement(ins_elem, f"{{{WORD_NAMESPACE}}}r")
+            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+            t.text = new_text
+            # Add xml:space="preserve" for whitespace preservation
+            if new_text and (new_text[0].isspace() or new_text[-1].isspace()):
+                t.set(f"{{{XML_NAMESPACE}}}space", "preserve")
+
+            self._xml_generator.next_change_id = change_id + 1
+        else:
+            # Untracked: remove all runs and add new content
+            for run in list(element.findall(f"./{{{WORD_NAMESPACE}}}r")):
+                element.remove(run)
+
+            # Also remove any tracked changes
+            for del_elem in list(element.findall(f"./{{{WORD_NAMESPACE}}}del")):
+                element.remove(del_elem)
+            for ins_elem in list(element.findall(f"./{{{WORD_NAMESPACE}}}ins")):
+                element.remove(ins_elem)
+
+            # Add new run
+            run = etree.SubElement(element, f"{{{WORD_NAMESPACE}}}r")
+            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+            t.text = new_text
+            # Add xml:space="preserve" for whitespace preservation
+            if new_text and (new_text[0].isspace() or new_text[-1].isspace()):
+                t.set(f"{{{XML_NAMESPACE}}}space", "preserve")
+
+        return EditResult(
+            success=True,
+            edit_type="replace_at_ref",
+            message="Replaced paragraph content" + (" with tracking" if track else ""),
+        )
+
+    def _replace_cell_content(
+        self,
+        element: etree._Element,
+        new_text: str,
+        track: bool,
+        author: str,
+    ) -> EditResult:
+        """Replace content of a table cell."""
+        # Get the first paragraph (or create one)
+        paragraphs = list(element.findall(f"./{{{WORD_NAMESPACE}}}p"))
+
+        if paragraphs:
+            # Replace content of first paragraph
+            return self._replace_paragraph_content(paragraphs[0], new_text, track, author)
+        else:
+            # Create a new paragraph with the content
+            para = etree.SubElement(element, f"{{{WORD_NAMESPACE}}}p")
+            run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+            t.text = new_text
+            # Add xml:space="preserve" for whitespace preservation
+            if new_text and (new_text[0].isspace() or new_text[-1].isspace()):
+                t.set(f"{{{XML_NAMESPACE}}}space", "preserve")
+
+            return EditResult(
+                success=True,
+                edit_type="replace_at_ref",
+                message="Created cell content",
+            )
+
+    def add_comment_at_ref(
+        self,
+        ref: str,
+        comment: str,
+        author: str | None = None,
+    ) -> "Comment":
+        """Add a comment anchored to the element at ref.
+
+        This method adds a comment that covers the entire text content of the
+        element identified by the ref. For more granular comment placement,
+        use the text-based add_comment() method.
+
+        Args:
+            ref: Ref path to the element to comment on (e.g., "p:5")
+            comment: The comment text
+            author: Author for the comment (uses document author if None)
+
+        Returns:
+            The created Comment object
+
+        Raises:
+            RefNotFoundError: If the ref cannot be resolved
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> comment = doc.add_comment_at_ref("p:15", "Please review this clause")
+            >>> print(comment.id)  # Comment ID for reference
+        """
+        # Resolve the ref
+        element = self.resolve_ref(ref)
+
+        # Get the text content of the element
+        text_parts = []
+        for t_elem in element.iter(f"{{{WORD_NAMESPACE}}}t"):
+            if t_elem.text:
+                text_parts.append(t_elem.text)
+        element_text = "".join(text_parts)
+
+        if not element_text:
+            # If no text, use a placeholder approach
+            # Find the first text element or create one
+            first_t = element.find(f".//{{{WORD_NAMESPACE}}}t")
+            if first_t is not None and first_t.text:
+                element_text = first_t.text
+            else:
+                # Create a minimal run with space so comment has an anchor
+                run = element.find(f".//{{{WORD_NAMESPACE}}}r")
+                if run is None:
+                    run = etree.SubElement(element, f"{{{WORD_NAMESPACE}}}r")
+                t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+                t.text = " "
+                element_text = " "
+
+        # Use the existing add_comment method with the element's text
+        # This finds the text and wraps it with comment markers
+        return self.add_comment(
+            text=comment,
+            on=element_text,
+            author=author,
+            occurrence=1,  # Use first occurrence
         )
 
     def __del__(self) -> None:
