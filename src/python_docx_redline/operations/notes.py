@@ -785,7 +785,7 @@ class NoteOperations:
         footnote_elem.set(f"{{{WORD_NAMESPACE}}}id", str(footnote_id))
 
         # Add paragraphs with rich content
-        self._create_note_content(footnote_elem, text)
+        self._create_note_content(footnote_elem, text, note_type="footnote")
 
         # Write footnotes.xml
         footnotes_tree.write(
@@ -846,7 +846,7 @@ class NoteOperations:
         endnote_elem.set(f"{{{WORD_NAMESPACE}}}id", str(endnote_id))
 
         # Add paragraphs with rich content
-        self._create_note_content(endnote_elem, text)
+        self._create_note_content(endnote_elem, text, note_type="endnote")
 
         # Write endnotes.xml
         endnotes_tree.write(
@@ -856,23 +856,64 @@ class NoteOperations:
             pretty_print=True,
         )
 
-    def _create_note_content(self, note_elem: etree._Element, text: str | list[str]) -> None:
+    def _create_note_content(
+        self,
+        note_elem: etree._Element,
+        text: str | list[str],
+        note_type: str = "footnote",
+    ) -> None:
         """Create rich content for a footnote or endnote element.
 
         Creates one or more paragraphs with formatted runs based on the text input.
+        Follows Word's structure:
+        - Paragraph has FootnoteText/EndnoteText style
+        - First run contains footnoteRef/endnoteRef with reference style
+        - Content follows with a leading space
+
         Supports markdown formatting: **bold**, *italic*, ++underline++, ~~strikethrough~~
 
         Args:
             note_elem: The footnote or endnote XML element to populate
             text: Content as a single string or list of strings for multiple paragraphs
+            note_type: Either "footnote" or "endnote" (default: "footnote")
         """
         # Normalize to list of paragraphs
         paragraphs = [text] if isinstance(text, str) else text
 
-        for para_text in paragraphs:
+        # Determine style names based on note type
+        if note_type == "footnote":
+            para_style = "FootnoteText"
+            ref_style = "FootnoteReference"
+            ref_tag = "footnoteRef"
+        else:
+            para_style = "EndnoteText"
+            ref_style = "EndnoteReference"
+            ref_tag = "endnoteRef"
+
+        for i, para_text in enumerate(paragraphs):
             para = etree.SubElement(note_elem, f"{{{WORD_NAMESPACE}}}p")
 
-            # Parse markdown and create runs
+            # Add paragraph properties with FootnoteText/EndnoteText style
+            ppr = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}pPr")
+            pstyle = etree.SubElement(ppr, f"{{{WORD_NAMESPACE}}}pStyle")
+            pstyle.set(f"{{{WORD_NAMESPACE}}}val", para_style)
+
+            # First paragraph gets the footnoteRef/endnoteRef marker
+            if i == 0:
+                # Create run with footnoteRef/endnoteRef (shows the note number)
+                ref_run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+                ref_rpr = etree.SubElement(ref_run, f"{{{WORD_NAMESPACE}}}rPr")
+                ref_rstyle = etree.SubElement(ref_rpr, f"{{{WORD_NAMESPACE}}}rStyle")
+                ref_rstyle.set(f"{{{WORD_NAMESPACE}}}val", ref_style)
+                etree.SubElement(ref_run, f"{{{WORD_NAMESPACE}}}{ref_tag}")
+
+                # Add space after footnoteRef in separate unformatted run (Word convention)
+                space_run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+                space_t = etree.SubElement(space_run, f"{{{WORD_NAMESPACE}}}t")
+                space_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                space_t.text = " "
+
+            # Parse markdown and create runs for content
             segments = parse_markdown(para_text)
 
             for segment in segments:
@@ -916,6 +957,11 @@ class NoteOperations:
         # Create a new run with the footnote reference
         new_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
 
+        # Add run properties with FootnoteReference style (for superscript formatting)
+        rpr = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}rPr")
+        rstyle = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}rStyle")
+        rstyle.set(f"{{{WORD_NAMESPACE}}}val", "FootnoteReference")
+
         # Add footnote reference
         footnote_ref = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}footnoteReference")
         footnote_ref.set(f"{{{WORD_NAMESPACE}}}id", str(footnote_id))
@@ -939,6 +985,11 @@ class NoteOperations:
 
         # Create a new run with the endnote reference
         new_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+
+        # Add run properties with EndnoteReference style (for superscript formatting)
+        rpr = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}rPr")
+        rstyle = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}rStyle")
+        rstyle.set(f"{{{WORD_NAMESPACE}}}val", "EndnoteReference")
 
         # Add endnote reference
         endnote_ref = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}endnoteReference")

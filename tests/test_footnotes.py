@@ -186,7 +186,8 @@ class TestFootnoteModel:
 
         footnote = doc.footnotes[0]
         assert len(footnote.paragraphs) == 1
-        assert footnote.paragraphs[0].text == "Footnote text"
+        # First paragraph has leading space after Word's footnote ref marker
+        assert footnote.paragraphs[0].text.strip() == "Footnote text"
 
     def test_footnote_contains(self):
         """Test footnote contains method."""
@@ -240,7 +241,8 @@ class TestEndnoteModel:
 
         endnote = doc.endnotes[0]
         assert len(endnote.paragraphs) == 1
-        assert endnote.paragraphs[0].text == "Endnote text"
+        # First paragraph has leading space after Word's endnote ref marker
+        assert endnote.paragraphs[0].text.strip() == "Endnote text"
 
     def test_endnote_contains(self):
         """Test endnote contains method."""
@@ -1072,7 +1074,8 @@ class TestMultiParagraphFootnotes:
         footnote = doc.get_footnote(1)
         paragraphs = footnote.paragraphs
         assert len(paragraphs) == 2
-        assert paragraphs[0].text == "First paragraph."
+        # First paragraph has leading space after Word's footnote ref marker
+        assert paragraphs[0].text.strip() == "First paragraph."
         assert paragraphs[1].text == "Second paragraph."
 
     def test_insert_endnote_with_list(self):
@@ -1089,7 +1092,8 @@ class TestMultiParagraphFootnotes:
         endnote = doc.get_endnote(1)
         paragraphs = endnote.paragraphs
         assert len(paragraphs) == 3
-        assert paragraphs[0].text == "Para one."
+        # First paragraph has leading space after Word's endnote ref marker
+        assert paragraphs[0].text.strip() == "Para one."
         assert paragraphs[1].text == "Para two."
         assert paragraphs[2].text == "Para three."
 
@@ -1121,7 +1125,8 @@ class TestMultiParagraphFootnotes:
             reloaded = Document(output_path)
             footnote = reloaded.get_footnote(1)
             assert len(footnote.paragraphs) == 2
-            assert footnote.paragraphs[0].text == "Paragraph A."
+            # First paragraph has leading space after Word's footnote ref marker
+            assert footnote.paragraphs[0].text.strip() == "Paragraph A."
             assert footnote.paragraphs[1].text == "Paragraph B."
 
 

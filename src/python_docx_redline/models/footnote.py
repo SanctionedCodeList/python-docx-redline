@@ -80,9 +80,12 @@ class Footnote:
         """Get the text content of the footnote.
 
         Returns:
-            All text from all paragraphs concatenated
+            All text from all paragraphs concatenated, with the leading
+            space (added by Word after footnoteRef) stripped.
         """
-        return "\n".join(p.text for p in self.paragraphs)
+        full_text = "\n".join(p.text for p in self.paragraphs)
+        # Strip the leading space that Word adds after footnoteRef
+        return full_text.lstrip(" ") if full_text.startswith(" ") else full_text
 
     def contains(self, text: str, case_sensitive: bool = True) -> bool:
         """Check if the footnote contains specific text.
@@ -348,9 +351,12 @@ class Endnote:
         """Get the text content of the endnote.
 
         Returns:
-            All text from all paragraphs concatenated
+            All text from all paragraphs concatenated, with the leading
+            space (added by Word after endnoteRef) stripped.
         """
-        return "\n".join(p.text for p in self.paragraphs)
+        full_text = "\n".join(p.text for p in self.paragraphs)
+        # Strip the leading space that Word adds after endnoteRef
+        return full_text.lstrip(" ") if full_text.startswith(" ") else full_text
 
     def contains(self, text: str, case_sensitive: bool = True) -> bool:
         """Check if the endnote contains specific text.
@@ -598,7 +604,8 @@ def _extract_formatted_text(note_element: etree._Element) -> list[dict]:
                 text_parts.append(t_elem.text or "")
 
             text = "".join(text_parts)
-            if not text:
+            # Skip empty runs and whitespace-only runs (like the space after footnoteRef)
+            if not text or text.isspace():
                 continue
 
             # Get run properties
