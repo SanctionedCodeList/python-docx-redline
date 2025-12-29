@@ -547,7 +547,51 @@ class HyperlinkOperations:
             >>> # Remove with tracking
             >>> doc.remove_hyperlink("lnk:5", keep_text=False, track=True)
         """
-        raise NotImplementedError("remove_hyperlink not yet implemented")
+        # Find the hyperlink element
+        hyperlink_elem, _ = self._find_hyperlink_by_ref(ref)
+        if hyperlink_elem is None:
+            raise ValueError(f"Hyperlink not found: {ref}")
+
+        parent = hyperlink_elem.getparent()
+        if parent is None:
+            raise ValueError(f"Hyperlink has no parent element: {ref}")
+
+        # Get the position of the hyperlink in its parent
+        hyperlink_index = list(parent).index(hyperlink_elem)
+
+        if keep_text:
+            # Extract runs from inside the hyperlink and insert them where the hyperlink was
+            inner_runs = list(hyperlink_elem.findall(f"{{{WORD_NAMESPACE}}}r"))
+
+            # Remove the hyperlink element
+            parent.remove(hyperlink_elem)
+
+            # Insert the inner runs at the hyperlink's former position
+            for i, run in enumerate(inner_runs):
+                # Remove the Hyperlink style from the run if present
+                self._remove_hyperlink_style_from_run(run)
+                parent.insert(hyperlink_index + i, run)
+        else:
+            # Remove the entire hyperlink including its text
+            if track:
+                # Extract the text content and create a tracked deletion
+                link_text = self._get_hyperlink_text(hyperlink_elem)
+                if link_text:
+                    # Create tracked deletion element
+                    deletion_xml = self._document._xml_generator.create_deletion(link_text, author)
+                    # Parse the deletion XML
+                    elements = self._parse_xml_elements(deletion_xml)
+                    deletion_element = elements[0]
+
+                    # Replace hyperlink with deletion element
+                    parent.remove(hyperlink_elem)
+                    parent.insert(hyperlink_index, deletion_element)
+                else:
+                    # No text, just remove the hyperlink
+                    parent.remove(hyperlink_elem)
+            else:
+                # Untracked removal - just remove the hyperlink element
+                parent.remove(hyperlink_elem)
 
     # ==================== Internal Helper Methods ====================
 
@@ -652,6 +696,57 @@ class HyperlinkOperations:
         ct_mgr.add_override("/word/styles.xml", ContentTypes.STYLES)
         ct_mgr.save()
 
+    def _find_hyperlink_by_ref(self, ref: str) -> tuple[Any | None, str | None]:
+        """Find a hyperlink element by its ref or relationship ID.
+
+        Args:
+            ref: Hyperlink ref (e.g., "lnk:5") or relationship ID (e.g., "rId5")
+
+        Returns:
+            Tuple of (hyperlink_element, relationship_id).
+            relationship_id is None for internal links.
+            Both are None if not found.
+
+        Raises:
+            ValueError: If ref format is invalid
+        """
+        ns_r = f"{{{OFFICE_RELATIONSHIPS_NAMESPACE}}}"
+
+        # If ref is already a relationship ID (rId...), search directly
+        if ref.startswith("rId"):
+            for hyperlink in self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}hyperlink"):
+                if hyperlink.get(f"{ns_r}id") == ref:
+                    return hyperlink, ref
+            return None, None
+
+        # Otherwise, parse the lnk:N format
+        if not ref.startswith("lnk:"):
+            raise ValueError(
+                f"Invalid hyperlink ref format: '{ref}'. "
+                "Expected 'lnk:N' (e.g., 'lnk:5') or 'rIdN' (e.g., 'rId5')"
+            )
+
+        try:
+            target_index = int(ref[4:])
+        except ValueError:
+            raise ValueError(f"Invalid hyperlink ref: '{ref}'. Expected 'lnk:N' with integer N")
+
+        # Iterate through hyperlinks in document order to find by index
+        body = self._document.xml_root.find(f".//{{{WORD_NAMESPACE}}}body")
+        if body is None:
+            return None, None
+
+        link_index = 0
+        for paragraph in body.findall(f"./{{{WORD_NAMESPACE}}}p"):
+            for hyperlink in paragraph.findall(f".//{{{WORD_NAMESPACE}}}hyperlink"):
+                if link_index == target_index:
+                    # Found the hyperlink - get its relationship ID (if external)
+                    r_id = hyperlink.get(f"{ns_r}id")
+                    return hyperlink, r_id
+                link_index += 1
+
+        return None, None
+
     def _get_next_hyperlink_index(self) -> int:
         """Get the next available hyperlink index for generating refs.
 
@@ -697,3 +792,56 @@ class HyperlinkOperations:
 
         # Insert element before the start_run
         paragraph.insert(run_index, element)
+
+    def _get_hyperlink_text(self, hyperlink_elem: etree._Element) -> str:
+        """Extract the display text from a hyperlink element.
+
+        Args:
+            hyperlink_elem: The w:hyperlink element
+
+        Returns:
+            The text content of the hyperlink
+        """
+        text_parts = []
+        for t_elem in hyperlink_elem.iter(f"{{{WORD_NAMESPACE}}}t"):
+            if t_elem.text:
+                text_parts.append(t_elem.text)
+        return "".join(text_parts)
+
+    def _remove_hyperlink_style_from_run(self, run: etree._Element) -> None:
+        """Remove the Hyperlink character style from a run's properties.
+
+        This removes the blue underline styling when unlinking a hyperlink
+        while keeping the text.
+
+        Args:
+            run: The w:r element to modify
+        """
+        run_props = run.find(f"{{{WORD_NAMESPACE}}}rPr")
+        if run_props is not None:
+            rstyle = run_props.find(f"{{{WORD_NAMESPACE}}}rStyle")
+            if rstyle is not None:
+                style_val = rstyle.get(f"{{{WORD_NAMESPACE}}}val")
+                if style_val == "Hyperlink":
+                    run_props.remove(rstyle)
+                    # If rPr is now empty, remove it too
+                    if len(run_props) == 0:
+                        run.remove(run_props)
+
+    def _parse_xml_elements(self, xml_content: str) -> list:
+        """Parse XML content into lxml elements with proper namespaces.
+
+        Args:
+            xml_content: The XML string(s) to parse (can be multiple fragments)
+
+        Returns:
+            List of parsed lxml Elements
+        """
+        wrapped_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<root xmlns:w="{WORD_NAMESPACE}"
+      xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"
+      xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+    {xml_content}
+</root>"""
+        root = etree.fromstring(wrapped_xml.encode("utf-8"))
+        return list(root)

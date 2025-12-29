@@ -226,6 +226,55 @@ class RelationshipManager:
 
         return f"rId{next_id}"
 
+    def update_relationship_target(self, rel_id: str, new_target: str) -> bool:
+        """Update the target of a relationship by its ID.
+
+        Args:
+            rel_id: The relationship ID (e.g., "rId5")
+            new_target: The new target path or URL
+
+        Returns:
+            True if the relationship was found and updated, False otherwise
+        """
+        self._ensure_loaded()
+        assert self._root is not None
+
+        for rel in self._root:
+            if rel.get("Id") == rel_id:
+                rel.set("Target", new_target)
+                self._modified = True
+                logger.debug(f"Updated relationship {rel_id} target to: {new_target}")
+                return True
+
+        return False
+
+    def get_relationship_by_id(self, rel_id: str) -> dict[str, str] | None:
+        """Get a relationship by its ID.
+
+        Args:
+            rel_id: The relationship ID (e.g., "rId5")
+
+        Returns:
+            Dictionary with relationship attributes (Id, Type, Target, TargetMode)
+            or None if not found
+        """
+        self._ensure_loaded()
+        assert self._root is not None
+
+        for rel in self._root:
+            if rel.get("Id") == rel_id:
+                result = {
+                    "Id": rel.get("Id", ""),
+                    "Type": rel.get("Type", ""),
+                    "Target": rel.get("Target", ""),
+                }
+                target_mode = rel.get("TargetMode")
+                if target_mode:
+                    result["TargetMode"] = target_mode
+                return result
+
+        return None
+
     def remove_relationship(self, rel_type: str) -> bool:
         """Remove a relationship by type.
 

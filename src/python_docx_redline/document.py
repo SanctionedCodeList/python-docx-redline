@@ -4577,6 +4577,26 @@ class Document:
             track=track,
         )
 
+    def edit_hyperlink_url(self, ref: str, new_url: str) -> None:
+        """Change the URL of an external hyperlink.
+
+        Updates the relationship target for the specified hyperlink.
+        Only works for external hyperlinks (not internal bookmarks).
+
+        Args:
+            ref: Hyperlink ref (e.g., "lnk:5") or relationship ID (e.g., "rId5")
+            new_url: The new URL to link to
+
+        Raises:
+            ValueError: If hyperlink not found or is an internal link
+            ValueError: If new_url is empty
+
+        Example:
+            >>> doc.edit_hyperlink_url("lnk:5", "https://new-url.com")
+            >>> doc.edit_hyperlink_url("rId10", "https://updated-url.com")
+        """
+        return self._hyperlink_ops.edit_hyperlink_url(ref=ref, new_url=new_url)
+
     # ========================================================================
     # Ref-based editing operations (DocTree accessibility layer)
     # ========================================================================
