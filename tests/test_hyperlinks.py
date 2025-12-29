@@ -1034,3 +1034,495 @@ class TestHyperlinkStyleCreation:
             doc_path.unlink()
             if output_path.exists():
                 output_path.unlink()
+
+
+def create_document_with_footnote() -> Path:
+    """Create a document with an existing footnote for testing."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:xml="http://www.w3.org/XML/1998/namespace">
+<w:body>
+<w:p>
+  <w:r><w:t>This document has a footnote reference here</w:t></w:r>
+  <w:r>
+    <w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr>
+    <w:footnoteReference w:id="1"/>
+  </w:r>
+  <w:r><w:t xml:space="preserve"> and continues after.</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+    footnotes_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+             xmlns:xml="http://www.w3.org/XML/1998/namespace">
+  <w:footnote w:id="-1" w:type="separator">
+    <w:p><w:r><w:separator/></w:r></w:p>
+  </w:footnote>
+  <w:footnote w:id="0" w:type="continuationSeparator">
+    <w:p><w:r><w:continuationSeparator/></w:r></w:p>
+  </w:footnote>
+  <w:footnote w:id="1">
+    <w:p>
+      <w:pPr><w:pStyle w:val="FootnoteText"/></w:pPr>
+      <w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteRef/></w:r>
+      <w:r><w:t xml:space="preserve"> </w:t></w:r>
+      <w:r><w:t>See the reference for more details.</w:t></w:r>
+    </w:p>
+  </w:footnote>
+</w:footnotes>"""
+
+    content_types_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>
+</Types>"""
+
+    root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    doc_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/>
+</Relationships>"""
+
+    with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types_xml)
+        docx.writestr("_rels/.rels", root_rels)
+        docx.writestr("word/document.xml", document_xml)
+        docx.writestr("word/footnotes.xml", footnotes_xml)
+        docx.writestr("word/_rels/document.xml.rels", doc_rels)
+
+    return doc_path
+
+
+def create_document_with_endnote() -> Path:
+    """Create a document with an existing endnote for testing."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:xml="http://www.w3.org/XML/1998/namespace">
+<w:body>
+<w:p>
+  <w:r><w:t>This document has an endnote reference here</w:t></w:r>
+  <w:r>
+    <w:rPr><w:rStyle w:val="EndnoteReference"/></w:rPr>
+    <w:endnoteReference w:id="1"/>
+  </w:r>
+  <w:r><w:t xml:space="preserve"> and continues after.</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+    endnotes_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:endnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:xml="http://www.w3.org/XML/1998/namespace">
+  <w:endnote w:id="-1" w:type="separator">
+    <w:p><w:r><w:separator/></w:r></w:p>
+  </w:endnote>
+  <w:endnote w:id="0" w:type="continuationSeparator">
+    <w:p><w:r><w:continuationSeparator/></w:r></w:p>
+  </w:endnote>
+  <w:endnote w:id="1">
+    <w:p>
+      <w:pPr><w:pStyle w:val="EndnoteText"/></w:pPr>
+      <w:r><w:rPr><w:rStyle w:val="EndnoteReference"/></w:rPr><w:endnoteRef/></w:r>
+      <w:r><w:t xml:space="preserve"> </w:t></w:r>
+      <w:r><w:t>See the bibliography for sources.</w:t></w:r>
+    </w:p>
+  </w:endnote>
+</w:endnotes>"""
+
+    content_types_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/endnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"/>
+</Types>"""
+
+    root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    doc_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes" Target="endnotes.xml"/>
+</Relationships>"""
+
+    with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types_xml)
+        docx.writestr("_rels/.rels", root_rels)
+        docx.writestr("word/document.xml", document_xml)
+        docx.writestr("word/endnotes.xml", endnotes_xml)
+        docx.writestr("word/_rels/document.xml.rels", doc_rels)
+
+    return doc_path
+
+
+class TestInsertHyperlinkInFootnote:
+    """Tests for insert_hyperlink_in_footnote method."""
+
+    def test_insert_external_hyperlink_in_footnote(self) -> None:
+        """Test inserting external hyperlink after text in a footnote."""
+        doc_path = create_document_with_footnote()
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_footnote(
+                note_id=1,
+                url="https://example.com/reference",
+                text="online reference",
+                after="See the",
+            )
+
+            # Should return relationship ID
+            assert r_id is not None
+            assert r_id.startswith("rId")
+
+            # Verify hyperlink was inserted in the footnote
+            footnotes_path = doc._temp_dir / "word" / "footnotes.xml"
+            tree = etree.parse(str(footnotes_path))
+            hyperlinks = tree.findall(f".//{{{WORD_NS}}}hyperlink")
+            assert len(hyperlinks) == 1
+
+            # Verify the hyperlink has the relationship ID
+            hyperlink = hyperlinks[0]
+            assert hyperlink.get(f"{{{REL_NS}}}id") == r_id
+
+            # Verify the display text
+            text_elems = hyperlink.findall(f".//{{{WORD_NS}}}t")
+            text = "".join(t.text or "" for t in text_elems)
+            assert "online reference" in text
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_internal_hyperlink_in_footnote(self) -> None:
+        """Test inserting internal hyperlink in a footnote."""
+        doc_path = create_document_with_footnote()
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_footnote(
+                note_id=1,
+                anchor="DefinitionsSection",
+                text="definitions",
+                after="See the",
+            )
+
+            # Internal links should return None (no rId)
+            assert r_id is None
+
+            # Verify hyperlink was inserted
+            footnotes_path = doc._temp_dir / "word" / "footnotes.xml"
+            tree = etree.parse(str(footnotes_path))
+            hyperlinks = tree.findall(f".//{{{WORD_NS}}}hyperlink")
+            assert len(hyperlinks) == 1
+
+            # Verify w:anchor attribute
+            hyperlink = hyperlinks[0]
+            assert hyperlink.get(f"{{{WORD_NS}}}anchor") == "DefinitionsSection"
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_footnote_before(self) -> None:
+        """Test inserting hyperlink before text in a footnote."""
+        doc_path = create_document_with_footnote()
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_footnote(
+                note_id=1,
+                url="https://example.com",
+                text="Link:",
+                before="See the",
+            )
+
+            assert r_id is not None
+
+            # Verify hyperlink was inserted
+            footnotes_path = doc._temp_dir / "word" / "footnotes.xml"
+            tree = etree.parse(str(footnotes_path))
+            hyperlinks = tree.findall(f".//{{{WORD_NS}}}hyperlink")
+            assert len(hyperlinks) == 1
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_footnote_creates_relationship_file(self) -> None:
+        """Test that inserting hyperlink creates footnotes.xml.rels."""
+        doc_path = create_document_with_footnote()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            doc.insert_hyperlink_in_footnote(
+                note_id=1,
+                url="https://test-url.com",
+                text="Test Link",
+                after="reference",
+            )
+
+            doc.save(output_path)
+
+            # Verify the footnotes rels file exists and contains the hyperlink
+            with zipfile.ZipFile(output_path, "r") as docx:
+                rels_content = docx.read("word/_rels/footnotes.xml.rels").decode("utf-8")
+
+            rels_tree = etree.fromstring(rels_content.encode())
+            relationships = rels_tree.findall(f".//{{{PKG_REL_NS}}}Relationship")
+
+            # Find the hyperlink relationship
+            hyperlink_rel = None
+            for rel in relationships:
+                if "hyperlink" in rel.get("Type", "").lower():
+                    hyperlink_rel = rel
+                    break
+
+            assert hyperlink_rel is not None
+            assert hyperlink_rel.get("Target") == "https://test-url.com"
+            assert hyperlink_rel.get("TargetMode") == "External"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_insert_hyperlink_in_footnote_not_found_raises_error(self) -> None:
+        """Test NoteNotFoundError when footnote doesn't exist."""
+        from python_docx_redline.errors import NoteNotFoundError
+
+        doc_path = create_document_with_footnote()
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(NoteNotFoundError) as exc_info:
+                doc.insert_hyperlink_in_footnote(
+                    note_id=999,
+                    url="https://example.com",
+                    text="Link",
+                    after="text",
+                )
+
+            assert "999" in str(exc_info.value)
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_footnote_text_not_found(self) -> None:
+        """Test TextNotFoundError when anchor text not in footnote."""
+        doc_path = create_document_with_footnote()
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(TextNotFoundError) as exc_info:
+                doc.insert_hyperlink_in_footnote(
+                    note_id=1,
+                    url="https://example.com",
+                    text="Link",
+                    after="nonexistent text",
+                )
+
+            assert "nonexistent text" in str(exc_info.value)
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_footnote_validation_errors(self) -> None:
+        """Test validation errors for invalid parameters."""
+        doc_path = create_document_with_footnote()
+        try:
+            doc = Document(doc_path)
+
+            # Neither url nor anchor
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_footnote(
+                    note_id=1,
+                    text="Link",
+                    after="text",
+                )
+
+            # Both url and anchor
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_footnote(
+                    note_id=1,
+                    url="https://example.com",
+                    anchor="Bookmark",
+                    text="Link",
+                    after="text",
+                )
+
+            # Neither after nor before
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_footnote(
+                    note_id=1,
+                    url="https://example.com",
+                    text="Link",
+                )
+
+            # Both after and before
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_footnote(
+                    note_id=1,
+                    url="https://example.com",
+                    text="Link",
+                    after="text",
+                    before="other",
+                )
+
+        finally:
+            doc_path.unlink()
+
+
+class TestInsertHyperlinkInEndnote:
+    """Tests for insert_hyperlink_in_endnote method."""
+
+    def test_insert_external_hyperlink_in_endnote(self) -> None:
+        """Test inserting external hyperlink after text in an endnote."""
+        doc_path = create_document_with_endnote()
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_endnote(
+                note_id=1,
+                url="https://example.com/bibliography",
+                text="full bibliography",
+                after="See the",
+            )
+
+            # Should return relationship ID
+            assert r_id is not None
+            assert r_id.startswith("rId")
+
+            # Verify hyperlink was inserted in the endnote
+            endnotes_path = doc._temp_dir / "word" / "endnotes.xml"
+            tree = etree.parse(str(endnotes_path))
+            hyperlinks = tree.findall(f".//{{{WORD_NS}}}hyperlink")
+            assert len(hyperlinks) == 1
+
+            # Verify the hyperlink has the relationship ID
+            hyperlink = hyperlinks[0]
+            assert hyperlink.get(f"{{{REL_NS}}}id") == r_id
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_internal_hyperlink_in_endnote(self) -> None:
+        """Test inserting internal hyperlink in an endnote."""
+        doc_path = create_document_with_endnote()
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_endnote(
+                note_id=1,
+                anchor="BibliographySection",
+                text="bibliography section",
+                after="See the",
+            )
+
+            # Internal links should return None
+            assert r_id is None
+
+            # Verify hyperlink was inserted
+            endnotes_path = doc._temp_dir / "word" / "endnotes.xml"
+            tree = etree.parse(str(endnotes_path))
+            hyperlinks = tree.findall(f".//{{{WORD_NS}}}hyperlink")
+            assert len(hyperlinks) == 1
+
+            # Verify w:anchor attribute
+            hyperlink = hyperlinks[0]
+            assert hyperlink.get(f"{{{WORD_NS}}}anchor") == "BibliographySection"
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_endnote_creates_relationship_file(self) -> None:
+        """Test that inserting hyperlink creates endnotes.xml.rels."""
+        doc_path = create_document_with_endnote()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            doc.insert_hyperlink_in_endnote(
+                note_id=1,
+                url="https://test-url.com/sources",
+                text="Test Link",
+                after="bibliography",
+            )
+
+            doc.save(output_path)
+
+            # Verify the endnotes rels file exists and contains the hyperlink
+            with zipfile.ZipFile(output_path, "r") as docx:
+                rels_content = docx.read("word/_rels/endnotes.xml.rels").decode("utf-8")
+
+            rels_tree = etree.fromstring(rels_content.encode())
+            relationships = rels_tree.findall(f".//{{{PKG_REL_NS}}}Relationship")
+
+            # Find the hyperlink relationship
+            hyperlink_rel = None
+            for rel in relationships:
+                if "hyperlink" in rel.get("Type", "").lower():
+                    hyperlink_rel = rel
+                    break
+
+            assert hyperlink_rel is not None
+            assert hyperlink_rel.get("Target") == "https://test-url.com/sources"
+            assert hyperlink_rel.get("TargetMode") == "External"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_insert_hyperlink_in_endnote_not_found_raises_error(self) -> None:
+        """Test NoteNotFoundError when endnote doesn't exist."""
+        from python_docx_redline.errors import NoteNotFoundError
+
+        doc_path = create_document_with_endnote()
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(NoteNotFoundError) as exc_info:
+                doc.insert_hyperlink_in_endnote(
+                    note_id=999,
+                    url="https://example.com",
+                    text="Link",
+                    after="text",
+                )
+
+            assert "999" in str(exc_info.value)
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_endnote_text_not_found(self) -> None:
+        """Test TextNotFoundError when anchor text not in endnote."""
+        doc_path = create_document_with_endnote()
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(TextNotFoundError) as exc_info:
+                doc.insert_hyperlink_in_endnote(
+                    note_id=1,
+                    url="https://example.com",
+                    text="Link",
+                    after="nonexistent text",
+                )
+
+            assert "nonexistent text" in str(exc_info.value)
+
+        finally:
+            doc_path.unlink()
