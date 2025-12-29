@@ -1526,3 +1526,527 @@ class TestInsertHyperlinkInEndnote:
 
         finally:
             doc_path.unlink()
+
+
+def create_document_with_header_footer(
+    header_text: str = "Test Header",
+    footer_text: str = "Test Footer",
+    first_header_text: str | None = None,
+    first_footer_text: str | None = None,
+) -> Path:
+    """Create a minimal .docx file with headers and footers for hyperlink testing."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    document_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>
+    <w:p>
+      <w:r>
+        <w:t>This is a test document with headers and footers.</w:t>
+      </w:r>
+    </w:p>
+    <w:sectPr>
+      <w:headerReference w:type="default" r:id="rId6"/>
+      <w:footerReference w:type="default" r:id="rId7"/>
+      {"<w:headerReference w:type='first' r:id='rId8'/>" if first_header_text else ""}
+      {"<w:footerReference w:type='first' r:id='rId9'/>" if first_footer_text else ""}
+      <w:titlePg/>
+    </w:sectPr>
+  </w:body>
+</w:document>"""
+
+    header1_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p>
+    <w:r>
+      <w:t>{header_text}</w:t>
+    </w:r>
+  </w:p>
+</w:hdr>"""
+
+    footer1_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p>
+    <w:r>
+      <w:t>{footer_text}</w:t>
+    </w:r>
+  </w:p>
+</w:ftr>"""
+
+    header2_xml = (
+        f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p>
+    <w:r>
+      <w:t>{first_header_text}</w:t>
+    </w:r>
+  </w:p>
+</w:hdr>"""
+        if first_header_text
+        else None
+    )
+
+    footer2_xml = (
+        f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p>
+    <w:r>
+      <w:t>{first_footer_text}</w:t>
+    </w:r>
+  </w:p>
+</w:ftr>"""
+        if first_footer_text
+        else None
+    )
+
+    content_types_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+  <Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>
+  {"<Override PartName='/word/header2.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml'/>" if first_header_text else ""}
+  {"<Override PartName='/word/footer2.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml'/>" if first_footer_text else ""}
+</Types>"""
+
+    root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    doc_rels = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId6" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+  <Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>
+  {"<Relationship Id='rId8' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/header' Target='header2.xml'/>" if first_header_text else ""}
+  {"<Relationship Id='rId9' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer' Target='footer2.xml'/>" if first_footer_text else ""}
+</Relationships>"""
+
+    with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types_xml)
+        docx.writestr("_rels/.rels", root_rels)
+        docx.writestr("word/document.xml", document_xml)
+        docx.writestr("word/_rels/document.xml.rels", doc_rels)
+        docx.writestr("word/header1.xml", header1_xml)
+        docx.writestr("word/footer1.xml", footer1_xml)
+        if header2_xml:
+            docx.writestr("word/header2.xml", header2_xml)
+        if footer2_xml:
+            docx.writestr("word/footer2.xml", footer2_xml)
+
+    return doc_path
+
+
+class TestHeaderHyperlinks:
+    """Tests for insert_hyperlink_in_header method."""
+
+    def test_insert_external_hyperlink_in_header(self) -> None:
+        """Test inserting external hyperlink in header default type."""
+        doc_path = create_document_with_header_footer(header_text="Visit our website")
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_header(
+                url="https://example.com",
+                text="Example",
+                after="Visit our",
+                header_type="default",
+            )
+
+            # Should return relationship ID
+            assert r_id is not None
+            assert r_id.startswith("rId")
+
+            # Verify hyperlink was inserted in header
+            headers = doc.headers
+            assert len(headers) >= 1
+            header = headers[0]
+            xml_str = etree.tostring(header.element, encoding="unicode")
+            assert "hyperlink" in xml_str.lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_internal_hyperlink_in_header(self) -> None:
+        """Test inserting internal hyperlink (anchor) in header."""
+        doc_path = create_document_with_header_footer(header_text="Go to Section One")
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_header(
+                anchor="SectionOne",
+                text="Jump",
+                after="Go to",
+                header_type="default",
+            )
+
+            # Internal links should return None
+            assert r_id is None
+
+            # Verify hyperlink was inserted with w:anchor attribute
+            headers = doc.headers
+            header = headers[0]
+            hyperlinks = list(header.element.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            hyperlink = hyperlinks[0]
+            assert hyperlink.get(f"{{{WORD_NS}}}anchor") == "SectionOne"
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_first_header(self) -> None:
+        """Test inserting hyperlink in first page header."""
+        doc_path = create_document_with_header_footer(
+            header_text="Default Header",
+            first_header_text="First Page Title",
+        )
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_header(
+                url="https://first-page.com",
+                text="Link",
+                after="First Page",
+                header_type="first",
+            )
+
+            assert r_id is not None
+
+            # Verify hyperlink was inserted in the first header
+            first_header = None
+            for h in doc.headers:
+                if h.type == "first":
+                    first_header = h
+                    break
+            assert first_header is not None
+            xml_str = etree.tostring(first_header.element, encoding="unicode")
+            assert "hyperlink" in xml_str.lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_header_creates_relationship_file(self) -> None:
+        """Test that inserting hyperlink creates header1.xml.rels."""
+        doc_path = create_document_with_header_footer(header_text="Click here")
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            doc.insert_hyperlink_in_header(
+                url="https://test-url.com",
+                text="Test Link",
+                after="Click",
+            )
+
+            doc.save(output_path)
+
+            # Verify the header rels file exists and contains the hyperlink
+            with zipfile.ZipFile(output_path, "r") as docx:
+                rels_content = docx.read("word/_rels/header1.xml.rels").decode("utf-8")
+
+            rels_tree = etree.fromstring(rels_content.encode())
+            relationships = rels_tree.findall(f".//{{{PKG_REL_NS}}}Relationship")
+
+            # Find the hyperlink relationship
+            hyperlink_rel = None
+            for rel in relationships:
+                if "hyperlink" in rel.get("Type", "").lower():
+                    hyperlink_rel = rel
+                    break
+
+            assert hyperlink_rel is not None
+            assert hyperlink_rel.get("Target") == "https://test-url.com"
+            assert hyperlink_rel.get("TargetMode") == "External"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_insert_hyperlink_in_header_text_not_found(self) -> None:
+        """Test TextNotFoundError when anchor text not in header."""
+        doc_path = create_document_with_header_footer(header_text="Test Header")
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(TextNotFoundError) as exc_info:
+                doc.insert_hyperlink_in_header(
+                    url="https://example.com",
+                    text="Link",
+                    after="nonexistent text",
+                )
+
+            assert "nonexistent text" in str(exc_info.value)
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_header_invalid_type(self) -> None:
+        """Test ValueError when invalid header_type specified."""
+        doc_path = create_document_with_header_footer(header_text="Test Header")
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.insert_hyperlink_in_header(
+                    url="https://example.com",
+                    text="Link",
+                    after="Test",
+                    header_type="invalid",
+                )
+
+            assert "invalid" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_header_validation_errors(self) -> None:
+        """Test validation errors for invalid parameters."""
+        doc_path = create_document_with_header_footer(header_text="Test Header")
+        try:
+            doc = Document(doc_path)
+
+            # Neither url nor anchor
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_header(
+                    text="Link",
+                    after="Test",
+                )
+
+            # Both url and anchor
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_header(
+                    url="https://example.com",
+                    anchor="Bookmark",
+                    text="Link",
+                    after="Test",
+                )
+
+            # Neither after nor before
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_header(
+                    url="https://example.com",
+                    text="Link",
+                )
+
+            # Both after and before
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_header(
+                    url="https://example.com",
+                    text="Link",
+                    after="Test",
+                    before="Header",
+                )
+
+        finally:
+            doc_path.unlink()
+
+
+class TestFooterHyperlinks:
+    """Tests for insert_hyperlink_in_footer method."""
+
+    def test_insert_external_hyperlink_in_footer(self) -> None:
+        """Test inserting external hyperlink in footer default type."""
+        doc_path = create_document_with_header_footer(footer_text="Contact us for more info")
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_footer(
+                url="https://contact.example.com",
+                text="contact form",
+                after="Contact us",
+                footer_type="default",
+            )
+
+            # Should return relationship ID
+            assert r_id is not None
+            assert r_id.startswith("rId")
+
+            # Verify hyperlink was inserted in footer
+            footers = doc.footers
+            assert len(footers) >= 1
+            footer = footers[0]
+            xml_str = etree.tostring(footer.element, encoding="unicode")
+            assert "hyperlink" in xml_str.lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_internal_hyperlink_in_footer(self) -> None:
+        """Test inserting internal hyperlink (anchor) in footer."""
+        doc_path = create_document_with_header_footer(footer_text="See the appendix for details")
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_footer(
+                anchor="AppendixA",
+                text="Appendix A",
+                after="See the",
+                footer_type="default",
+            )
+
+            # Internal links should return None
+            assert r_id is None
+
+            # Verify hyperlink was inserted with w:anchor attribute
+            footers = doc.footers
+            footer = footers[0]
+            hyperlinks = list(footer.element.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            hyperlink = hyperlinks[0]
+            assert hyperlink.get(f"{{{WORD_NS}}}anchor") == "AppendixA"
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_first_footer(self) -> None:
+        """Test inserting hyperlink in first page footer."""
+        doc_path = create_document_with_header_footer(
+            footer_text="Default Footer",
+            first_footer_text="Cover Page Footer",
+        )
+        try:
+            doc = Document(doc_path)
+
+            r_id = doc.insert_hyperlink_in_footer(
+                url="https://cover-page.com",
+                text="Link",
+                after="Cover Page",
+                footer_type="first",
+            )
+
+            assert r_id is not None
+
+            # Verify hyperlink was inserted in the first footer
+            first_footer = None
+            for f in doc.footers:
+                if f.type == "first":
+                    first_footer = f
+                    break
+            assert first_footer is not None
+            xml_str = etree.tostring(first_footer.element, encoding="unicode")
+            assert "hyperlink" in xml_str.lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_footer_creates_relationship_file(self) -> None:
+        """Test that inserting hyperlink creates footer1.xml.rels."""
+        doc_path = create_document_with_header_footer(footer_text="Click here")
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            doc.insert_hyperlink_in_footer(
+                url="https://footer-link.com",
+                text="Footer Link",
+                after="Click",
+            )
+
+            doc.save(output_path)
+
+            # Verify the footer rels file exists and contains the hyperlink
+            with zipfile.ZipFile(output_path, "r") as docx:
+                rels_content = docx.read("word/_rels/footer1.xml.rels").decode("utf-8")
+
+            rels_tree = etree.fromstring(rels_content.encode())
+            relationships = rels_tree.findall(f".//{{{PKG_REL_NS}}}Relationship")
+
+            # Find the hyperlink relationship
+            hyperlink_rel = None
+            for rel in relationships:
+                if "hyperlink" in rel.get("Type", "").lower():
+                    hyperlink_rel = rel
+                    break
+
+            assert hyperlink_rel is not None
+            assert hyperlink_rel.get("Target") == "https://footer-link.com"
+            assert hyperlink_rel.get("TargetMode") == "External"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_insert_hyperlink_in_footer_text_not_found(self) -> None:
+        """Test TextNotFoundError when anchor text not in footer."""
+        doc_path = create_document_with_header_footer(footer_text="Test Footer")
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(TextNotFoundError) as exc_info:
+                doc.insert_hyperlink_in_footer(
+                    url="https://example.com",
+                    text="Link",
+                    after="nonexistent text",
+                )
+
+            assert "nonexistent text" in str(exc_info.value)
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_footer_invalid_type(self) -> None:
+        """Test ValueError when invalid footer_type specified."""
+        doc_path = create_document_with_header_footer(footer_text="Test Footer")
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.insert_hyperlink_in_footer(
+                    url="https://example.com",
+                    text="Link",
+                    after="Test",
+                    footer_type="invalid",
+                )
+
+            assert "invalid" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_insert_hyperlink_in_footer_validation_errors(self) -> None:
+        """Test validation errors for invalid parameters."""
+        doc_path = create_document_with_header_footer(footer_text="Test Footer")
+        try:
+            doc = Document(doc_path)
+
+            # Neither url nor anchor
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_footer(
+                    text="Link",
+                    after="Test",
+                )
+
+            # Both url and anchor
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_footer(
+                    url="https://example.com",
+                    anchor="Bookmark",
+                    text="Link",
+                    after="Test",
+                )
+
+            # Neither after nor before
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_footer(
+                    url="https://example.com",
+                    text="Link",
+                )
+
+            # Both after and before
+            with pytest.raises(ValueError):
+                doc.insert_hyperlink_in_footer(
+                    url="https://example.com",
+                    text="Link",
+                    after="Test",
+                    before="Footer",
+                )
+
+        finally:
+            doc_path.unlink()
