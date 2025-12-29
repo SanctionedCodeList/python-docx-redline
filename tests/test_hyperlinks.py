@@ -2050,3 +2050,738 @@ class TestFooterHyperlinks:
 
         finally:
             doc_path.unlink()
+
+
+# ==================== Phase 4 Tests: Edit and Remove Hyperlinks ====================
+
+
+def create_document_with_external_hyperlink() -> Path:
+    """Create a document with an external hyperlink for testing edit/remove."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:body>
+<w:p>
+  <w:r><w:t>Click on this </w:t></w:r>
+  <w:hyperlink r:id="rId2" w:tooltip="Original tooltip">
+    <w:r>
+      <w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr>
+      <w:t>link text</w:t>
+    </w:r>
+  </w:hyperlink>
+  <w:r><w:t> to visit the site.</w:t></w:r>
+</w:p>
+<w:p>
+  <w:r><w:t>More content here.</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+    content_types_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    doc_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://original-url.com" TargetMode="External"/>
+</Relationships>"""
+
+    with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types_xml)
+        docx.writestr("_rels/.rels", root_rels)
+        docx.writestr("word/document.xml", document_xml)
+        docx.writestr("word/_rels/document.xml.rels", doc_rels)
+
+    return doc_path
+
+
+def create_document_with_internal_hyperlink() -> Path:
+    """Create a document with an internal hyperlink for testing edit/remove."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:body>
+<w:p>
+  <w:r><w:t>See the </w:t></w:r>
+  <w:hyperlink w:anchor="OriginalBookmark">
+    <w:r>
+      <w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr>
+      <w:t>definitions section</w:t>
+    </w:r>
+  </w:hyperlink>
+  <w:r><w:t> for details.</w:t></w:r>
+</w:p>
+<w:p>
+  <w:bookmarkStart w:id="0" w:name="OriginalBookmark"/>
+  <w:r><w:t>Definitions start here.</w:t></w:r>
+  <w:bookmarkEnd w:id="0"/>
+</w:p>
+<w:p>
+  <w:bookmarkStart w:id="1" w:name="NewBookmark"/>
+  <w:r><w:t>New section here.</w:t></w:r>
+  <w:bookmarkEnd w:id="1"/>
+</w:p>
+</w:body>
+</w:document>"""
+
+    content_types_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+    root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+    with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("[Content_Types].xml", content_types_xml)
+        docx.writestr("_rels/.rels", root_rels)
+        docx.writestr("word/document.xml", document_xml)
+
+    return doc_path
+
+
+class TestEditHyperlinkUrl:
+    """Tests for Document.edit_hyperlink_url() method."""
+
+    def test_edit_hyperlink_url_success(self) -> None:
+        """Test successfully changing external link URL."""
+        doc_path = create_document_with_external_hyperlink()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            # Edit the URL using relationship ID
+            doc.edit_hyperlink_url("rId2", "https://new-url.com/page")
+
+            # Save and verify the relationship was updated (skip validation for minimal test doc)
+            doc.save(output_path, validate=False)
+
+            with zipfile.ZipFile(output_path, "r") as docx:
+                rels_content = docx.read("word/_rels/document.xml.rels").decode("utf-8")
+
+            rels_tree = etree.fromstring(rels_content.encode())
+            relationships = rels_tree.findall(f".//{{{PKG_REL_NS}}}Relationship")
+
+            hyperlink_rel = None
+            for rel in relationships:
+                if rel.get("Id") == "rId2":
+                    hyperlink_rel = rel
+                    break
+
+            assert hyperlink_rel is not None
+            assert hyperlink_rel.get("Target") == "https://new-url.com/page"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_edit_hyperlink_url_by_lnk_ref(self) -> None:
+        """Test editing URL using lnk:N ref format."""
+        doc_path = create_document_with_external_hyperlink()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            # Edit using lnk:0 (first hyperlink)
+            doc.edit_hyperlink_url("lnk:0", "https://updated-link.com")
+
+            doc.save(output_path, validate=False)
+
+            with zipfile.ZipFile(output_path, "r") as docx:
+                rels_content = docx.read("word/_rels/document.xml.rels").decode("utf-8")
+
+            rels_tree = etree.fromstring(rels_content.encode())
+            relationships = rels_tree.findall(f".//{{{PKG_REL_NS}}}Relationship")
+
+            for rel in relationships:
+                if "hyperlink" in rel.get("Type", "").lower():
+                    assert rel.get("Target") == "https://updated-link.com"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_edit_hyperlink_url_ref_not_found(self) -> None:
+        """Test error when ref not found."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.edit_hyperlink_url("rIdNonExistent", "https://new-url.com")
+
+            assert "not found" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_url_on_internal_link_raises_error(self) -> None:
+        """Test error when trying to edit URL of internal link."""
+        doc_path = create_document_with_internal_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.edit_hyperlink_url("lnk:0", "https://new-url.com")
+
+            assert "internal" in str(exc_info.value).lower()
+            assert "edit_hyperlink_anchor" in str(exc_info.value)
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_url_empty_url_raises_error(self) -> None:
+        """Test error when new_url is empty."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.edit_hyperlink_url("rId2", "")
+
+            assert "empty" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
+
+
+class TestEditHyperlinkText:
+    """Tests for Document.edit_hyperlink_text() method."""
+
+    def test_edit_hyperlink_text_success(self) -> None:
+        """Test successfully changing display text."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            doc.edit_hyperlink_text("lnk:0", "Updated Link Text")
+
+            # Verify text was updated
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            hyperlink = hyperlinks[0]
+            text_elements = hyperlink.findall(f".//{{{WORD_NS}}}t")
+            text = "".join(t.text or "" for t in text_elements)
+            assert text == "Updated Link Text"
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_text_preserves_hyperlink_style(self) -> None:
+        """Test that Hyperlink style is preserved after text edit."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            doc.edit_hyperlink_text("lnk:0", "New Text")
+
+            # Verify Hyperlink style is still applied
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            hyperlink = hyperlinks[0]
+            runs = hyperlink.findall(f".//{{{WORD_NS}}}r")
+
+            assert len(runs) >= 1
+            run = runs[0]
+            rpr = run.find(f"{{{WORD_NS}}}rPr")
+            assert rpr is not None
+
+            rstyle = rpr.find(f"{{{WORD_NS}}}rStyle")
+            assert rstyle is not None
+            assert rstyle.get(f"{{{WORD_NS}}}val") == "Hyperlink"
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_text_persists_after_save_reload(self) -> None:
+        """Test text change persists after save/reload."""
+        doc_path = create_document_with_external_hyperlink()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+            doc.edit_hyperlink_text("lnk:0", "Persistent Text Change")
+            doc.save(output_path, validate=False)
+
+            # Reload and verify
+            doc2 = Document(output_path)
+            hyperlinks = list(doc2.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            hyperlink = hyperlinks[0]
+            text_elements = hyperlink.findall(f".//{{{WORD_NS}}}t")
+            text = "".join(t.text or "" for t in text_elements)
+            assert text == "Persistent Text Change"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_edit_hyperlink_text_ref_not_found(self) -> None:
+        """Test error when ref not found."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.edit_hyperlink_text("lnk:999", "New Text")
+
+            assert "not found" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_text_empty_text_raises_error(self) -> None:
+        """Test error when new_text is empty."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.edit_hyperlink_text("lnk:0", "")
+
+            assert "empty" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_text_preserves_whitespace(self) -> None:
+        """Test that leading/trailing whitespace in text is preserved."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            doc.edit_hyperlink_text("lnk:0", " spaced text ")
+
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            hyperlink = hyperlinks[0]
+            t_elem = hyperlink.find(f".//{{{WORD_NS}}}t")
+
+            # Check xml:space="preserve" attribute
+            space_attr = t_elem.get("{http://www.w3.org/XML/1998/namespace}space")
+            assert space_attr == "preserve"
+            assert t_elem.text == " spaced text "
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_text_on_internal_link(self) -> None:
+        """Test editing text on internal hyperlink works."""
+        doc_path = create_document_with_internal_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            doc.edit_hyperlink_text("lnk:0", "Updated internal link text")
+
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            hyperlink = hyperlinks[0]
+            text_elements = hyperlink.findall(f".//{{{WORD_NS}}}t")
+            text = "".join(t.text or "" for t in text_elements)
+            assert text == "Updated internal link text"
+
+        finally:
+            doc_path.unlink()
+
+
+class TestEditHyperlinkAnchor:
+    """Tests for Document.edit_hyperlink_anchor() method."""
+
+    def test_edit_hyperlink_anchor_success(self) -> None:
+        """Test successfully changing internal link target."""
+        doc_path = create_document_with_internal_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            doc.edit_hyperlink_anchor("lnk:0", "NewBookmark")
+
+            # Verify anchor was updated
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            hyperlink = hyperlinks[0]
+            anchor = hyperlink.get(f"{{{WORD_NS}}}anchor")
+            assert anchor == "NewBookmark"
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_anchor_ref_not_found(self) -> None:
+        """Test error when ref not found."""
+        doc_path = create_document_with_internal_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.edit_hyperlink_anchor("lnk:999", "SomeBookmark")
+
+            assert "not found" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_anchor_on_external_link_raises_error(self) -> None:
+        """Test error when trying to edit anchor of external link."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.edit_hyperlink_anchor("lnk:0", "SomeBookmark")
+
+            assert "external" in str(exc_info.value).lower()
+            assert "edit_hyperlink_url" in str(exc_info.value)
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_anchor_empty_anchor_raises_error(self) -> None:
+        """Test error when new_anchor is empty."""
+        doc_path = create_document_with_internal_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.edit_hyperlink_anchor("lnk:0", "")
+
+            assert "empty" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_anchor_nonexistent_bookmark_warning(self) -> None:
+        """Test warning when new bookmark doesn't exist."""
+        import warnings
+
+        doc_path = create_document_with_internal_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                doc.edit_hyperlink_anchor("lnk:0", "NonExistentBookmark")
+
+                # Should have issued a warning
+                assert len(w) == 1
+                assert issubclass(w[0].category, UserWarning)
+                assert "NonExistentBookmark" in str(w[0].message)
+                assert "does not exist" in str(w[0].message)
+
+            # But the anchor should still be changed
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            hyperlink = hyperlinks[0]
+            anchor = hyperlink.get(f"{{{WORD_NS}}}anchor")
+            assert anchor == "NonExistentBookmark"
+
+        finally:
+            doc_path.unlink()
+
+    def test_edit_hyperlink_anchor_persists_after_save_reload(self) -> None:
+        """Test anchor change persists after save/reload."""
+        import warnings
+
+        doc_path = create_document_with_internal_hyperlink()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            # Suppress warning about existing bookmark
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                doc.edit_hyperlink_anchor("lnk:0", "NewBookmark")
+
+            doc.save(output_path, validate=False)
+
+            # Reload and verify
+            doc2 = Document(output_path)
+            hyperlinks = list(doc2.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            hyperlink = hyperlinks[0]
+            anchor = hyperlink.get(f"{{{WORD_NS}}}anchor")
+            assert anchor == "NewBookmark"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+
+class TestRemoveHyperlink:
+    """Tests for Document.remove_hyperlink() method."""
+
+    def test_remove_hyperlink_keep_text(self) -> None:
+        """Test removing hyperlink while keeping the text."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            doc.remove_hyperlink("lnk:0", keep_text=True)
+
+            # Hyperlink element should be gone
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 0
+
+            # But the text should still exist in the document
+            all_text = []
+            for t_elem in doc.xml_root.iter(f"{{{WORD_NS}}}t"):
+                if t_elem.text:
+                    all_text.append(t_elem.text)
+
+            full_text = "".join(all_text)
+            assert "link text" in full_text
+
+        finally:
+            doc_path.unlink()
+
+    def test_remove_hyperlink_keep_text_removes_style(self) -> None:
+        """Test that removing hyperlink removes Hyperlink character style from text."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            doc.remove_hyperlink("lnk:0", keep_text=True)
+
+            # Find all runs containing "link text"
+            for run in doc.xml_root.iter(f"{{{WORD_NS}}}r"):
+                t_elem = run.find(f"{{{WORD_NS}}}t")
+                if t_elem is not None and t_elem.text and "link text" in t_elem.text:
+                    # Check that Hyperlink style is removed
+                    rpr = run.find(f"{{{WORD_NS}}}rPr")
+                    if rpr is not None:
+                        rstyle = rpr.find(f"{{{WORD_NS}}}rStyle")
+                        if rstyle is not None:
+                            # If there's a style, it shouldn't be "Hyperlink"
+                            style_val = rstyle.get(f"{{{WORD_NS}}}val")
+                            assert style_val != "Hyperlink"
+
+        finally:
+            doc_path.unlink()
+
+    def test_remove_hyperlink_remove_text(self) -> None:
+        """Test removing hyperlink and its text entirely."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            doc.remove_hyperlink("lnk:0", keep_text=False)
+
+            # Hyperlink element should be gone
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 0
+
+            # The text "link text" should also be gone
+            all_text = []
+            for t_elem in doc.xml_root.iter(f"{{{WORD_NS}}}t"):
+                if t_elem.text:
+                    all_text.append(t_elem.text)
+
+            full_text = "".join(all_text)
+            assert "link text" not in full_text
+
+            # But surrounding text should remain
+            assert "Click on this" in full_text
+            assert "to visit the site" in full_text
+
+        finally:
+            doc_path.unlink()
+
+    def test_remove_hyperlink_ref_not_found(self) -> None:
+        """Test error when ref not found."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.remove_hyperlink("lnk:999")
+
+            assert "not found" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_remove_hyperlink_persists_after_save_reload(self) -> None:
+        """Test that removal persists after save/reload."""
+        doc_path = create_document_with_external_hyperlink()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+            doc.remove_hyperlink("lnk:0", keep_text=True)
+            doc.save(output_path, validate=False)
+
+            # Reload and verify
+            doc2 = Document(output_path)
+            hyperlinks = list(doc2.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 0
+
+            # Text should still be there
+            all_text = []
+            for t_elem in doc2.xml_root.iter(f"{{{WORD_NS}}}t"):
+                if t_elem.text:
+                    all_text.append(t_elem.text)
+
+            full_text = "".join(all_text)
+            assert "link text" in full_text
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_remove_internal_hyperlink_keep_text(self) -> None:
+        """Test removing internal hyperlink while keeping text."""
+        doc_path = create_document_with_internal_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            doc.remove_hyperlink("lnk:0", keep_text=True)
+
+            # Hyperlink element should be gone
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 0
+
+            # But the text should still exist
+            all_text = []
+            for t_elem in doc.xml_root.iter(f"{{{WORD_NS}}}t"):
+                if t_elem.text:
+                    all_text.append(t_elem.text)
+
+            full_text = "".join(all_text)
+            assert "definitions section" in full_text
+
+        finally:
+            doc_path.unlink()
+
+    def test_remove_internal_hyperlink_remove_text(self) -> None:
+        """Test removing internal hyperlink and its text."""
+        doc_path = create_document_with_internal_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            doc.remove_hyperlink("lnk:0", keep_text=False)
+
+            # Hyperlink element should be gone
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 0
+
+            # The text should also be gone
+            all_text = []
+            for t_elem in doc.xml_root.iter(f"{{{WORD_NS}}}t"):
+                if t_elem.text:
+                    all_text.append(t_elem.text)
+
+            full_text = "".join(all_text)
+            assert "definitions section" not in full_text
+
+            # But surrounding text should remain
+            assert "See the" in full_text
+            assert "for details" in full_text
+
+        finally:
+            doc_path.unlink()
+
+    def test_remove_hyperlink_with_track_true(self) -> None:
+        """Test removing hyperlink with tracked changes."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            # Remove with track=True and keep_text=False
+            doc.remove_hyperlink("lnk:0", keep_text=False, track=True)
+
+            # Hyperlink element should be gone
+            hyperlinks = list(doc.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 0
+
+            # A tracked deletion should be present
+            deletions = list(doc.xml_root.iter(f"{{{WORD_NS}}}del"))
+            assert len(deletions) >= 1
+
+            # The deleted text should be "link text"
+            del_text = []
+            for del_elem in deletions:
+                for t_elem in del_elem.iter(f"{{{WORD_NS}}}delText"):
+                    if t_elem.text:
+                        del_text.append(t_elem.text)
+
+            assert "link text" in "".join(del_text)
+
+        finally:
+            doc_path.unlink()
+
+
+class TestEditHyperlinkInvalidRef:
+    """Tests for invalid ref format handling."""
+
+    def test_invalid_ref_format_raises_error(self) -> None:
+        """Test error for invalid ref format."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.edit_hyperlink_url("invalid:format", "https://new-url.com")
+
+            assert "invalid" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
+
+    def test_lnk_ref_with_non_integer_raises_error(self) -> None:
+        """Test error when lnk:N has non-integer N."""
+        doc_path = create_document_with_external_hyperlink()
+
+        try:
+            doc = Document(doc_path)
+
+            with pytest.raises(ValueError) as exc_info:
+                doc.edit_hyperlink_text("lnk:abc", "New Text")
+
+            assert "invalid" in str(exc_info.value).lower()
+
+        finally:
+            doc_path.unlink()
