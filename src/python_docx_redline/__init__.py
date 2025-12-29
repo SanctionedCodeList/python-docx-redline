@@ -70,6 +70,16 @@ __all__ = [
     "is_pdftoppm_available",
     "is_rendering_available",
     "render_document_to_images",
+    # Style templates
+    "STANDARD_STYLES",
+    "ensure_standard_styles",
+    "get_footnote_reference_style",
+    "get_footnote_text_style",
+    "get_footnote_text_char_style",
+    "get_endnote_reference_style",
+    "get_endnote_text_style",
+    "get_endnote_text_char_style",
+    "get_hyperlink_style",
 ]
 
 # Import author identity
@@ -140,6 +150,19 @@ from .results import AcceptResult, ComparisonStats, EditResult, FormatResult, Re
 
 # Import scope evaluation
 from .scope import ScopeEvaluator
+
+# Import style templates
+from .style_templates import (
+    STANDARD_STYLES,
+    ensure_standard_styles,
+    get_endnote_reference_style,
+    get_endnote_text_char_style,
+    get_endnote_text_style,
+    get_footnote_reference_style,
+    get_footnote_text_char_style,
+    get_footnote_text_style,
+    get_hyperlink_style,
+)
 
 # Import suggestion generator
 from .suggestions import SuggestionGenerator
