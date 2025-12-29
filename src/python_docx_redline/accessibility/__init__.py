@@ -6,6 +6,7 @@ enabling structured navigation and ref-based editing of Word documents.
 """
 
 from .registry import RefRegistry
+from .tree import AccessibilityTree, DocumentStats
 from .types import (
     AccessibilityNode,
     ChangeInfo,
@@ -18,9 +19,11 @@ from .types import (
 
 __all__ = [
     "AccessibilityNode",
+    "AccessibilityTree",
     "ChangeInfo",
     "ChangeType",
     "CommentInfo",
+    "DocumentStats",
     "ElementType",
     "Ref",
     "RefRegistry",
