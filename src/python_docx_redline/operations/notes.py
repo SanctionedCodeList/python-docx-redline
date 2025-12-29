@@ -778,6 +778,7 @@ class NoteOperations:
             # Need to add relationship and content type
             self._ensure_footnotes_relationship()
             self._ensure_footnotes_content_type()
+            self._ensure_footnote_styles()
 
         # Create footnote element
         footnote_elem = etree.SubElement(footnotes_root, f"{{{WORD_NAMESPACE}}}footnote")
@@ -838,6 +839,7 @@ class NoteOperations:
             # Need to add relationship and content type
             self._ensure_endnotes_relationship()
             self._ensure_endnotes_content_type()
+            self._ensure_endnote_styles()
 
         # Create endnote element
         endnote_elem = etree.SubElement(endnotes_root, f"{{{WORD_NAMESPACE}}}endnote")
@@ -985,6 +987,70 @@ class NoteOperations:
 
         ct_mgr = ContentTypeManager(package)
         ct_mgr.add_override("/word/endnotes.xml", ContentTypes.ENDNOTES)
+        ct_mgr.save()
+
+    def _ensure_footnote_styles(self) -> None:
+        """Ensure required footnote styles exist in the document.
+
+        Creates FootnoteReference, FootnoteText, and FootnoteTextChar styles
+        if they don't already exist. These styles are required for proper
+        footnote display in Word (superscript numbers, proper text formatting).
+
+        Also ensures the styles.xml relationship and content type exist.
+        """
+        from ..style_templates import ensure_standard_styles
+
+        ensure_standard_styles(
+            self._document.styles,
+            "FootnoteReference",
+            "FootnoteText",
+            "FootnoteTextChar",
+        )
+        # Ensure styles.xml is properly registered if it was created
+        self._ensure_styles_relationship()
+        self._ensure_styles_content_type()
+        self._document.styles.save()
+
+    def _ensure_endnote_styles(self) -> None:
+        """Ensure required endnote styles exist in the document.
+
+        Creates EndnoteReference, EndnoteText, and EndnoteTextChar styles
+        if they don't already exist. These styles are required for proper
+        endnote display in Word (superscript numbers, proper text formatting).
+
+        Also ensures the styles.xml relationship and content type exist.
+        """
+        from ..style_templates import ensure_standard_styles
+
+        ensure_standard_styles(
+            self._document.styles,
+            "EndnoteReference",
+            "EndnoteText",
+            "EndnoteTextChar",
+        )
+        # Ensure styles.xml is properly registered if it was created
+        self._ensure_styles_relationship()
+        self._ensure_styles_content_type()
+        self._document.styles.save()
+
+    def _ensure_styles_relationship(self) -> None:
+        """Ensure styles.xml relationship exists in document.xml.rels."""
+        package = self._document._package
+        if not package:
+            return
+
+        rel_mgr = RelationshipManager(package, "word/document.xml")
+        rel_mgr.add_relationship(RelationshipTypes.STYLES, "styles.xml")
+        rel_mgr.save()
+
+    def _ensure_styles_content_type(self) -> None:
+        """Ensure styles.xml content type exists in [Content_Types].xml."""
+        package = self._document._package
+        if not package:
+            return
+
+        ct_mgr = ContentTypeManager(package)
+        ct_mgr.add_override("/word/styles.xml", ContentTypes.STYLES)
         ct_mgr.save()
 
     def _find_footnote_reference(
