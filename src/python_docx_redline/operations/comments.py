@@ -128,7 +128,7 @@ class CommentOperations:
         initials: str | None = None,
         reply_to: Comment | str | int | None = None,
         occurrence: int | list[int] | str | None = None,
-    ) -> "Comment | list[Comment]":
+    ) -> Comment | list[Comment]:
         """Add a comment to the document on specified text or as a reply.
 
         This method can either add a new top-level comment on text in the
@@ -237,7 +237,7 @@ class CommentOperations:
         initials: str,
         timestamp: str,
         occurrence: int | list[int] | str | None = None,
-    ) -> "Comment | list[Comment]":
+    ) -> Comment | list[Comment]:
         """Add a new top-level comment on text in the document."""
         from ..models.comment import Comment, CommentRange
         from ..models.paragraph import Paragraph
@@ -294,8 +294,8 @@ class CommentOperations:
         return comments
 
     def _select_matches(
-        self, matches: list["TextSpan"], occurrence: int | list[int] | str, text: str
-    ) -> list["TextSpan"]:
+        self, matches: list[TextSpan], occurrence: int | list[int] | str, text: str
+    ) -> list[TextSpan]:
         """Select target matches based on occurrence parameter.
 
         Args:
