@@ -77,6 +77,7 @@ brew install pandoc                    # Text extraction (macOS)
 | **Add comments** | python-docx-redline | [comments.md](./comments.md) |
 | **Footnotes/endnotes** | python-docx-redline | [footnotes.md](./footnotes.md) |
 | **CriticMarkup workflow** | python-docx-redline | [criticmarkup.md](./criticmarkup.md) |
+| **Use both libraries together** | from_python_docx / to_python_docx | [integration.md](./integration.md) |
 | **Complex XML manipulation** | Raw OOXML | [ooxml.md](./ooxml.md) |
 
 **Note:** python-docx-redline is recommended for ALL editing (not just tracked changes) because it handles run fragmentation that breaks python-docx find/replace.
@@ -228,6 +229,7 @@ Detailed workflows for document manipulation:
 - **[comments.md](./comments.md)** — Adding comments, occurrence parameter, replies, resolution
 - **[footnotes.md](./footnotes.md)** — Footnotes/endnotes: CRUD, tracked changes, rich content, search
 - **[criticmarkup.md](./criticmarkup.md)** — Export/import with CriticMarkup, round-trip workflows
+- **[integration.md](./integration.md)** — python-docx integration: from_python_docx, to_python_docx, workflows
 - **[ooxml.md](./ooxml.md)** — Raw XML manipulation for complex scenarios
 
 ---
