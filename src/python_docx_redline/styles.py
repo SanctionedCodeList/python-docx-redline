@@ -641,6 +641,394 @@ class StyleManager:
         """Check if there are unsaved modifications."""
         return self._modified
 
+    # -------------------------------------------------------------------------
+    # Write Operations
+    # -------------------------------------------------------------------------
+
+    def _style_to_element(self, style: Style) -> etree._Element:
+        """Convert a Style object to a w:style XML element.
+
+        Creates a complete w:style element with all properties from the Style
+        object, including name, type, based_on, run formatting, paragraph
+        formatting, and UI properties.
+
+        Args:
+            style: The Style object to convert
+
+        Returns:
+            A w:style XML element ready to be appended to the styles root
+        """
+        # Create the w:style element
+        style_elem = etree.Element(w("style"))
+        style_elem.set(w("type"), style.style_type.value)
+        style_elem.set(w("styleId"), style.style_id)
+
+        # Add w:name element (required)
+        name_elem = etree.SubElement(style_elem, w("name"))
+        name_elem.set(w("val"), style.name)
+
+        # Add optional metadata elements
+        if style.based_on:
+            based_on_elem = etree.SubElement(style_elem, w("basedOn"))
+            based_on_elem.set(w("val"), style.based_on)
+
+        if style.next_style:
+            next_elem = etree.SubElement(style_elem, w("next"))
+            next_elem.set(w("val"), style.next_style)
+
+        if style.linked_style:
+            link_elem = etree.SubElement(style_elem, w("link"))
+            link_elem.set(w("val"), style.linked_style)
+
+        # Add UI properties
+        if style.ui_priority is not None:
+            ui_priority_elem = etree.SubElement(style_elem, w("uiPriority"))
+            ui_priority_elem.set(w("val"), str(style.ui_priority))
+
+        if style.quick_format:
+            etree.SubElement(style_elem, w("qFormat"))
+
+        if style.semi_hidden:
+            etree.SubElement(style_elem, w("semiHidden"))
+
+        if style.unhide_when_used:
+            etree.SubElement(style_elem, w("unhideWhenUsed"))
+
+        # Add paragraph formatting (w:pPr)
+        ppr_elem = self._paragraph_formatting_to_element(style.paragraph_formatting)
+        if ppr_elem is not None:
+            style_elem.append(ppr_elem)
+
+        # Add run formatting (w:rPr)
+        rpr_elem = self._run_formatting_to_element(style.run_formatting)
+        if rpr_elem is not None:
+            style_elem.append(rpr_elem)
+
+        return style_elem
+
+    def _run_formatting_to_element(self, fmt: RunFormatting) -> etree._Element | None:
+        """Convert RunFormatting to a w:rPr XML element.
+
+        Args:
+            fmt: The RunFormatting object to convert
+
+        Returns:
+            A w:rPr element if any formatting is set, None otherwise
+        """
+        rpr = etree.Element(w("rPr"))
+        has_content = False
+
+        # Bold
+        if fmt.bold is not None:
+            b_elem = etree.SubElement(rpr, w("b"))
+            if not fmt.bold:
+                b_elem.set(w("val"), "0")
+            has_content = True
+
+        # Italic
+        if fmt.italic is not None:
+            i_elem = etree.SubElement(rpr, w("i"))
+            if not fmt.italic:
+                i_elem.set(w("val"), "0")
+            has_content = True
+
+        # Underline
+        if fmt.underline is not None:
+            u_elem = etree.SubElement(rpr, w("u"))
+            if fmt.underline is True:
+                u_elem.set(w("val"), "single")
+            elif fmt.underline is False:
+                u_elem.set(w("val"), "none")
+            else:
+                # String value like "double", "wave", etc.
+                u_elem.set(w("val"), str(fmt.underline))
+            has_content = True
+
+        # Strikethrough
+        if fmt.strikethrough is not None:
+            strike_elem = etree.SubElement(rpr, w("strike"))
+            if not fmt.strikethrough:
+                strike_elem.set(w("val"), "0")
+            has_content = True
+
+        # Font name
+        if fmt.font_name is not None:
+            fonts_elem = etree.SubElement(rpr, w("rFonts"))
+            fonts_elem.set(w("ascii"), fmt.font_name)
+            fonts_elem.set(w("hAnsi"), fmt.font_name)
+            has_content = True
+
+        # Font size (convert points to half-points)
+        if fmt.font_size is not None:
+            half_points = int(fmt.font_size * 2)
+            sz_elem = etree.SubElement(rpr, w("sz"))
+            sz_elem.set(w("val"), str(half_points))
+            sz_cs_elem = etree.SubElement(rpr, w("szCs"))
+            sz_cs_elem.set(w("val"), str(half_points))
+            has_content = True
+
+        # Color
+        if fmt.color is not None:
+            color_elem = etree.SubElement(rpr, w("color"))
+            # Strip # prefix if present
+            color_val = fmt.color.lstrip("#")
+            color_elem.set(w("val"), color_val)
+            has_content = True
+
+        # Highlight
+        if fmt.highlight is not None:
+            highlight_elem = etree.SubElement(rpr, w("highlight"))
+            highlight_elem.set(w("val"), fmt.highlight)
+            has_content = True
+
+        # Superscript/subscript (via w:vertAlign)
+        if fmt.superscript:
+            vert_elem = etree.SubElement(rpr, w("vertAlign"))
+            vert_elem.set(w("val"), "superscript")
+            has_content = True
+        elif fmt.subscript:
+            vert_elem = etree.SubElement(rpr, w("vertAlign"))
+            vert_elem.set(w("val"), "subscript")
+            has_content = True
+
+        # Small caps
+        if fmt.small_caps is not None:
+            small_caps_elem = etree.SubElement(rpr, w("smallCaps"))
+            if not fmt.small_caps:
+                small_caps_elem.set(w("val"), "0")
+            has_content = True
+
+        # All caps
+        if fmt.all_caps is not None:
+            caps_elem = etree.SubElement(rpr, w("caps"))
+            if not fmt.all_caps:
+                caps_elem.set(w("val"), "0")
+            has_content = True
+
+        return rpr if has_content else None
+
+    def _paragraph_formatting_to_element(self, fmt: ParagraphFormatting) -> etree._Element | None:
+        """Convert ParagraphFormatting to a w:pPr XML element.
+
+        Args:
+            fmt: The ParagraphFormatting object to convert
+
+        Returns:
+            A w:pPr element if any formatting is set, None otherwise
+        """
+        ppr = etree.Element(w("pPr"))
+        has_content = False
+
+        # Alignment (w:jc)
+        if fmt.alignment is not None:
+            jc_elem = etree.SubElement(ppr, w("jc"))
+            # Map our simplified names to OOXML values
+            alignment_map = {
+                "left": "left",
+                "center": "center",
+                "right": "right",
+                "justify": "both",
+            }
+            jc_val = alignment_map.get(fmt.alignment, fmt.alignment)
+            jc_elem.set(w("val"), jc_val)
+            has_content = True
+
+        # Spacing (w:spacing)
+        if (
+            fmt.spacing_before is not None
+            or fmt.spacing_after is not None
+            or fmt.line_spacing is not None
+        ):
+            spacing_elem = etree.SubElement(ppr, w("spacing"))
+
+            # spacing_before/after are in points, convert to twentieths of a point
+            if fmt.spacing_before is not None:
+                twips = int(fmt.spacing_before * 20)
+                spacing_elem.set(w("before"), str(twips))
+
+            if fmt.spacing_after is not None:
+                twips = int(fmt.spacing_after * 20)
+                spacing_elem.set(w("after"), str(twips))
+
+            # line_spacing is a multiplier, convert to 240ths of a line
+            if fmt.line_spacing is not None:
+                line_val = int(fmt.line_spacing * 240)
+                spacing_elem.set(w("line"), str(line_val))
+                spacing_elem.set(w("lineRule"), "auto")
+
+            has_content = True
+
+        # Indentation (w:ind)
+        if (
+            fmt.indent_left is not None
+            or fmt.indent_right is not None
+            or fmt.indent_first_line is not None
+            or fmt.indent_hanging is not None
+        ):
+            ind_elem = etree.SubElement(ppr, w("ind"))
+
+            # Convert inches to twentieths of a point (1 inch = 1440 twips)
+            if fmt.indent_left is not None:
+                twips = int(fmt.indent_left * 1440)
+                ind_elem.set(w("left"), str(twips))
+
+            if fmt.indent_right is not None:
+                twips = int(fmt.indent_right * 1440)
+                ind_elem.set(w("right"), str(twips))
+
+            if fmt.indent_first_line is not None:
+                twips = int(fmt.indent_first_line * 1440)
+                ind_elem.set(w("firstLine"), str(twips))
+
+            if fmt.indent_hanging is not None:
+                twips = int(fmt.indent_hanging * 1440)
+                ind_elem.set(w("hanging"), str(twips))
+
+            has_content = True
+
+        # Keep properties
+        if fmt.keep_next:
+            etree.SubElement(ppr, w("keepNext"))
+            has_content = True
+
+        if fmt.keep_lines:
+            etree.SubElement(ppr, w("keepLines"))
+            has_content = True
+
+        # Outline level
+        if fmt.outline_level is not None:
+            outline_elem = etree.SubElement(ppr, w("outlineLvl"))
+            outline_elem.set(w("val"), str(fmt.outline_level))
+            has_content = True
+
+        return ppr if has_content else None
+
+    def add(self, style: Style) -> None:
+        """Add a new style to the document.
+
+        Creates a new style definition in the document's styles.xml. The style
+        must have a unique style_id that doesn't already exist.
+
+        Args:
+            style: The Style object to add
+
+        Raises:
+            ValueError: If a style with the same style_id already exists
+
+        Example:
+            >>> from python_docx_redline.models.style import Style, StyleType, RunFormatting
+            >>> custom = Style(
+            ...     style_id="MyStyle",
+            ...     name="My Custom Style",
+            ...     style_type=StyleType.CHARACTER,
+            ...     run_formatting=RunFormatting(bold=True, color="#FF0000"),
+            ... )
+            >>> styles.add(custom)
+            >>> styles.save()
+        """
+        if style.style_id in self._styles:
+            raise ValueError(f"Style with id '{style.style_id}' already exists")
+
+        if self._root is None:
+            raise RuntimeError("StyleManager not properly initialized")
+
+        # Convert style to XML element
+        style_elem = self._style_to_element(style)
+
+        # Append to root
+        self._root.append(style_elem)
+
+        # Store reference to the element in the style
+        style._element = style_elem
+
+        # Add to internal dict
+        self._styles[style.style_id] = style
+
+        # Mark as modified
+        self._modified = True
+
+        logger.debug(f"Added style: {style.style_id}")
+
+    def ensure_style(
+        self,
+        style_id: str,
+        name: str,
+        style_type: StyleType,
+        *,
+        based_on: str | None = None,
+        next_style: str | None = None,
+        linked_style: str | None = None,
+        run_formatting: RunFormatting | None = None,
+        paragraph_formatting: ParagraphFormatting | None = None,
+        ui_priority: int | None = None,
+        quick_format: bool = False,
+        semi_hidden: bool = False,
+        unhide_when_used: bool = False,
+    ) -> Style:
+        """Ensure a style exists, creating it if necessary.
+
+        This is the primary method for features that require specific styles.
+        If a style with the given style_id already exists, it is returned.
+        Otherwise, a new style is created with the provided parameters and added.
+
+        Args:
+            style_id: The unique identifier for the style
+            name: The display name of the style
+            style_type: The type of style (paragraph, character, etc.)
+            based_on: Optional style_id of parent style to inherit from
+            next_style: Optional style_id of style to apply after pressing Enter
+            linked_style: Optional style_id of linked style
+            run_formatting: Optional character formatting
+            paragraph_formatting: Optional paragraph formatting
+            ui_priority: Optional sort order in style gallery
+            quick_format: Whether style appears in Quick Style gallery
+            semi_hidden: Whether style is hidden from UI
+            unhide_when_used: Whether to unhide style when first used
+
+        Returns:
+            The existing or newly created Style object
+
+        Example:
+            >>> style = styles.ensure_style(
+            ...     style_id="FootnoteReference",
+            ...     name="footnote reference",
+            ...     style_type=StyleType.CHARACTER,
+            ...     based_on="DefaultParagraphFont",
+            ...     run_formatting=RunFormatting(superscript=True),
+            ...     ui_priority=99,
+            ...     unhide_when_used=True,
+            ... )
+        """
+        # Return existing style if it exists
+        existing = self.get(style_id)
+        if existing is not None:
+            logger.debug(f"Style '{style_id}' already exists, returning existing")
+            return existing
+
+        # Create new style
+        style = Style(
+            style_id=style_id,
+            name=name,
+            style_type=style_type,
+            based_on=based_on,
+            next_style=next_style,
+            linked_style=linked_style,
+            run_formatting=run_formatting if run_formatting else RunFormatting(),
+            paragraph_formatting=(
+                paragraph_formatting if paragraph_formatting else ParagraphFormatting()
+            ),
+            ui_priority=ui_priority,
+            quick_format=quick_format,
+            semi_hidden=semi_hidden,
+            unhide_when_used=unhide_when_used,
+        )
+
+        # Add the new style
+        self.add(style)
+
+        logger.debug(f"Created new style: {style_id}")
+        return style
+
     def save(self) -> None:
         """Persist changes to the word/styles.xml file.
 

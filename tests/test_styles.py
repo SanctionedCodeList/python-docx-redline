@@ -740,3 +740,360 @@ class TestStyleManagerWithRealDocument:
                 len(style_mgr.list(style_type=t, include_hidden=True)) for t in StyleType
             )
             assert sum_by_type == len(all_styles)
+
+
+class TestStyleManagerAdd:
+    """Tests for adding new styles."""
+
+    def test_add_character_style(self):
+        """Test adding a simple character style."""
+        from python_docx_redline.models.style import RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # Create a custom style
+            custom = Style(
+                style_id="MyHighlight",
+                name="My Highlight",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(bold=True, color="#FF0000"),
+            )
+
+            style_mgr.add(custom)
+
+            # Style should now exist in the manager
+            assert "MyHighlight" in style_mgr
+            retrieved = style_mgr.get("MyHighlight")
+            assert retrieved is not None
+            assert retrieved.name == "My Highlight"
+            assert retrieved.style_type == StyleType.CHARACTER
+
+            # Manager should be marked as modified
+            assert style_mgr.is_modified is True
+
+    def test_add_paragraph_style(self):
+        """Test adding a paragraph style with formatting."""
+        from python_docx_redline.models.style import ParagraphFormatting, RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            custom = Style(
+                style_id="CustomParagraph",
+                name="Custom Paragraph",
+                style_type=StyleType.PARAGRAPH,
+                based_on="Normal",
+                paragraph_formatting=ParagraphFormatting(
+                    alignment="justify",
+                    spacing_after=12.0,
+                    line_spacing=1.5,
+                ),
+                run_formatting=RunFormatting(font_name="Arial", font_size=11.0),
+            )
+
+            style_mgr.add(custom)
+
+            assert "CustomParagraph" in style_mgr
+            retrieved = style_mgr.get("CustomParagraph")
+            assert retrieved.based_on == "Normal"
+
+    def test_add_duplicate_raises_error(self):
+        """Test that adding a duplicate style_id raises ValueError."""
+        import pytest
+
+        from python_docx_redline.models.style import Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # "Normal" already exists
+            duplicate = Style(
+                style_id="Normal",
+                name="Duplicate Normal",
+                style_type=StyleType.PARAGRAPH,
+            )
+
+            with pytest.raises(ValueError, match="already exists"):
+                style_mgr.add(duplicate)
+
+    def test_add_style_with_all_properties(self):
+        """Test adding a style with all properties set."""
+        from python_docx_redline.models.style import ParagraphFormatting, RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            custom = Style(
+                style_id="FullFeatured",
+                name="Full Featured Style",
+                style_type=StyleType.PARAGRAPH,
+                based_on="Normal",
+                next_style="Normal",
+                linked_style="FullFeaturedChar",
+                ui_priority=50,
+                quick_format=True,
+                semi_hidden=False,
+                unhide_when_used=True,
+                run_formatting=RunFormatting(
+                    bold=True,
+                    italic=True,
+                    underline="double",
+                    font_name="Times New Roman",
+                    font_size=14.0,
+                    color="#0000FF",
+                    superscript=True,
+                ),
+                paragraph_formatting=ParagraphFormatting(
+                    alignment="center",
+                    spacing_before=6.0,
+                    spacing_after=12.0,
+                    line_spacing=2.0,
+                    indent_left=0.5,
+                    keep_next=True,
+                    keep_lines=True,
+                    outline_level=1,
+                ),
+            )
+
+            style_mgr.add(custom)
+
+            assert "FullFeatured" in style_mgr
+
+
+class TestStyleManagerEnsureStyle:
+    """Tests for the ensure_style method."""
+
+    def test_ensure_style_returns_existing(self):
+        """Test that ensure_style returns existing style if it exists."""
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # Normal already exists
+            style = style_mgr.ensure_style(
+                style_id="Normal",
+                name="should be ignored",
+                style_type=StyleType.CHARACTER,  # Wrong type, but should be ignored
+            )
+
+            # Should return the existing style
+            assert style.style_id == "Normal"
+            assert style.style_type == StyleType.PARAGRAPH  # Original type
+
+            # Should NOT be modified since we just returned existing
+            assert style_mgr.is_modified is False
+
+    def test_ensure_style_creates_if_missing(self):
+        """Test that ensure_style creates a new style if missing."""
+        from python_docx_redline.models.style import RunFormatting
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # FootnoteReference typically doesn't exist in simple_document
+            style = style_mgr.ensure_style(
+                style_id="FootnoteReference",
+                name="footnote reference",
+                style_type=StyleType.CHARACTER,
+                based_on="DefaultParagraphFont",
+                run_formatting=RunFormatting(superscript=True),
+                ui_priority=99,
+                unhide_when_used=True,
+            )
+
+            # Should be created
+            assert style.style_id == "FootnoteReference"
+            assert style.name == "footnote reference"
+            assert style.style_type == StyleType.CHARACTER
+            assert style.based_on == "DefaultParagraphFont"
+            assert style.run_formatting.superscript is True
+            assert style.ui_priority == 99
+            assert style.unhide_when_used is True
+
+            # Should be in manager
+            assert "FootnoteReference" in style_mgr
+            assert style_mgr.is_modified is True
+
+    def test_ensure_style_idempotent(self):
+        """Test that calling ensure_style twice returns same style."""
+        from python_docx_redline.models.style import RunFormatting
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # First call - creates it
+            style1 = style_mgr.ensure_style(
+                style_id="NewStyle",
+                name="New Style",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(bold=True),
+            )
+
+            # Second call - returns existing
+            style2 = style_mgr.ensure_style(
+                style_id="NewStyle",
+                name="Different Name",  # Should be ignored
+                style_type=StyleType.PARAGRAPH,  # Should be ignored
+            )
+
+            # Should be the same style
+            assert style1.style_id == style2.style_id
+            assert style2.name == "New Style"  # Original name
+            assert style2.style_type == StyleType.CHARACTER  # Original type
+
+
+class TestStyleManagerStyleToElement:
+    """Tests for converting Style to XML element."""
+
+    def test_style_to_element_basic(self):
+        """Test converting a basic style to XML."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="TestStyle",
+                name="Test Style",
+                style_type=StyleType.CHARACTER,
+            )
+
+            elem = style_mgr._style_to_element(style)
+
+            # Check element attributes
+            assert elem.tag == w("style")
+            assert elem.get(w("type")) == "character"
+            assert elem.get(w("styleId")) == "TestStyle"
+
+            # Check name child
+            name_elem = elem.find(w("name"))
+            assert name_elem is not None
+            assert name_elem.get(w("val")) == "Test Style"
+
+    def test_style_to_element_with_formatting(self):
+        """Test converting a style with run formatting to XML."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="FormattedStyle",
+                name="Formatted Style",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(
+                    bold=True,
+                    italic=True,
+                    font_size=14.0,
+                    superscript=True,
+                ),
+            )
+
+            elem = style_mgr._style_to_element(style)
+
+            # Check rPr exists
+            rpr = elem.find(w("rPr"))
+            assert rpr is not None
+
+            # Check bold
+            bold = rpr.find(w("b"))
+            assert bold is not None
+            assert bold.get(w("val")) is None  # True is implicit
+
+            # Check italic
+            italic = rpr.find(w("i"))
+            assert italic is not None
+
+            # Check font size (14pt = 28 half-points)
+            sz = rpr.find(w("sz"))
+            assert sz is not None
+            assert sz.get(w("val")) == "28"
+
+            # Check superscript
+            vert_align = rpr.find(w("vertAlign"))
+            assert vert_align is not None
+            assert vert_align.get(w("val")) == "superscript"
+
+
+class TestStyleManagerRoundTrip:
+    """Tests for round-trip style preservation."""
+
+    def test_add_save_reload_preserves_style(self):
+        """Test that adding, saving, and reloading preserves the style."""
+        from python_docx_redline.models.style import RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # Add a custom style
+            custom = Style(
+                style_id="RoundTripTest",
+                name="Round Trip Test",
+                style_type=StyleType.CHARACTER,
+                based_on="DefaultParagraphFont",
+                run_formatting=RunFormatting(bold=True, color="#FF5500"),
+                ui_priority=75,
+                semi_hidden=True,
+                unhide_when_used=True,
+            )
+            style_mgr.add(custom)
+
+            # Save
+            style_mgr.save()
+
+            # Create new StyleManager to reload
+            style_mgr2 = StyleManager(package)
+
+            # Check the style was preserved
+            assert "RoundTripTest" in style_mgr2
+            reloaded = style_mgr2.get("RoundTripTest")
+
+            assert reloaded.name == "Round Trip Test"
+            assert reloaded.style_type == StyleType.CHARACTER
+            assert reloaded.based_on == "DefaultParagraphFont"
+            assert reloaded.run_formatting.bold is True
+            assert reloaded.run_formatting.color == "#FF5500"
+            assert reloaded.ui_priority == 75
+            assert reloaded.semi_hidden is True
+            assert reloaded.unhide_when_used is True
+
+    def test_footnote_reference_style_round_trip(self):
+        """Test creating a FootnoteReference style as used in notes.py."""
+        from python_docx_redline.models.style import RunFormatting
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # This mirrors _ensure_footnote_styles in notes.py
+            _style = style_mgr.ensure_style(
+                style_id="FootnoteReference",
+                name="footnote reference",
+                style_type=StyleType.CHARACTER,
+                based_on="DefaultParagraphFont",
+                run_formatting=RunFormatting(superscript=True),
+                ui_priority=99,
+                unhide_when_used=True,
+            )
+
+            # Save and reload
+            style_mgr.save()
+            style_mgr2 = StyleManager(package)
+
+            # Verify
+            reloaded = style_mgr2.get("FootnoteReference")
+            assert reloaded is not None
+            assert reloaded.run_formatting.superscript is True
+            assert reloaded.ui_priority == 99
