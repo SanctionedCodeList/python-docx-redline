@@ -1026,6 +1026,527 @@ class TestStyleManagerStyleToElement:
             assert vert_align.get(w("val")) == "superscript"
 
 
+class TestStyleManagerStyleToElementDetailed:
+    """Detailed tests for _style_to_element() XML generation."""
+
+    def test_style_to_element_with_based_on(self):
+        """Test that basedOn element is created correctly."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="CustomStyle",
+                name="Custom Style",
+                style_type=StyleType.CHARACTER,
+                based_on="DefaultParagraphFont",
+            )
+
+            elem = style_mgr._style_to_element(style)
+
+            # Check basedOn element exists with correct value
+            based_on_elem = elem.find(w("basedOn"))
+            assert based_on_elem is not None
+            assert based_on_elem.get(w("val")) == "DefaultParagraphFont"
+
+    def test_style_to_element_superscript_creates_vert_align(self):
+        """Test that superscript creates w:vertAlign element."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="SuperscriptStyle",
+                name="Superscript Style",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(superscript=True),
+            )
+
+            elem = style_mgr._style_to_element(style)
+
+            # Check w:rPr/w:vertAlign exists with superscript value
+            rpr = elem.find(w("rPr"))
+            assert rpr is not None
+            vert_align = rpr.find(w("vertAlign"))
+            assert vert_align is not None
+            assert vert_align.get(w("val")) == "superscript"
+
+    def test_style_to_element_subscript_creates_vert_align(self):
+        """Test that subscript creates w:vertAlign element."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="SubscriptStyle",
+                name="Subscript Style",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(subscript=True),
+            )
+
+            elem = style_mgr._style_to_element(style)
+
+            rpr = elem.find(w("rPr"))
+            assert rpr is not None
+            vert_align = rpr.find(w("vertAlign"))
+            assert vert_align is not None
+            assert vert_align.get(w("val")) == "subscript"
+
+    def test_style_to_element_alignment_creates_jc(self):
+        """Test that alignment creates w:pPr/w:jc element."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import ParagraphFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="CenteredStyle",
+                name="Centered Style",
+                style_type=StyleType.PARAGRAPH,
+                paragraph_formatting=ParagraphFormatting(alignment="center"),
+            )
+
+            elem = style_mgr._style_to_element(style)
+
+            # Check w:pPr/w:jc exists with center value
+            ppr = elem.find(w("pPr"))
+            assert ppr is not None
+            jc = ppr.find(w("jc"))
+            assert jc is not None
+            assert jc.get(w("val")) == "center"
+
+    def test_style_to_element_justify_alignment_maps_to_both(self):
+        """Test that 'justify' alignment maps to OOXML 'both' value."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import ParagraphFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="JustifiedStyle",
+                name="Justified Style",
+                style_type=StyleType.PARAGRAPH,
+                paragraph_formatting=ParagraphFormatting(alignment="justify"),
+            )
+
+            elem = style_mgr._style_to_element(style)
+
+            ppr = elem.find(w("pPr"))
+            jc = ppr.find(w("jc"))
+            assert jc is not None
+            # "justify" should map to "both" in OOXML
+            assert jc.get(w("val")) == "both"
+
+    def test_style_to_element_ui_properties(self):
+        """Test that UI properties are correctly generated."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="UITestStyle",
+                name="UI Test Style",
+                style_type=StyleType.CHARACTER,
+                ui_priority=99,
+                quick_format=True,
+                semi_hidden=True,
+                unhide_when_used=True,
+            )
+
+            elem = style_mgr._style_to_element(style)
+
+            # Check uiPriority
+            ui_priority = elem.find(w("uiPriority"))
+            assert ui_priority is not None
+            assert ui_priority.get(w("val")) == "99"
+
+            # Check qFormat (presence indicates True)
+            assert elem.find(w("qFormat")) is not None
+
+            # Check semiHidden
+            assert elem.find(w("semiHidden")) is not None
+
+            # Check unhideWhenUsed
+            assert elem.find(w("unhideWhenUsed")) is not None
+
+    def test_style_to_element_next_and_linked_styles(self):
+        """Test that next_style and linked_style are generated correctly."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="HeadingTest",
+                name="Heading Test",
+                style_type=StyleType.PARAGRAPH,
+                next_style="Normal",
+                linked_style="HeadingTestChar",
+            )
+
+            elem = style_mgr._style_to_element(style)
+
+            # Check next element
+            next_elem = elem.find(w("next"))
+            assert next_elem is not None
+            assert next_elem.get(w("val")) == "Normal"
+
+            # Check link element
+            link_elem = elem.find(w("link"))
+            assert link_elem is not None
+            assert link_elem.get(w("val")) == "HeadingTestChar"
+
+    def test_style_to_element_run_formatting_comprehensive(self):
+        """Test comprehensive run formatting XML generation."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="ComprehensiveRun",
+                name="Comprehensive Run Style",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(
+                    bold=True,
+                    italic=True,
+                    underline="double",
+                    strikethrough=True,
+                    font_name="Arial",
+                    font_size=12.0,
+                    color="#FF0000",
+                    highlight="yellow",
+                    small_caps=True,
+                ),
+            )
+
+            elem = style_mgr._style_to_element(style)
+            rpr = elem.find(w("rPr"))
+            assert rpr is not None
+
+            # Check bold (no val attribute means True)
+            assert rpr.find(w("b")) is not None
+
+            # Check italic
+            assert rpr.find(w("i")) is not None
+
+            # Check underline
+            u = rpr.find(w("u"))
+            assert u is not None
+            assert u.get(w("val")) == "double"
+
+            # Check strikethrough
+            assert rpr.find(w("strike")) is not None
+
+            # Check font
+            fonts = rpr.find(w("rFonts"))
+            assert fonts is not None
+            assert fonts.get(w("ascii")) == "Arial"
+
+            # Check font size (12pt = 24 half-points)
+            sz = rpr.find(w("sz"))
+            assert sz is not None
+            assert sz.get(w("val")) == "24"
+
+            # Check color (without # prefix)
+            color = rpr.find(w("color"))
+            assert color is not None
+            assert color.get(w("val")) == "FF0000"
+
+            # Check highlight
+            highlight = rpr.find(w("highlight"))
+            assert highlight is not None
+            assert highlight.get(w("val")) == "yellow"
+
+            # Check small caps
+            assert rpr.find(w("smallCaps")) is not None
+
+    def test_style_to_element_paragraph_formatting_comprehensive(self):
+        """Test comprehensive paragraph formatting XML generation."""
+        from python_docx_redline.constants import w
+        from python_docx_redline.models.style import ParagraphFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = Style(
+                style_id="ComprehensivePara",
+                name="Comprehensive Para Style",
+                style_type=StyleType.PARAGRAPH,
+                paragraph_formatting=ParagraphFormatting(
+                    alignment="right",
+                    spacing_before=12.0,
+                    spacing_after=6.0,
+                    line_spacing=1.5,
+                    indent_left=0.5,
+                    indent_right=0.25,
+                    indent_first_line=0.5,
+                    keep_next=True,
+                    keep_lines=True,
+                    outline_level=2,
+                ),
+            )
+
+            elem = style_mgr._style_to_element(style)
+            ppr = elem.find(w("pPr"))
+            assert ppr is not None
+
+            # Check alignment
+            jc = ppr.find(w("jc"))
+            assert jc is not None
+            assert jc.get(w("val")) == "right"
+
+            # Check spacing (12pt before = 240 twips, 6pt after = 120 twips)
+            spacing = ppr.find(w("spacing"))
+            assert spacing is not None
+            assert spacing.get(w("before")) == "240"
+            assert spacing.get(w("after")) == "120"
+            # Line spacing 1.5 = 360 (in 240ths)
+            assert spacing.get(w("line")) == "360"
+            assert spacing.get(w("lineRule")) == "auto"
+
+            # Check indentation (0.5 inch = 720 twips)
+            ind = ppr.find(w("ind"))
+            assert ind is not None
+            assert ind.get(w("left")) == "720"
+            assert ind.get(w("right")) == "360"  # 0.25 inch = 360 twips
+            assert ind.get(w("firstLine")) == "720"
+
+            # Check keep properties
+            assert ppr.find(w("keepNext")) is not None
+            assert ppr.find(w("keepLines")) is not None
+
+            # Check outline level
+            outline = ppr.find(w("outlineLvl"))
+            assert outline is not None
+            assert outline.get(w("val")) == "2"
+
+
+class TestStyleManagerAddDetailed:
+    """Detailed tests for add() method."""
+
+    def test_add_sets_modified_flag(self):
+        """Test that add() sets _modified to True."""
+        from python_docx_redline.models.style import Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # Initially should not be modified (loaded from existing file)
+            assert style_mgr.is_modified is False
+
+            custom = Style(
+                style_id="ModifiedTest",
+                name="Modified Test",
+                style_type=StyleType.CHARACTER,
+            )
+            style_mgr.add(custom)
+
+            # Should now be modified
+            assert style_mgr.is_modified is True
+
+    def test_add_style_accessible_via_get(self):
+        """Test that added style is accessible via get() immediately."""
+        from python_docx_redline.models.style import RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            custom = Style(
+                style_id="GetTestStyle",
+                name="Get Test Style",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(italic=True),
+            )
+            style_mgr.add(custom)
+
+            # Should be retrievable immediately
+            retrieved = style_mgr.get("GetTestStyle")
+            assert retrieved is not None
+            assert retrieved.name == "Get Test Style"
+            assert retrieved.run_formatting.italic is True
+
+    def test_add_style_stores_element_reference(self):
+        """Test that added style has _element reference set."""
+        from python_docx_redline.models.style import Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            custom = Style(
+                style_id="ElementRefTest",
+                name="Element Ref Test",
+                style_type=StyleType.CHARACTER,
+            )
+            style_mgr.add(custom)
+
+            # The style should have _element set
+            assert custom._element is not None
+            assert isinstance(custom._element, etree._Element)
+
+
+class TestStyleManagerSaveDetailed:
+    """Detailed tests for save() method."""
+
+    def test_save_sets_modified_to_false(self):
+        """Test that save() sets _modified to False."""
+        from python_docx_redline.models.style import Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # Add a style to mark as modified
+            custom = Style(
+                style_id="SaveModifiedTest",
+                name="Save Modified Test",
+                style_type=StyleType.CHARACTER,
+            )
+            style_mgr.add(custom)
+            assert style_mgr.is_modified is True
+
+            # Save
+            style_mgr.save()
+
+            # Should no longer be modified
+            assert style_mgr.is_modified is False
+
+    def test_save_writes_changes_to_file(self):
+        """Test that save() writes changes to the styles.xml file."""
+        from python_docx_redline.models.style import RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            custom = Style(
+                style_id="SaveWriteTest",
+                name="Save Write Test",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(bold=True),
+            )
+            style_mgr.add(custom)
+            style_mgr.save()
+
+            # Read the saved file directly
+            styles_path = package.temp_dir / STYLES_PATH
+            assert styles_path.exists()
+
+            # Parse and verify the style was written
+            tree = etree.parse(str(styles_path))
+            root = tree.getroot()
+
+            from python_docx_redline.constants import w
+
+            # Find our style
+            found = False
+            for style_elem in root.findall(w("style")):
+                if style_elem.get(w("styleId")) == "SaveWriteTest":
+                    found = True
+                    # Verify it has the expected content
+                    name_elem = style_elem.find(w("name"))
+                    assert name_elem is not None
+                    assert name_elem.get(w("val")) == "Save Write Test"
+                    break
+            assert found, "Style 'SaveWriteTest' not found in saved file"
+
+    def test_saved_styles_persist_after_reload(self):
+        """Test that saved styles persist after creating new StyleManager."""
+        from python_docx_redline.models.style import RunFormatting, Style
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            custom = Style(
+                style_id="PersistTest",
+                name="Persist Test",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(italic=True, color="#00FF00"),
+            )
+            style_mgr.add(custom)
+            style_mgr.save()
+
+            # Create new StyleManager to reload
+            style_mgr2 = StyleManager(package)
+
+            # Style should be present
+            assert "PersistTest" in style_mgr2
+            reloaded = style_mgr2.get("PersistTest")
+            assert reloaded is not None
+            assert reloaded.name == "Persist Test"
+            assert reloaded.style_type == StyleType.CHARACTER
+            assert reloaded.run_formatting.italic is True
+            assert reloaded.run_formatting.color == "#00FF00"
+
+
+class TestStyleManagerEnsureStyleDetailed:
+    """Detailed tests for ensure_style() method."""
+
+    def test_ensure_style_with_run_formatting(self):
+        """Test ensure_style with run_formatting parameter."""
+        from python_docx_redline.models.style import RunFormatting
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = style_mgr.ensure_style(
+                style_id="RunFormattedStyle",
+                name="Run Formatted Style",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(bold=True, font_size=16.0),
+            )
+
+            assert style.run_formatting.bold is True
+            assert style.run_formatting.font_size == 16.0
+
+    def test_ensure_style_with_paragraph_formatting(self):
+        """Test ensure_style with paragraph_formatting parameter."""
+        from python_docx_redline.models.style import ParagraphFormatting
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            style = style_mgr.ensure_style(
+                style_id="ParaFormattedStyle",
+                name="Para Formatted Style",
+                style_type=StyleType.PARAGRAPH,
+                paragraph_formatting=ParagraphFormatting(
+                    alignment="center",
+                    spacing_after=10.0,
+                ),
+            )
+
+            assert style.paragraph_formatting.alignment == "center"
+            assert style.paragraph_formatting.spacing_after == 10.0
+
+
 class TestStyleManagerRoundTrip:
     """Tests for round-trip style preservation."""
 
@@ -1097,3 +1618,107 @@ class TestStyleManagerRoundTrip:
             assert reloaded is not None
             assert reloaded.run_formatting.superscript is True
             assert reloaded.ui_priority == 99
+
+    def test_footnote_text_paragraph_style_round_trip(self):
+        """Test creating a FootnoteText-like paragraph style round trip."""
+        from python_docx_redline.models.style import ParagraphFormatting, RunFormatting
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # Create a FootnoteText-like paragraph style
+            _style = style_mgr.ensure_style(
+                style_id="FootnoteText",
+                name="footnote text",
+                style_type=StyleType.PARAGRAPH,
+                based_on="Normal",
+                next_style="FootnoteText",
+                run_formatting=RunFormatting(font_size=10.0),
+                paragraph_formatting=ParagraphFormatting(
+                    spacing_after=0,
+                    line_spacing=1.0,
+                ),
+                ui_priority=99,
+                semi_hidden=True,
+                unhide_when_used=True,
+            )
+
+            # Save and reload
+            style_mgr.save()
+            style_mgr2 = StyleManager(package)
+
+            # Verify
+            reloaded = style_mgr2.get("FootnoteText")
+            assert reloaded is not None
+            assert reloaded.name == "footnote text"
+            assert reloaded.style_type == StyleType.PARAGRAPH
+            assert reloaded.based_on == "Normal"
+            assert reloaded.next_style == "FootnoteText"
+            assert reloaded.run_formatting.font_size == 10.0
+            assert reloaded.paragraph_formatting.spacing_after == 0
+            assert reloaded.paragraph_formatting.line_spacing == 1.0
+            assert reloaded.ui_priority == 99
+            assert reloaded.semi_hidden is True
+            assert reloaded.unhide_when_used is True
+
+    def test_multiple_styles_round_trip(self):
+        """Test creating multiple styles and saving them together."""
+        from python_docx_redline.models.style import (
+            ParagraphFormatting,
+            RunFormatting,
+            Style,
+        )
+
+        docx_path = FIXTURES_DIR / "simple_document.docx"
+        with OOXMLPackage.open(docx_path) as package:
+            style_mgr = StyleManager(package)
+
+            # Add multiple styles
+            style1 = Style(
+                style_id="CustomTitle",
+                name="Custom Title",
+                style_type=StyleType.PARAGRAPH,
+                run_formatting=RunFormatting(bold=True, font_size=24.0),
+                paragraph_formatting=ParagraphFormatting(alignment="center"),
+            )
+            style_mgr.add(style1)
+
+            style2 = Style(
+                style_id="CustomEmphasis",
+                name="Custom Emphasis",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(italic=True, color="#0000FF"),
+            )
+            style_mgr.add(style2)
+
+            style3 = Style(
+                style_id="CustomCode",
+                name="Custom Code",
+                style_type=StyleType.CHARACTER,
+                run_formatting=RunFormatting(font_name="Courier New", font_size=10.0),
+            )
+            style_mgr.add(style3)
+
+            # Save
+            style_mgr.save()
+
+            # Reload
+            style_mgr2 = StyleManager(package)
+
+            # Verify all styles exist and have correct properties
+            title = style_mgr2.get("CustomTitle")
+            assert title is not None
+            assert title.run_formatting.bold is True
+            assert title.run_formatting.font_size == 24.0
+            assert title.paragraph_formatting.alignment == "center"
+
+            emphasis = style_mgr2.get("CustomEmphasis")
+            assert emphasis is not None
+            assert emphasis.run_formatting.italic is True
+            assert emphasis.run_formatting.color == "#0000FF"
+
+            code = style_mgr2.get("CustomCode")
+            assert code is not None
+            assert code.run_formatting.font_name == "Courier New"
+            assert code.run_formatting.font_size == 10.0
