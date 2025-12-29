@@ -9,6 +9,7 @@ table styles, and numbering styles.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from lxml import etree
@@ -499,6 +500,141 @@ class StyleManager:
         etree.SubElement(dpf_style, w("unhideWhenUsed"))
 
         return root
+
+    # -------------------------------------------------------------------------
+    # Read Operations
+    # -------------------------------------------------------------------------
+
+    def get(self, style_id: str) -> Style | None:
+        """Get a style by its ID.
+
+        Args:
+            style_id: The style identifier (e.g., "Normal", "Heading1",
+                "FootnoteReference")
+
+        Returns:
+            The Style object if found, None otherwise
+
+        Example:
+            >>> styles = StyleManager(package)
+            >>> normal = styles.get("Normal")
+            >>> if normal:
+            ...     print(f"Normal style: {normal.name}")
+        """
+        return self._styles.get(style_id)
+
+    def get_by_name(self, name: str) -> Style | None:
+        """Get a style by its display name (case-insensitive).
+
+        Searches for a style by its display name rather than its internal ID.
+        The comparison is case-insensitive to match Word's behavior.
+
+        Args:
+            name: The display name to search for (e.g., "Normal",
+                "Heading 1", "footnote reference")
+
+        Returns:
+            The Style object if found, None otherwise
+
+        Example:
+            >>> styles = StyleManager(package)
+            >>> heading = styles.get_by_name("heading 1")  # Case-insensitive
+            >>> if heading:
+            ...     print(f"Found: {heading.style_id}")
+        """
+        name_lower = name.lower()
+        for style in self._styles.values():
+            if style.name.lower() == name_lower:
+                return style
+        return None
+
+    def list(
+        self,
+        style_type: StyleType | None = None,
+        include_hidden: bool = False,
+    ) -> list[Style]:
+        """List all styles, optionally filtered by type.
+
+        Returns styles in the document, with optional filtering by style type
+        and visibility.
+
+        Args:
+            style_type: If provided, only return styles of this type
+            include_hidden: If False (default), exclude semi_hidden styles
+
+        Returns:
+            List of Style objects matching the criteria
+
+        Example:
+            >>> styles = StyleManager(package)
+            >>> # Get all visible styles
+            >>> all_styles = styles.list()
+            >>> # Get only paragraph styles
+            >>> para_styles = styles.list(style_type=StyleType.PARAGRAPH)
+            >>> # Get all styles including hidden ones
+            >>> all_including_hidden = styles.list(include_hidden=True)
+        """
+        result = []
+        for style in self._styles.values():
+            # Filter by type if specified
+            if style_type is not None and style.style_type != style_type:
+                continue
+            # Filter hidden styles if not included
+            if not include_hidden and style.semi_hidden:
+                continue
+            result.append(style)
+        return result
+
+    def __contains__(self, style_id: str) -> bool:
+        """Check if a style exists by ID.
+
+        Enables the use of 'in' operator for checking style existence.
+
+        Args:
+            style_id: The style identifier to check
+
+        Returns:
+            True if the style exists, False otherwise
+
+        Example:
+            >>> styles = StyleManager(package)
+            >>> if "FootnoteReference" in styles:
+            ...     print("Style exists")
+        """
+        return style_id in self._styles
+
+    def __iter__(self) -> Iterator[Style]:
+        """Iterate over all styles.
+
+        Enables iteration over StyleManager to get all Style objects.
+
+        Yields:
+            Style objects in the manager
+
+        Example:
+            >>> styles = StyleManager(package)
+            >>> for style in styles:
+            ...     print(f"{style.style_id}: {style.name}")
+        """
+        return iter(self._styles.values())
+
+    def __len__(self) -> int:
+        """Return the number of styles.
+
+        Enables len() on StyleManager.
+
+        Returns:
+            The number of styles in the manager
+
+        Example:
+            >>> styles = StyleManager(package)
+            >>> print(f"Document has {len(styles)} styles")
+        """
+        return len(self._styles)
+
+    # -------------------------------------------------------------------------
+    # Properties
+    # -------------------------------------------------------------------------
 
     @property
     def is_modified(self) -> bool:
