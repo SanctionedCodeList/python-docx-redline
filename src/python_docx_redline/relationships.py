@@ -144,7 +144,7 @@ class RelationshipManager:
         """
         return self.get_relationship(rel_type) is not None
 
-    def add_relationship(self, rel_type: str, target: str) -> str:
+    def add_relationship(self, rel_type: str, target: str, target_mode: str | None = None) -> str:
         """Add a new relationship or return existing one.
 
         If a relationship of the given type already exists, returns its ID.
@@ -153,6 +153,7 @@ class RelationshipManager:
         Args:
             rel_type: The relationship type URI
             target: The target path (relative to the part's directory)
+            target_mode: Optional target mode (e.g., "External" for hyperlinks)
 
         Returns:
             The relationship ID (e.g., "rId3")
@@ -174,25 +175,37 @@ class RelationshipManager:
         rel_elem.set("Id", f"rId{next_id}")
         rel_elem.set("Type", rel_type)
         rel_elem.set("Target", target)
+        if target_mode is not None:
+            rel_elem.set("TargetMode", target_mode)
 
         self._modified = True
         logger.debug(f"Added relationship rId{next_id}: {rel_type} -> {target}")
 
         return f"rId{next_id}"
 
-    def add_unique_relationship(self, rel_type: str, target: str) -> str:
+    def add_unique_relationship(
+        self, rel_type: str, target: str, target_mode: str | None = None
+    ) -> str:
         """Add a new relationship, always creating a new ID.
 
         Unlike add_relationship(), this method does not check for existing
         relationships of the same type. Use this for relationship types
-        that can have multiple instances, like images.
+        that can have multiple instances, like images or hyperlinks.
 
         Args:
             rel_type: The relationship type URI
             target: The target path (relative to the part's directory)
+            target_mode: Optional target mode (e.g., "External" for hyperlinks)
 
         Returns:
             The new relationship ID (e.g., "rId3")
+
+        Example:
+            >>> rel_mgr.add_unique_relationship(
+            ...     RelationshipTypes.HYPERLINK,
+            ...     "https://example.com",
+            ...     target_mode="External"
+            ... )
         """
         self._ensure_loaded()
         assert self._root is not None
@@ -205,6 +218,8 @@ class RelationshipManager:
         rel_elem.set("Id", f"rId{next_id}")
         rel_elem.set("Type", rel_type)
         rel_elem.set("Target", target)
+        if target_mode is not None:
+            rel_elem.set("TargetMode", target_mode)
 
         self._modified = True
         logger.debug(f"Added unique relationship rId{next_id}: {rel_type} -> {target}")

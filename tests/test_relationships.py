@@ -300,6 +300,92 @@ class TestRelationshipManagerSave:
         assert rel_mgr2.has_relationship(RelationshipTypes.STYLES) is False
 
 
+class TestRelationshipTargetMode:
+    """Test target_mode parameter for external relationships."""
+
+    def test_add_relationship_with_target_mode(self, package: OOXMLPackage) -> None:
+        """Test adding a relationship with TargetMode attribute."""
+        rel_mgr = RelationshipManager(package, "word/document.xml")
+
+        # Add a hyperlink relationship with External target mode
+        rel_id = rel_mgr.add_relationship(
+            RelationshipTypes.HYPERLINK, "https://example.com", target_mode="External"
+        )
+
+        assert rel_id == "rId2"
+        rel_mgr.save()
+
+        # Read the file and verify TargetMode attribute
+        parser = etree.XMLParser(remove_blank_text=False)
+        tree = etree.parse(str(rel_mgr._rels_path), parser)
+        root = tree.getroot()
+
+        hyperlink_rel = None
+        for rel in root.findall(f"{{{RELS_NAMESPACE}}}Relationship"):
+            if rel.get("Type") == RelationshipTypes.HYPERLINK:
+                hyperlink_rel = rel
+                break
+
+        assert hyperlink_rel is not None
+        assert hyperlink_rel.get("Target") == "https://example.com"
+        assert hyperlink_rel.get("TargetMode") == "External"
+
+    def test_add_relationship_without_target_mode(self, package: OOXMLPackage) -> None:
+        """Test adding a relationship without TargetMode (default behavior)."""
+        rel_mgr = RelationshipManager(package, "word/document.xml")
+
+        # Add a relationship without target_mode
+        rel_id = rel_mgr.add_relationship(RelationshipTypes.COMMENTS, "comments.xml")
+
+        assert rel_id == "rId2"
+        rel_mgr.save()
+
+        # Read the file and verify no TargetMode attribute
+        parser = etree.XMLParser(remove_blank_text=False)
+        tree = etree.parse(str(rel_mgr._rels_path), parser)
+        root = tree.getroot()
+
+        comments_rel = None
+        for rel in root.findall(f"{{{RELS_NAMESPACE}}}Relationship"):
+            if rel.get("Type") == RelationshipTypes.COMMENTS:
+                comments_rel = rel
+                break
+
+        assert comments_rel is not None
+        assert comments_rel.get("TargetMode") is None
+
+    def test_add_unique_relationship_with_target_mode(self, package: OOXMLPackage) -> None:
+        """Test adding multiple unique relationships with TargetMode."""
+        rel_mgr = RelationshipManager(package, "word/document.xml")
+
+        # Add multiple hyperlinks (same type, different targets)
+        rel_id1 = rel_mgr.add_unique_relationship(
+            RelationshipTypes.HYPERLINK, "https://example.com", target_mode="External"
+        )
+        rel_id2 = rel_mgr.add_unique_relationship(
+            RelationshipTypes.HYPERLINK, "https://another.com", target_mode="External"
+        )
+
+        assert rel_id1 == "rId2"
+        assert rel_id2 == "rId3"
+        rel_mgr.save()
+
+        # Read the file and verify both have TargetMode
+        parser = etree.XMLParser(remove_blank_text=False)
+        tree = etree.parse(str(rel_mgr._rels_path), parser)
+        root = tree.getroot()
+
+        hyperlink_rels = [
+            rel
+            for rel in root.findall(f"{{{RELS_NAMESPACE}}}Relationship")
+            if rel.get("Type") == RelationshipTypes.HYPERLINK
+        ]
+
+        assert len(hyperlink_rels) == 2
+        for rel in hyperlink_rels:
+            assert rel.get("TargetMode") == "External"
+
+
 class TestRelationshipTypes:
     """Test RelationshipTypes constants."""
 
@@ -316,3 +402,8 @@ class TestRelationshipTypes:
 
         assert RelationshipTypes.COMMENTS_EXTENDED is not None
         assert "commentsExtended" in RelationshipTypes.COMMENTS_EXTENDED
+
+    def test_hyperlink_relationship_type(self) -> None:
+        """Test that HYPERLINK relationship type is defined."""
+        assert RelationshipTypes.HYPERLINK is not None
+        assert "hyperlink" in RelationshipTypes.HYPERLINK.lower()
