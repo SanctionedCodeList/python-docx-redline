@@ -11,6 +11,7 @@ from .comments import CommentOperations
 from .comparison import ComparisonOperations
 from .formatting import FormatOperations
 from .header_footer import HeaderFooterOperations
+from .hyperlinks import HyperlinkInfo, HyperlinkOperations
 from .images import ImageOperations
 from .notes import NoteOperations
 from .patterns import PatternOperations
@@ -25,6 +26,8 @@ __all__ = [
     "ComparisonOperations",
     "FormatOperations",
     "HeaderFooterOperations",
+    "HyperlinkInfo",
+    "HyperlinkOperations",
     "ImageOperations",
     "NoteOperations",
     "PatternOperations",
