@@ -32,6 +32,7 @@ from .operations.comments import CommentOperations
 from .operations.comparison import ComparisonOperations
 from .operations.formatting import FormatOperations
 from .operations.header_footer import HeaderFooterOperations
+from .operations.hyperlinks import HyperlinkInfo, HyperlinkOperations
 from .operations.images import ImageOperations
 from .operations.notes import NoteOperations
 from .operations.patterns import PatternOperations
@@ -371,6 +372,13 @@ class Document:
         if not hasattr(self, "_comparison_ops_instance"):
             self._comparison_ops_instance = ComparisonOperations(self)
         return self._comparison_ops_instance
+
+    @property
+    def _hyperlink_ops(self) -> HyperlinkOperations:
+        """Get the HyperlinkOperations instance (lazy initialization)."""
+        if not hasattr(self, "_hyperlink_ops_instance"):
+            self._hyperlink_ops_instance = HyperlinkOperations(self)
+        return self._hyperlink_ops_instance
 
     @property
     def styles(self) -> StyleManager:
@@ -4318,6 +4326,254 @@ class Document:
             author=author,
             regex=regex,
             normalize_special_chars=normalize_special_chars,
+            track=track,
+        )
+
+    # ========================================================================
+    # HYPERLINK METHODS
+    # ========================================================================
+
+    @property
+    def hyperlinks(self) -> list[HyperlinkInfo]:
+        """Get all hyperlinks in the document.
+
+        Returns hyperlinks from all locations: body, headers, footers,
+        footnotes, and endnotes.
+
+        Returns:
+            List of HyperlinkInfo objects with link details
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> for link in doc.hyperlinks:
+            ...     print(f"{link.text} -> {link.target}")
+            ...     if link.is_external:
+            ...         print("  External URL")
+            ...     else:
+            ...         print("  Internal bookmark")
+        """
+        return self._hyperlink_ops.get_all_hyperlinks()
+
+    def insert_hyperlink(
+        self,
+        url: str | None = None,
+        anchor: str | None = None,
+        text: str = "",
+        after: str | None = None,
+        before: str | None = None,
+        scope: str | dict | Any | None = None,
+        tooltip: str | None = None,
+        track: bool = False,
+        author: str | None = None,
+    ) -> str | None:
+        """Insert a hyperlink at a specific location in the document body.
+
+        Supports both external hyperlinks (URLs) and internal hyperlinks
+        (bookmarks). Use the `url` parameter for external links and the
+        `anchor` parameter for internal links.
+
+        Args:
+            url: External URL to link to (mutually exclusive with anchor)
+            anchor: Internal bookmark name to link to (mutually exclusive with url)
+            text: The display text for the hyperlink
+            after: Text to insert after (mutually exclusive with before)
+            before: Text to insert before (mutually exclusive with after)
+            scope: Optional scope to limit search (paragraph ref, heading, etc.)
+            tooltip: Optional tooltip text shown on hover
+            track: If True, wrap insertion in tracked change markup
+            author: Optional author override for tracked changes
+
+        Returns:
+            Relationship ID (rId) for external links, None for internal links
+
+        Raises:
+            ValueError: If both url and anchor specified, or neither specified
+            ValueError: If both after and before specified, or neither specified
+            TextNotFoundError: If anchor text not found
+            AmbiguousTextError: If anchor text found multiple times
+
+        Example:
+            >>> # External hyperlink
+            >>> doc.insert_hyperlink(
+            ...     url="https://www.law.cornell.edu/uscode/text/28/1782",
+            ...     text="28 U.S.C. section 1782",
+            ...     after="discovery statute"
+            ... )
+            'rId15'
+
+            >>> # Internal hyperlink to bookmark
+            >>> doc.insert_hyperlink(
+            ...     anchor="DefinitionsSection",
+            ...     text="See Definitions",
+            ...     after="as defined below"
+            ... )
+            None
+        """
+        return self._hyperlink_ops.insert_hyperlink(
+            url=url,
+            anchor=anchor,
+            text=text,
+            after=after,
+            before=before,
+            scope=scope,
+            tooltip=tooltip,
+            track=track,
+            author=author,
+        )
+
+    def insert_hyperlink_in_header(
+        self,
+        url: str | None = None,
+        anchor: str | None = None,
+        text: str = "",
+        after: str | None = None,
+        before: str | None = None,
+        header_type: str = "default",
+        track: bool = False,
+    ) -> str | None:
+        """Insert a hyperlink in a header.
+
+        Args:
+            url: External URL (mutually exclusive with anchor)
+            anchor: Internal bookmark name (mutually exclusive with url)
+            text: Display text for the hyperlink
+            after: Text to insert after
+            before: Text to insert before
+            header_type: "default", "first", or "even"
+            track: If True, track the insertion
+
+        Returns:
+            Relationship ID for external links, None for internal
+
+        Raises:
+            ValueError: If both url and anchor specified, or neither specified
+            ValueError: If invalid header_type specified
+            TextNotFoundError: If anchor text not found in header
+        """
+        return self._hyperlink_ops.insert_hyperlink_in_header(
+            url=url,
+            anchor=anchor,
+            text=text,
+            after=after,
+            before=before,
+            header_type=header_type,
+            track=track,
+        )
+
+    def insert_hyperlink_in_footer(
+        self,
+        url: str | None = None,
+        anchor: str | None = None,
+        text: str = "",
+        after: str | None = None,
+        before: str | None = None,
+        footer_type: str = "default",
+        track: bool = False,
+    ) -> str | None:
+        """Insert a hyperlink in a footer.
+
+        Args:
+            url: External URL (mutually exclusive with anchor)
+            anchor: Internal bookmark name (mutually exclusive with url)
+            text: Display text for the hyperlink
+            after: Text to insert after
+            before: Text to insert before
+            footer_type: "default", "first", or "even"
+            track: If True, track the insertion
+
+        Returns:
+            Relationship ID for external links, None for internal
+
+        Raises:
+            ValueError: If both url and anchor specified, or neither specified
+            ValueError: If invalid footer_type specified
+            TextNotFoundError: If anchor text not found in footer
+        """
+        return self._hyperlink_ops.insert_hyperlink_in_footer(
+            url=url,
+            anchor=anchor,
+            text=text,
+            after=after,
+            before=before,
+            footer_type=footer_type,
+            track=track,
+        )
+
+    def insert_hyperlink_in_footnote(
+        self,
+        note_id: str | int,
+        url: str | None = None,
+        anchor: str | None = None,
+        text: str = "",
+        after: str | None = None,
+        before: str | None = None,
+        track: bool = False,
+    ) -> str | None:
+        """Insert a hyperlink inside an existing footnote.
+
+        Args:
+            note_id: The footnote ID to edit
+            url: External URL (mutually exclusive with anchor)
+            anchor: Internal bookmark name (mutually exclusive with url)
+            text: Display text for the hyperlink
+            after: Text to insert after within the footnote
+            before: Text to insert before within the footnote
+            track: If True, track the insertion
+
+        Returns:
+            Relationship ID for external links, None for internal
+
+        Raises:
+            NoteNotFoundError: If footnote not found
+            ValueError: If both url and anchor specified, or neither specified
+            TextNotFoundError: If anchor text not found in footnote
+        """
+        return self._hyperlink_ops.insert_hyperlink_in_footnote(
+            note_id=note_id,
+            url=url,
+            anchor=anchor,
+            text=text,
+            after=after,
+            before=before,
+            track=track,
+        )
+
+    def insert_hyperlink_in_endnote(
+        self,
+        note_id: str | int,
+        url: str | None = None,
+        anchor: str | None = None,
+        text: str = "",
+        after: str | None = None,
+        before: str | None = None,
+        track: bool = False,
+    ) -> str | None:
+        """Insert a hyperlink inside an existing endnote.
+
+        Args:
+            note_id: The endnote ID to edit
+            url: External URL (mutually exclusive with anchor)
+            anchor: Internal bookmark name (mutually exclusive with url)
+            text: Display text for the hyperlink
+            after: Text to insert after within the endnote
+            before: Text to insert before within the endnote
+            track: If True, track the insertion
+
+        Returns:
+            Relationship ID for external links, None for internal
+
+        Raises:
+            NoteNotFoundError: If endnote not found
+            ValueError: If both url and anchor specified, or neither specified
+            TextNotFoundError: If anchor text not found in endnote
+        """
+        return self._hyperlink_ops.insert_hyperlink_in_endnote(
+            note_id=note_id,
+            url=url,
+            anchor=anchor,
+            text=text,
+            after=after,
+            before=before,
             track=track,
         )
 
