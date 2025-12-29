@@ -515,10 +515,9 @@ class TestHyperlinksProperty:
         try:
             doc = Document(doc_path)
 
-            # hyperlinks property currently raises NotImplementedError
-            # Once implemented, this should return empty list
-            with pytest.raises(NotImplementedError):
-                _ = doc.hyperlinks
+            # hyperlinks property returns empty list for document without hyperlinks
+            hyperlinks = doc.hyperlinks
+            assert hyperlinks == []
 
         finally:
             doc_path.unlink()
@@ -529,9 +528,11 @@ class TestHyperlinksProperty:
         try:
             doc = Document(doc_path)
 
-            # hyperlinks property currently raises NotImplementedError
-            with pytest.raises(NotImplementedError):
-                _ = doc.hyperlinks
+            # hyperlinks property returns a list of HyperlinkInfo objects
+            hyperlinks = doc.hyperlinks
+            assert isinstance(hyperlinks, list)
+            # The document created by create_document_with_hyperlinks should have hyperlinks
+            assert len(hyperlinks) > 0
 
         finally:
             doc_path.unlink()
@@ -925,13 +926,16 @@ class TestInternalHyperlinks:
         try:
             doc = Document(doc_path)
 
-            # hyperlinks property currently raises NotImplementedError
-            # This test documents expected behavior once implemented
-            with pytest.raises(NotImplementedError):
-                _ = doc.hyperlinks
-
-            # Future implementation should return list with is_external flag
+            # hyperlinks property returns list with is_external flag
             # distinguishing internal (anchor) from external (URL) links
+            hyperlinks = doc.hyperlinks
+            assert isinstance(hyperlinks, list)
+            assert len(hyperlinks) > 0
+
+            # Each HyperlinkInfo should have an is_external attribute
+            for link in hyperlinks:
+                assert hasattr(link, "is_external")
+                assert isinstance(link.is_external, bool)
 
         finally:
             doc_path.unlink()

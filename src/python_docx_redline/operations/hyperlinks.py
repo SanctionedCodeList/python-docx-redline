@@ -620,7 +620,34 @@ class HyperlinkOperations:
             ...     else:
             ...         print(f"  Internal bookmark")
         """
-        raise NotImplementedError("get_all_hyperlinks not yet implemented")
+        from ..accessibility.types import LinkType
+
+        # Build relationships map for resolving external hyperlink URLs
+        relationships = self._get_hyperlink_relationships()
+
+        # Use BookmarkRegistry to extract hyperlinks from the document
+        registry = BookmarkRegistry.from_xml(
+            self._document.xml_root,
+            relationships=relationships,
+        )
+
+        # Convert from accessibility HyperlinkInfo to operations HyperlinkInfo
+        result: list[HyperlinkInfo] = []
+        for link in registry.hyperlinks:
+            is_external = link.link_type == LinkType.EXTERNAL
+            result.append(
+                HyperlinkInfo(
+                    ref=link.ref,
+                    text=link.text,
+                    target=link.target,
+                    is_external=is_external,
+                    tooltip=None,  # Not tracked by BookmarkRegistry
+                    location=link.from_location,
+                    r_id=link.relationship_id,
+                )
+            )
+
+        return result
 
     def get_hyperlink(self, ref: str) -> HyperlinkInfo | None:
         """Get a specific hyperlink by its ref.
@@ -636,7 +663,10 @@ class HyperlinkOperations:
             >>> if link:
             ...     print(f"Found: {link.text} -> {link.target}")
         """
-        raise NotImplementedError("get_hyperlink not yet implemented")
+        for link in self.get_all_hyperlinks():
+            if link.ref == ref:
+                return link
+        return None
 
     def get_hyperlinks_by_url(self, url_pattern: str) -> list[HyperlinkInfo]:
         """Find hyperlinks matching a URL pattern.
@@ -656,7 +686,7 @@ class HyperlinkOperations:
             >>> for link in links:
             ...     print(f"{link.text}: {link.target}")
         """
-        raise NotImplementedError("get_hyperlinks_by_url not yet implemented")
+        return [link for link in self.get_all_hyperlinks() if url_pattern in link.target]
 
     # ==================== Edit Hyperlinks ====================
 
@@ -1109,7 +1139,50 @@ class HyperlinkOperations:
         Returns:
             Integer index for generating unique hyperlink refs
         """
-        raise NotImplementedError("_get_next_hyperlink_index not yet implemented")
+        # Count existing hyperlinks in the document body
+        body = self._document.xml_root.find(f".//{{{WORD_NAMESPACE}}}body")
+        if body is None:
+            return 0
+
+        count = 0
+        for _ in body.iter(f"{{{WORD_NAMESPACE}}}hyperlink"):
+            count += 1
+
+        return count
+
+    def _get_hyperlink_relationships(self) -> dict[str, str]:
+        """Build a dictionary mapping relationship IDs to target URLs.
+
+        This reads the document.xml.rels file and extracts all hyperlink
+        relationships, mapping rId values to their target URLs.
+
+        Returns:
+            Dictionary mapping relationship IDs (e.g., "rId5") to URLs
+        """
+        relationships: dict[str, str] = {}
+
+        # Need a valid package to read relationships
+        if not self._document._is_zip or not self._document._package:
+            return relationships
+
+        package = self._document._package
+        rel_mgr = RelationshipManager(package, "word/document.xml")
+
+        # Load the relationships file
+        rel_mgr._ensure_loaded()
+        if rel_mgr._root is None:
+            return relationships
+
+        # Extract all hyperlink relationships
+        for rel in rel_mgr._root:
+            rel_type = rel.get("Type", "")
+            if rel_type == RelationshipTypes.HYPERLINK:
+                rel_id = rel.get("Id", "")
+                target = rel.get("Target", "")
+                if rel_id and target:
+                    relationships[rel_id] = target
+
+        return relationships
 
     def _insert_after_match(self, match: TextSpan, element: Any) -> None:
         """Insert an XML element after a matched text span.
