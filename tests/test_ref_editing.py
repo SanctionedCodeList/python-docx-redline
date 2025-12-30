@@ -1748,3 +1748,164 @@ class TestReplaceInRefIntegration:
             assert "second thing" in text
         finally:
             docx_path.unlink()
+
+
+# ============================================================================
+# Test delete_ref() - paragraph mark deletion
+# ============================================================================
+
+
+class TestDeleteRefParagraphMarkDeletion:
+    """Tests for paragraph mark deletion in delete_ref().
+
+    When deleting a paragraph with track=True, the paragraph mark itself must be
+    marked as deleted in addition to the text content. This ensures that when
+    the tracked change is accepted in Word, the paragraph cleanly merges with
+    the next paragraph instead of leaving an empty line behind.
+    """
+
+    def test_tracked_delete_marks_paragraph_mark(self) -> None:
+        """Verify that tracked deletion marks the paragraph mark as deleted.
+
+        The paragraph mark deletion is represented by a <w:del> element inside
+        <w:pPr>/<w:rPr> per the OOXML specification.
+        """
+        docx_path = create_test_docx()
+        try:
+            doc = Document(docx_path)
+
+            doc.delete_ref("p:0", track=True, author="TestAgent")
+
+            # After deletion, the paragraph should still exist
+            element = doc.resolve_ref("p:0")
+
+            # Check for paragraph mark deletion in w:pPr/w:rPr/w:del
+            p_pr = element.find(f"{{{WORD_NAMESPACE}}}pPr")
+            assert p_pr is not None, "Paragraph properties (w:pPr) should exist"
+
+            r_pr = p_pr.find(f"{{{WORD_NAMESPACE}}}rPr")
+            assert r_pr is not None, "Run properties (w:rPr) should exist inside w:pPr"
+
+            del_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}del")
+            assert del_elem is not None, "Deletion marker (w:del) should exist inside w:rPr"
+            assert del_elem.get(f"{{{WORD_NAMESPACE}}}author") == "TestAgent"
+        finally:
+            docx_path.unlink()
+
+    def test_tracked_delete_has_both_content_and_paragraph_mark_deletion(self) -> None:
+        """Verify that tracked deletion marks both content and paragraph mark.
+
+        A complete tracked paragraph deletion should have:
+        1. Content wrapped in <w:del> with <w:delText>
+        2. Paragraph mark marked as deleted in <w:pPr>/<w:rPr>/<w:del>
+        """
+        docx_path = create_test_docx()
+        try:
+            doc = Document(docx_path)
+
+            doc.delete_ref("p:0", track=True, author="Editor")
+
+            element = doc.resolve_ref("p:0")
+
+            # Check for content deletion (w:del wrapping runs)
+            content_del = element.find(f".//{{{WORD_NAMESPACE}}}del/{{{WORD_NAMESPACE}}}r")
+            assert content_del is not None, "Content should be wrapped in w:del"
+
+            # Check for delText
+            del_text = element.find(f".//{{{WORD_NAMESPACE}}}delText")
+            assert del_text is not None, "Text should be converted to w:delText"
+
+            # Check for paragraph mark deletion
+            p_pr = element.find(f"{{{WORD_NAMESPACE}}}pPr")
+            r_pr = p_pr.find(f"{{{WORD_NAMESPACE}}}rPr") if p_pr is not None else None
+            para_mark_del = r_pr.find(f"{{{WORD_NAMESPACE}}}del") if r_pr is not None else None
+            assert para_mark_del is not None, "Paragraph mark should be marked as deleted"
+        finally:
+            docx_path.unlink()
+
+    def test_untracked_delete_removes_paragraph_entirely(self) -> None:
+        """Verify that untracked deletion removes the paragraph element entirely.
+
+        When track=False, the paragraph should be completely removed from the
+        document, not just have its content marked as deleted.
+        """
+        docx_path = create_test_docx()
+        try:
+            doc = Document(docx_path)
+            count_before = len(doc.paragraphs)
+
+            # Get text of first paragraph before deletion
+            first_para_text = doc.get_text_at_ref("p:0")
+            assert "First paragraph" in first_para_text
+
+            doc.delete_ref("p:0", track=False)
+
+            # Paragraph count should decrease
+            count_after = len(doc.paragraphs)
+            assert count_after == count_before - 1
+
+            # The new first paragraph should be what was previously p:1
+            new_first_text = doc.get_text_at_ref("p:0")
+            assert "Second paragraph" in new_first_text
+        finally:
+            docx_path.unlink()
+
+    def test_tracked_delete_paragraph_without_ppr(self) -> None:
+        """Verify that paragraph mark deletion works on paragraphs without existing w:pPr.
+
+        The first paragraph in MINIMAL_DOCUMENT_XML doesn't have w:pPr, so
+        the helper method must create it.
+        """
+        docx_path = create_test_docx()
+        try:
+            doc = Document(docx_path)
+
+            # First paragraph (p:0) in MINIMAL_DOCUMENT_XML has no w:pPr
+            element = doc.resolve_ref("p:0")
+            assert element.find(f"{{{WORD_NAMESPACE}}}pPr") is None
+
+            doc.delete_ref("p:0", track=True, author="TestAgent")
+
+            # After deletion, w:pPr/w:rPr/w:del should be created
+            element = doc.resolve_ref("p:0")
+            p_pr = element.find(f"{{{WORD_NAMESPACE}}}pPr")
+            assert p_pr is not None, "w:pPr should be created"
+
+            r_pr = p_pr.find(f"{{{WORD_NAMESPACE}}}rPr")
+            assert r_pr is not None, "w:rPr should be created inside w:pPr"
+
+            del_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}del")
+            assert del_elem is not None, "w:del should be created inside w:rPr"
+        finally:
+            docx_path.unlink()
+
+    def test_tracked_delete_paragraph_with_existing_ppr(self) -> None:
+        """Verify that paragraph mark deletion works on paragraphs with existing w:pPr.
+
+        The second paragraph in MINIMAL_DOCUMENT_XML has w:pPr with a style.
+        """
+        docx_path = create_test_docx()
+        try:
+            doc = Document(docx_path)
+
+            # Second paragraph (p:1) in MINIMAL_DOCUMENT_XML has w:pPr with w:pStyle
+            element = doc.resolve_ref("p:1")
+            p_pr = element.find(f"{{{WORD_NAMESPACE}}}pPr")
+            assert p_pr is not None, "p:1 should have existing w:pPr"
+            assert p_pr.find(f"{{{WORD_NAMESPACE}}}pStyle") is not None
+
+            doc.delete_ref("p:1", track=True, author="TestAgent")
+
+            # After deletion, w:pPr should still exist with style preserved
+            element = doc.resolve_ref("p:1")
+            p_pr = element.find(f"{{{WORD_NAMESPACE}}}pPr")
+            assert p_pr is not None
+            assert p_pr.find(f"{{{WORD_NAMESPACE}}}pStyle") is not None, "Style should be preserved"
+
+            # And w:rPr/w:del should be added
+            r_pr = p_pr.find(f"{{{WORD_NAMESPACE}}}rPr")
+            assert r_pr is not None
+            del_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}del")
+            assert del_elem is not None
+        finally:
+            docx_path.unlink()

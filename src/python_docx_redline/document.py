@@ -5339,6 +5339,49 @@ class Document:
             # Generic element deletion
             return self._delete_element_ref(element, track, author_name)
 
+    def _mark_paragraph_mark_deleted(
+        self, para_element: etree._Element, author: str, timestamp: str
+    ) -> None:
+        """Mark the paragraph mark as deleted for tracked changes.
+
+        Adds a <w:del> element inside <w:pPr>/<w:rPr> to mark the paragraph
+        mark (the invisible character at the end of each paragraph) as deleted.
+        When this tracked change is accepted in Word, the paragraph merges with
+        the following paragraph instead of leaving an empty line behind.
+
+        Per OOXML spec (ISO/IEC 29500): "This element specifies that the
+        paragraph mark delimiting the end of a paragraph shall be treated
+        as deleted... the contents of this paragraph are combined with the
+        following paragraph."
+
+        Args:
+            para_element: The paragraph element to mark
+            author: Author name for the tracked change
+            timestamp: ISO 8601 timestamp for the change
+        """
+        # Get or create paragraph properties <w:pPr>
+        p_pr = para_element.find(f"{{{WORD_NAMESPACE}}}pPr")
+        if p_pr is None:
+            p_pr = etree.Element(f"{{{WORD_NAMESPACE}}}pPr")
+            para_element.insert(0, p_pr)
+
+        # Get or create run properties for paragraph mark <w:rPr>
+        r_pr = p_pr.find(f"{{{WORD_NAMESPACE}}}rPr")
+        if r_pr is None:
+            r_pr = etree.Element(f"{{{WORD_NAMESPACE}}}rPr")
+            p_pr.append(r_pr)
+
+        # Create the deletion marker for the paragraph mark
+        change_id = self._xml_generator.next_change_id
+        self._xml_generator.next_change_id += 1
+
+        del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
+        del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))
+        del_elem.set(f"{{{WORD_NAMESPACE}}}author", author)
+        del_elem.set(f"{{{WORD_NAMESPACE}}}date", timestamp)
+
+        r_pr.append(del_elem)
+
     def _delete_paragraph_ref(
         self,
         element: etree._Element,
@@ -5375,6 +5418,10 @@ class Document:
                 change_id += 1
 
             self._xml_generator.next_change_id = change_id
+
+            # Mark the paragraph mark as deleted (causes merge with next
+            # paragraph on accept instead of leaving empty line)
+            self._mark_paragraph_mark_deleted(element, author, timestamp)
         else:
             # Hard delete: remove the paragraph element
             parent = element.getparent()
