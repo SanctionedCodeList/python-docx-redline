@@ -14,7 +14,12 @@ if TYPE_CHECKING:
     from python_docx_redline.accessibility import Ref
     from python_docx_redline.criticmarkup import ApplyResult
     from python_docx_redline.models.comment import Comment
-    from python_docx_redline.models.footnote import Endnote, Footnote
+    from python_docx_redline.models.footnote import (
+        Endnote,
+        Footnote,
+        OrphanedEndnote,
+        OrphanedFootnote,
+    )
     from python_docx_redline.models.header_footer import Footer, Header
     from python_docx_redline.models.paragraph import Paragraph
     from python_docx_redline.models.section import Section
@@ -3818,6 +3823,48 @@ class Document:
         """
         return self._note_ops.endnotes
 
+    def find_orphaned_footnotes(self) -> list["OrphanedFootnote"]:
+        """Find footnotes that have no reference in the document body.
+
+        Orphaned footnotes occur when text containing footnote markers is deleted
+        but the footnote content remains in footnotes.xml. This method detects
+        these orphans by comparing footnote IDs in footnotes.xml against
+        footnoteReference elements in document.xml.
+
+        System footnotes (id=-1 for separator, id=0 for continuationSeparator)
+        are excluded from the results.
+
+        Returns:
+            List of OrphanedFootnote objects with id and text content
+
+        Example:
+            >>> orphans = doc.find_orphaned_footnotes()
+            >>> for orphan in orphans:
+            ...     print(f"Orphaned footnote {orphan.id}: {orphan.text[:50]}...")
+        """
+        return self._note_ops.find_orphaned_footnotes()
+
+    def find_orphaned_endnotes(self) -> list["OrphanedEndnote"]:
+        """Find endnotes that have no reference in the document body.
+
+        Orphaned endnotes occur when text containing endnote markers is deleted
+        but the endnote content remains in endnotes.xml. This method detects
+        these orphans by comparing endnote IDs in endnotes.xml against
+        endnoteReference elements in document.xml.
+
+        System endnotes (id=-1 for separator, id=0 for continuationSeparator)
+        are excluded from the results.
+
+        Returns:
+            List of OrphanedEndnote objects with id and text content
+
+        Example:
+            >>> orphans = doc.find_orphaned_endnotes()
+            >>> for orphan in orphans:
+            ...     print(f"Orphaned endnote {orphan.id}: {orphan.text[:50]}...")
+        """
+        return self._note_ops.find_orphaned_endnotes()
+
     def insert_footnote(
         self,
         text: str,
@@ -4167,6 +4214,80 @@ class Document:
             >>> doc.replace_tracked_in_endnote(1, "ibid", "op. cit.")
         """
         self._note_ops.replace_tracked_in_endnote(note_id, find, replace, author=author)
+
+    def merge_footnotes(
+        self,
+        footnote_ids: list[int],
+        separator: str = "; ",
+        keep_first: bool = True,
+    ) -> int:
+        """Merge multiple footnotes into one.
+
+        Combines the content of multiple footnotes and removes the extras.
+        Useful for cleaning up adjacent footnotes after text deletion,
+        particularly in legal documents following Bluebook citation style.
+
+        When deleting text between two footnotes, they may become adjacent
+        (e.g., `[^15][^16]`). This method merges them into a single footnote
+        with combined content.
+
+        Args:
+            footnote_ids: List of footnote IDs to merge (in order)
+            separator: Text to insert between merged contents (default: "; ")
+            keep_first: If True, keep first footnote and delete others.
+                       If False, keep last footnote.
+
+        Returns:
+            ID of the remaining footnote
+
+        Raises:
+            ValueError: If fewer than 2 footnote IDs provided
+            NoteNotFoundError: If any footnote ID is not found
+
+        Example:
+            >>> # Merge footnotes 15 and 16 into one
+            >>> remaining_id = doc.merge_footnotes([15, 16], separator="; ")
+            >>> print(f"Merged into footnote {remaining_id}")
+            >>>
+            >>> # Merge three footnotes, keeping the last one
+            >>> remaining_id = doc.merge_footnotes([1, 2, 3], keep_first=False)
+        """
+        return self._note_ops.merge_footnotes(
+            footnote_ids, separator=separator, keep_first=keep_first
+        )
+
+    def merge_endnotes(
+        self,
+        endnote_ids: list[int],
+        separator: str = "; ",
+        keep_first: bool = True,
+    ) -> int:
+        """Merge multiple endnotes into one.
+
+        Combines the content of multiple endnotes and removes the extras.
+        Useful for cleaning up adjacent endnotes after text deletion.
+
+        Args:
+            endnote_ids: List of endnote IDs to merge (in order)
+            separator: Text to insert between merged contents (default: "; ")
+            keep_first: If True, keep first endnote and delete others.
+                       If False, keep last endnote.
+
+        Returns:
+            ID of the remaining endnote
+
+        Raises:
+            ValueError: If fewer than 2 endnote IDs provided
+            NoteNotFoundError: If any endnote ID is not found
+
+        Example:
+            >>> # Merge endnotes 5 and 6 into one
+            >>> remaining_id = doc.merge_endnotes([5, 6], separator="; ")
+            >>> print(f"Merged into endnote {remaining_id}")
+        """
+        return self._note_ops.merge_endnotes(
+            endnote_ids, separator=separator, keep_first=keep_first
+        )
 
     # ========================================================================
     # HEADER / FOOTER METHODS
@@ -4806,6 +4927,39 @@ class Document:
         """
         return self._ref_registry.get_ref(element, use_fingerprint=use_fingerprint)
 
+    def get_text_at_ref(self, ref: str) -> str:
+        """Get the full text content of the element at ref.
+
+        This method extracts all visible text from the element identified by the ref.
+        It is useful for getting the complete text of a paragraph or table cell,
+        which can then be used with other editing methods like delete_tracked().
+
+        Args:
+            ref: Element reference (e.g., "p:5", "tbl:0/row:1/cell:2")
+
+        Returns:
+            Full text content of the element (concatenated from all w:t elements)
+
+        Raises:
+            RefNotFoundError: If the ref cannot be resolved
+            StaleRefError: If the ref points to a deleted/modified element
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> # Get text from a paragraph discovered via AccessibilityTree
+            >>> text = doc.get_text_at_ref("p:15")
+            >>> doc.delete_tracked(text)  # Delete entire paragraph
+            >>>
+            >>> # Get text from a table cell
+            >>> cell_text = doc.get_text_at_ref("tbl:0/row:1/cell:2")
+        """
+        element = self.resolve_ref(ref)
+        text_parts = []
+        for t_elem in element.iter(f"{{{WORD_NAMESPACE}}}t"):
+            if t_elem.text:
+                text_parts.append(t_elem.text)
+        return "".join(text_parts)
+
     def insert_at_ref(
         self,
         ref: str,
@@ -4887,6 +5041,124 @@ class Document:
         else:
             # Default: try to insert as text content
             return self._insert_run_at_ref(element, text, position, track, author_name)
+
+    def insert_in_ref(
+        self,
+        ref: str,
+        text: str,
+        before: str | None = None,
+        after: str | None = None,
+        track: bool = False,
+        author: str | None = None,
+    ) -> EditResult:
+        """Insert text within a specific element identified by ref.
+
+        Unlike insert_at_ref() which inserts an element at a position relative
+        to the ref element, this method inserts text within an existing element
+        by finding anchor text inside the element first.
+
+        Args:
+            ref: Element reference (e.g., "p:15", "tbl:0/row:1/cell:0")
+            text: Text to insert (supports markdown: **bold**, *italic*, etc.)
+            before: Insert before this anchor text (mutually exclusive with after)
+            after: Insert after this anchor text (mutually exclusive with before)
+            track: If True, show as tracked change
+            author: Author for tracked change (uses document author if None)
+
+        Returns:
+            EditResult indicating success/failure
+
+        Raises:
+            RefNotFoundError: If the ref cannot be resolved
+            ValueError: If neither before nor after is specified, or if both are
+            TextNotFoundError: If the anchor text is not found within the element
+            AmbiguousTextError: If the anchor text appears multiple times in the element
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> # Append "(amended)" after "Section 2.1" within paragraph 15
+            >>> doc.insert_in_ref("p:15", " (amended)", after="Section 2.1", track=True)
+            >>>
+            >>> # Insert "Important: " before "Terms" within a table cell
+            >>> doc.insert_in_ref("tbl:0/row:1/cell:0", "Important: ", before="Terms")
+        """
+        from .errors import AmbiguousTextError, TextNotFoundError
+
+        # Validate parameters
+        if before is not None and after is not None:
+            raise ValueError("Cannot specify both 'before' and 'after' parameters")
+        if before is None and after is None:
+            raise ValueError("Must specify either 'before' or 'after' parameter")
+
+        # Resolve the ref to get the element
+        element = self.resolve_ref(ref)
+
+        # Get author
+        author_name = author if author is not None else self.author
+
+        # Determine anchor text and insertion mode
+        anchor: str = after if after is not None else before  # type: ignore[assignment]
+        insert_after = after is not None
+
+        # Get all paragraphs within the element (or the element itself if it's a paragraph)
+        if element.tag == f"{{{WORD_NAMESPACE}}}p":
+            paragraphs = [element]
+        else:
+            # For tables, cells, etc., find all paragraphs within
+            paragraphs = list(element.findall(f".//{{{WORD_NAMESPACE}}}p"))
+
+        if not paragraphs:
+            return EditResult(
+                success=False,
+                edit_type="insert_in_ref",
+                message=f"No paragraphs found within element at ref '{ref}'",
+            )
+
+        # Search for the anchor text within the element's paragraphs
+        matches = self._text_search.find_text(
+            anchor,
+            paragraphs,
+            regex=False,
+            normalize_special_chars=True,
+            fuzzy=None,
+        )
+
+        if not matches:
+            raise TextNotFoundError(
+                anchor,
+                scope=f"element at ref '{ref}'",
+                hint=f"The anchor text was not found within the element at '{ref}'",
+            )
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(anchor, matches)
+
+        # Get the single match
+        match = matches[0]
+
+        # Create the insertion element
+        if track:
+            # Tracked insertion: wrap in <w:ins>
+            insertion_xml = self._xml_generator.create_insertion(text, author_name)
+            elements = self._tracked_ops._parse_xml_elements(insertion_xml)
+            insertion_element = elements[0]
+        else:
+            # Untracked insertion: plain runs
+            source_run = match.runs[0] if match.runs else None
+            plain_runs = self._xml_generator.create_plain_runs(text, source_run=source_run)
+            insertion_element = plain_runs
+
+        # Insert at the appropriate position
+        if insert_after:
+            self._tracked_ops._insert_after_match(match, insertion_element)
+        else:
+            self._tracked_ops._insert_before_match(match, insertion_element)
+
+        return EditResult(
+            success=True,
+            edit_type="insert_in_ref",
+            message=f"Inserted text {'after' if insert_after else 'before'} anchor in ref '{ref}'",
+        )
 
     def _insert_paragraph_at_ref(
         self,
@@ -5342,6 +5614,250 @@ class Document:
                 edit_type="replace_at_ref",
                 message="Created cell content",
             )
+
+    def replace_in_ref(
+        self,
+        ref: str,
+        find: str,
+        replace: str,
+        occurrence: int | list[int] | str = "first",
+        track: bool = False,
+        author: str | None = None,
+    ) -> EditResult:
+        """Replace text within a specific element identified by ref.
+
+        Unlike replace_at_ref() which replaces the ENTIRE element content,
+        this method performs a substring replacement within the element.
+        The search is scoped to only the element identified by the ref.
+
+        Args:
+            ref: Element reference (e.g., "p:15", "tbl:0/row:1/cell:2")
+            find: Text to find within the element
+            replace: Replacement text
+            occurrence: Which occurrence(s) to replace:
+                - 1, 2, etc.: Replace the Nth occurrence (1-indexed)
+                - "first": Replace first occurrence (default)
+                - "last": Replace last occurrence
+                - "all": Replace all occurrences
+                - [1, 3, 5]: Replace specific occurrences
+            track: If True, show as tracked change (default: False)
+            author: Author for tracked change (uses document author if None)
+
+        Returns:
+            EditResult indicating success/failure
+
+        Raises:
+            RefNotFoundError: If the ref cannot be resolved
+            TextNotFoundError: If the find text is not found in the element
+            AmbiguousTextError: If multiple occurrences found and occurrence
+                not specified
+
+        Example:
+            >>> doc = Document("contract.docx")
+            >>> # Update a year reference in a specific paragraph
+            >>> doc.replace_in_ref("p:15", "2020", "2024", track=True)
+            >>>
+            >>> # Replace all occurrences of a term in a table cell
+            >>> doc.replace_in_ref("tbl:0/row:1/cell:0", "old", "new", occurrence="all")
+        """
+        from .errors import TextNotFoundError
+        from .suggestions import SuggestionGenerator
+
+        # Resolve the ref to get the element
+        element = self.resolve_ref(ref)
+
+        # Get paragraphs within the element
+        # For paragraphs, it's just the element itself
+        # For table cells or other containers, get all nested paragraphs
+        if element.tag == f"{{{WORD_NAMESPACE}}}p":
+            paragraphs = [element]
+        else:
+            paragraphs = list(element.iter(f"{{{WORD_NAMESPACE}}}p"))
+
+        if not paragraphs:
+            return EditResult(
+                success=False,
+                edit_type="replace_in_ref",
+                message=f"No paragraphs found in element at ref '{ref}'",
+            )
+
+        # Get author
+        author_name = author if author is not None else self.author
+
+        # Helper function to perform a single replacement
+        def do_replacement(match: "TextSpan") -> None:
+            if track:
+                # Tracked replace: deletion + insertion XML
+                deletion_xml = self._xml_generator.create_deletion(match.text, author_name)
+                insertion_xml = self._xml_generator.create_insertion(replace, author_name)
+                elements = self._tracked_ops._parse_xml_elements(
+                    f"{deletion_xml}\n    {insertion_xml}"
+                )
+                self._tracked_ops._replace_match_with_elements(match, elements)
+            else:
+                # Untracked replace: just replace with plain runs
+                source_run = match.runs[0] if match.runs else None
+                new_runs = self._xml_generator.create_plain_runs(replace, source_run=source_run)
+                if len(new_runs) == 1:
+                    self._tracked_ops._replace_match_with_element(match, new_runs[0])
+                else:
+                    self._tracked_ops._replace_match_with_elements(match, new_runs)
+
+        # Handle "all" occurrence specially - re-find after each replacement
+        # because the paragraph structure changes after each edit
+        if occurrence == "all":
+            replacement_count = 0
+            while True:
+                # Re-search after each replacement to get fresh run references
+                matches = self._text_search.find_text(
+                    find,
+                    paragraphs,
+                    regex=False,
+                    normalize_special_chars=True,
+                )
+                if not matches:
+                    break
+                # Replace the first occurrence
+                do_replacement(matches[0])
+                replacement_count += 1
+
+            if replacement_count == 0:
+                suggestions = SuggestionGenerator.generate_suggestions(find, paragraphs)
+                raise TextNotFoundError(
+                    find,
+                    scope=f"element at ref '{ref}'",
+                    suggestions=suggestions,
+                )
+
+            return EditResult(
+                success=True,
+                edit_type="replace_in_ref",
+                message=f"Replaced {replacement_count} occurrence(s)"
+                + (" with tracking" if track else ""),
+            )
+
+        # For specific occurrences, search once and select targets
+        matches = self._text_search.find_text(
+            find,
+            paragraphs,
+            regex=False,
+            normalize_special_chars=True,
+        )
+
+        if not matches:
+            suggestions = SuggestionGenerator.generate_suggestions(find, paragraphs)
+            raise TextNotFoundError(
+                find,
+                scope=f"element at ref '{ref}'",
+                suggestions=suggestions,
+            )
+
+        # Select target matches based on occurrence parameter
+        target_matches = self._tracked_ops._select_matches(matches, occurrence, find)
+
+        # Replace each target match (process in reverse to preserve indices)
+        for match in reversed(target_matches):
+            do_replacement(match)
+
+        return EditResult(
+            success=True,
+            edit_type="replace_in_ref",
+            message=f"Replaced {len(target_matches)} occurrence(s)"
+            + (" with tracking" if track else ""),
+        )
+
+    def delete_in_ref(
+        self,
+        ref: str,
+        text: str,
+        track: bool = False,
+        author: str | None = None,
+    ) -> EditResult:
+        """Delete text within a specific element identified by ref.
+
+        Unlike delete_ref() which deletes the ENTIRE element,
+        this method deletes only the specified text within the element.
+
+        Args:
+            ref: Element reference (e.g., "p:15")
+            text: Text to delete
+            track: If True, show as tracked change
+            author: Author for tracked change
+
+        Returns:
+            EditResult indicating success/failure
+
+        Raises:
+            RefNotFoundError: If the ref cannot be resolved
+            TextNotFoundError: If the text is not found within the element
+            AmbiguousTextError: If multiple occurrences of text are found
+
+        Example:
+            >>> doc.delete_in_ref("p:15", "DRAFT - ", track=True)
+        """
+        from .errors import AmbiguousTextError, TextNotFoundError
+
+        # Resolve the ref
+        element = self.resolve_ref(ref)
+
+        # Get paragraphs within this element
+        # If the element is itself a paragraph, use it directly
+        if element.tag == f"{{{WORD_NAMESPACE}}}p":
+            paragraphs = [element]
+        else:
+            # Otherwise, find all paragraphs within the element
+            paragraphs = list(element.findall(f".//{{{WORD_NAMESPACE}}}p"))
+
+        if not paragraphs:
+            raise TextNotFoundError(
+                text,
+                hint=f"Element at ref '{ref}' contains no paragraphs",
+            )
+
+        # Find the text within these paragraphs
+        matches = self._text_search.find_text(
+            text,
+            paragraphs,
+            regex=False,
+            normalize_special_chars=True,
+        )
+
+        if not matches:
+            # Get element text for error message
+            element_text = self.get_text_at_ref(ref)
+            preview = element_text[:100] + "..." if len(element_text) > 100 else element_text
+            raise TextNotFoundError(
+                text,
+                hint=f"Text not found in element at ref '{ref}'. Element contains: '{preview}'",
+            )
+
+        if len(matches) > 1:
+            raise AmbiguousTextError(text, matches)
+
+        # Get the single match
+        match = matches[0]
+
+        # Get author
+        author_name = author if author is not None else self.author
+
+        if track:
+            # Tracked deletion: wrap in <w:del>
+            deletion_xml = self._xml_generator.create_deletion(match.text, author_name)
+            elements = self._tracked_ops._parse_xml_elements(deletion_xml)
+            deletion_element = elements[0]
+            self._tracked_ops._replace_match_with_element(match, deletion_element)
+        else:
+            # Untracked deletion: simply remove the matched text
+            self._tracked_ops._remove_match(match)
+
+        # Invalidate registry cache
+        self._ref_registry.invalidate()
+
+        return EditResult(
+            success=True,
+            edit_type="delete_in_ref",
+            message=f"Deleted text '{text}'" + (" with tracking" if track else ""),
+        )
 
     def add_comment_at_ref(
         self,

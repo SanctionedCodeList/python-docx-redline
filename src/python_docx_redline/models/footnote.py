@@ -35,6 +35,38 @@ class FootnoteReference:
     position_in_paragraph: int
 
 
+@dataclass
+class OrphanedFootnote:
+    """Represents an orphaned footnote that has no reference in the document body.
+
+    Orphaned footnotes occur when text containing footnote markers is deleted
+    but the footnote content remains in footnotes.xml.
+
+    Attributes:
+        id: The footnote ID (unique identifier)
+        text: The text content of the orphaned footnote
+    """
+
+    id: str
+    text: str
+
+
+@dataclass
+class OrphanedEndnote:
+    """Represents an orphaned endnote that has no reference in the document body.
+
+    Orphaned endnotes occur when text containing endnote markers is deleted
+    but the endnote content remains in endnotes.xml.
+
+    Attributes:
+        id: The endnote ID (unique identifier)
+        text: The text content of the orphaned endnote
+    """
+
+    id: str
+    text: str
+
+
 class Footnote:
     """Represents a footnote in a Word document.
 

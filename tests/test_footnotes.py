@@ -2129,6 +2129,226 @@ class TestFindAllBothNotesAndBody:
         assert indices == list(range(len(matches)))
 
 
+class TestOrphanedFootnotes:
+    """Tests for find_orphaned_footnotes() functionality."""
+
+    def test_no_orphans_when_all_referenced(self):
+        """Test that no orphans are reported when all footnotes are referenced."""
+        doc = Document(create_test_docx())
+
+        # Insert footnotes - all will have references
+        doc.insert_footnote("First footnote", at="test document")
+        doc.insert_footnote("Second footnote", at="Another paragraph")
+
+        orphans = doc.find_orphaned_footnotes()
+        assert len(orphans) == 0
+
+    def test_document_with_no_footnotes(self):
+        """Test find_orphaned_footnotes on document with no footnotes."""
+        doc = Document(create_test_docx())
+
+        orphans = doc.find_orphaned_footnotes()
+        assert len(orphans) == 0
+
+    def test_finds_orphaned_footnote_after_reference_removal(self):
+        """Test that orphaned footnotes are detected after reference is removed."""
+        doc = Document(create_test_docx())
+
+        # Insert a footnote
+        doc.insert_footnote("This will become orphaned", at="test document")
+
+        # Verify initially no orphans
+        assert len(doc.find_orphaned_footnotes()) == 0
+
+        # Manually remove the reference from document.xml (simulating reference deletion)
+        # without using delete_footnote which would clean up both sides
+        for ref in doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}footnoteReference"):
+            parent = ref.getparent()
+            if parent is not None:
+                grandparent = parent.getparent()
+                if grandparent is not None:
+                    grandparent.remove(parent)
+                break
+
+        # Now there should be an orphan
+        orphans = doc.find_orphaned_footnotes()
+        assert len(orphans) == 1
+        assert orphans[0].id == "1"
+        assert orphans[0].text == "This will become orphaned"
+
+    def test_multiple_orphaned_footnotes(self):
+        """Test detection of multiple orphaned footnotes."""
+        doc = Document(create_test_docx())
+
+        # Create document with 3 paragraphs for 3 footnotes
+        content = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>First paragraph.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Second paragraph.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Third paragraph.</w:t></w:r></w:p>
+  </w:body>
+</w:document>"""
+
+        doc = Document(create_test_docx(content))
+
+        doc.insert_footnote("Footnote A", at="First paragraph")
+        doc.insert_footnote("Footnote B", at="Second paragraph")
+        doc.insert_footnote("Footnote C", at="Third paragraph")
+
+        # Remove references for footnotes 1 and 3 manually
+        refs_to_remove = []
+        for ref in doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}footnoteReference"):
+            ref_id = ref.get(f"{{{WORD_NAMESPACE}}}id")
+            if ref_id in ("1", "3"):
+                refs_to_remove.append(ref)
+
+        for ref in refs_to_remove:
+            parent = ref.getparent()
+            if parent is not None:
+                grandparent = parent.getparent()
+                if grandparent is not None:
+                    grandparent.remove(parent)
+
+        # Should find 2 orphans
+        orphans = doc.find_orphaned_footnotes()
+        assert len(orphans) == 2
+
+        orphan_ids = {o.id for o in orphans}
+        assert "1" in orphan_ids
+        assert "3" in orphan_ids
+
+    def test_orphan_text_content(self):
+        """Test that orphan text content is correctly extracted."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Specific orphan text content here", at="test document")
+
+        # Remove reference
+        for ref in doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}footnoteReference"):
+            parent = ref.getparent()
+            if parent is not None:
+                grandparent = parent.getparent()
+                if grandparent is not None:
+                    grandparent.remove(parent)
+                break
+
+        orphans = doc.find_orphaned_footnotes()
+        assert len(orphans) == 1
+        assert orphans[0].text == "Specific orphan text content here"
+
+    def test_orphan_with_multi_paragraph_content(self):
+        """Test that orphan text content handles multi-paragraph footnotes."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote(
+            ["First para.", "Second para."],
+            at="test document",
+        )
+
+        # Remove reference
+        for ref in doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}footnoteReference"):
+            parent = ref.getparent()
+            if parent is not None:
+                grandparent = parent.getparent()
+                if grandparent is not None:
+                    grandparent.remove(parent)
+                break
+
+        orphans = doc.find_orphaned_footnotes()
+        assert len(orphans) == 1
+        # Multi-paragraph should be joined with newlines
+        assert "First para." in orphans[0].text
+        assert "Second para." in orphans[0].text
+
+    def test_orphan_dataclass_fields(self):
+        """Test OrphanedFootnote dataclass has expected fields."""
+        from python_docx_redline.models.footnote import OrphanedFootnote
+
+        orphan = OrphanedFootnote(id="5", text="Test content")
+
+        assert orphan.id == "5"
+        assert orphan.text == "Test content"
+
+
+class TestOrphanedEndnotes:
+    """Tests for find_orphaned_endnotes() functionality."""
+
+    def test_no_orphans_when_all_referenced(self):
+        """Test that no orphans are reported when all endnotes are referenced."""
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("First endnote", at="test document")
+        doc.insert_endnote("Second endnote", at="Another paragraph")
+
+        orphans = doc.find_orphaned_endnotes()
+        assert len(orphans) == 0
+
+    def test_document_with_no_endnotes(self):
+        """Test find_orphaned_endnotes on document with no endnotes."""
+        doc = Document(create_test_docx())
+
+        orphans = doc.find_orphaned_endnotes()
+        assert len(orphans) == 0
+
+    def test_finds_orphaned_endnote_after_reference_removal(self):
+        """Test that orphaned endnotes are detected after reference is removed."""
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("This endnote will become orphaned", at="test document")
+
+        # Verify initially no orphans
+        assert len(doc.find_orphaned_endnotes()) == 0
+
+        # Remove the reference from document.xml
+        for ref in doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}endnoteReference"):
+            parent = ref.getparent()
+            if parent is not None:
+                grandparent = parent.getparent()
+                if grandparent is not None:
+                    grandparent.remove(parent)
+                break
+
+        # Now there should be an orphan
+        orphans = doc.find_orphaned_endnotes()
+        assert len(orphans) == 1
+        assert orphans[0].id == "1"
+        assert orphans[0].text == "This endnote will become orphaned"
+
+    def test_orphan_endnote_dataclass_fields(self):
+        """Test OrphanedEndnote dataclass has expected fields."""
+        from python_docx_redline.models.footnote import OrphanedEndnote
+
+        orphan = OrphanedEndnote(id="3", text="Endnote content")
+
+        assert orphan.id == "3"
+        assert orphan.text == "Endnote content"
+
+
+class TestOrphanedNotesViaModel:
+    """Tests for accessing orphaned footnotes/endnotes via NoteOperations."""
+
+    def test_orphan_detection_via_note_ops(self):
+        """Test finding orphans directly through _note_ops."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Test footnote", at="test document")
+
+        # Remove reference
+        for ref in doc.xml_root.iter(f"{{{WORD_NAMESPACE}}}footnoteReference"):
+            parent = ref.getparent()
+            if parent is not None:
+                grandparent = parent.getparent()
+                if grandparent is not None:
+                    grandparent.remove(parent)
+                break
+
+        # Access via _note_ops directly
+        orphans = doc._note_ops.find_orphaned_footnotes()
+        assert len(orphans) == 1
+        assert orphans[0].id == "1"
+
+
 class TestScopedNoteEditing:
     """Tests for replace/insert/delete with scope='footnote:N' or 'endnote:N'."""
 
@@ -2284,3 +2504,259 @@ class TestScopedNoteEditing:
         # Footnote 2 should still have 2020
         matches_fn2 = doc.find_all("2020", scope="footnote:2")
         assert len(matches_fn2) == 1
+
+
+class TestMergeFootnotes:
+    """Tests for merge_footnotes() functionality."""
+
+    def test_merge_two_footnotes_basic(self):
+        """Test merging two footnotes into one."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("First footnote content", at="test document")
+        doc.insert_footnote("Second footnote content", at="Another paragraph")
+
+        assert len(doc.footnotes) == 2
+
+        # Merge footnotes 1 and 2
+        remaining_id = doc.merge_footnotes([1, 2])
+
+        # Should have only one footnote now
+        footnotes = doc.footnotes
+        assert len(footnotes) == 1
+
+        # Content should be merged with default separator
+        assert footnotes[0].text == "First footnote content; Second footnote content"
+        assert remaining_id == 1
+
+    def test_merge_footnotes_custom_separator(self):
+        """Test merging footnotes with a custom separator."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Citation A", at="test document")
+        doc.insert_footnote("Citation B", at="Another paragraph")
+
+        doc.merge_footnotes([1, 2], separator=" and ")
+
+        footnotes = doc.footnotes
+        assert len(footnotes) == 1
+        assert footnotes[0].text == "Citation A and Citation B"
+
+    def test_merge_three_footnotes(self):
+        """Test merging three footnotes into one."""
+        content = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>First paragraph.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Second paragraph.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Third paragraph.</w:t></w:r></w:p>
+  </w:body>
+</w:document>"""
+
+        doc = Document(create_test_docx(content))
+
+        doc.insert_footnote("Note A", at="First paragraph")
+        doc.insert_footnote("Note B", at="Second paragraph")
+        doc.insert_footnote("Note C", at="Third paragraph")
+
+        assert len(doc.footnotes) == 3
+
+        # Merge all three
+        doc.merge_footnotes([1, 2, 3])
+
+        footnotes = doc.footnotes
+        assert len(footnotes) == 1
+        assert footnotes[0].text == "Note A; Note B; Note C"
+
+    def test_merge_footnotes_keep_last(self):
+        """Test merging footnotes while keeping the last one."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("First content", at="test document")
+        doc.insert_footnote("Second content", at="Another paragraph")
+
+        # Keep last footnote
+        doc.merge_footnotes([1, 2], keep_first=False)
+
+        footnotes = doc.footnotes
+        assert len(footnotes) == 1
+        # Content is still in order of the IDs provided
+        assert footnotes[0].text == "First content; Second content"
+
+    def test_merge_footnotes_less_than_two_raises(self):
+        """Test that merging fewer than 2 footnotes raises ValueError."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Single footnote", at="test document")
+
+        with pytest.raises(ValueError) as exc_info:
+            doc.merge_footnotes([1])
+
+        assert "at least 2" in str(exc_info.value).lower()
+
+    def test_merge_footnotes_not_found_raises(self):
+        """Test that merging nonexistent footnotes raises NoteNotFoundError."""
+        from python_docx_redline import NoteNotFoundError
+
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Single footnote", at="test document")
+
+        with pytest.raises(NoteNotFoundError):
+            doc.merge_footnotes([1, 99])
+
+    def test_merge_footnotes_updates_references(self):
+        """Test that all references in document.xml point to the kept footnote."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("First", at="test document")
+        doc.insert_footnote("Second", at="Another paragraph")
+
+        # Verify both references exist initially
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        assert 'w:id="1"' in xml_str
+        assert 'w:id="2"' in xml_str
+
+        # Merge - should update reference from footnote 2 to point to 1
+        doc.merge_footnotes([1, 2])
+
+        # After merge and renumber, we should have only one reference
+        xml_str = etree.tostring(doc.xml_root, encoding="unicode")
+        # Count footnoteReference elements
+        ref_count = xml_str.count("footnoteReference")
+        assert ref_count == 2  # Both references now point to merged footnote
+
+    def test_merge_footnotes_persists_after_save(self):
+        """Test that merged footnotes persist after save/reload."""
+        doc = Document(create_test_docx())
+
+        doc.insert_footnote("Footnote A", at="test document")
+        doc.insert_footnote("Footnote B", at="Another paragraph")
+
+        doc.merge_footnotes([1, 2], separator=" | ")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "merged_footnotes.docx"
+            doc.save(output_path)
+
+            reloaded = Document(output_path)
+            footnotes = reloaded.footnotes
+
+            assert len(footnotes) == 1
+            assert footnotes[0].text == "Footnote A | Footnote B"
+
+
+class TestMergeEndnotes:
+    """Tests for merge_endnotes() functionality."""
+
+    def test_merge_two_endnotes_basic(self):
+        """Test merging two endnotes into one."""
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("First endnote content", at="test document")
+        doc.insert_endnote("Second endnote content", at="Another paragraph")
+
+        assert len(doc.endnotes) == 2
+
+        # Merge endnotes 1 and 2
+        remaining_id = doc.merge_endnotes([1, 2])
+
+        # Should have only one endnote now
+        endnotes = doc.endnotes
+        assert len(endnotes) == 1
+
+        # Content should be merged with default separator
+        assert endnotes[0].text == "First endnote content; Second endnote content"
+        assert remaining_id == 1
+
+    def test_merge_endnotes_custom_separator(self):
+        """Test merging endnotes with a custom separator."""
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("Reference A", at="test document")
+        doc.insert_endnote("Reference B", at="Another paragraph")
+
+        doc.merge_endnotes([1, 2], separator=". See also: ")
+
+        endnotes = doc.endnotes
+        assert len(endnotes) == 1
+        assert endnotes[0].text == "Reference A. See also: Reference B"
+
+    def test_merge_three_endnotes(self):
+        """Test merging three endnotes into one."""
+        content = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Para one.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Para two.</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Para three.</w:t></w:r></w:p>
+  </w:body>
+</w:document>"""
+
+        doc = Document(create_test_docx(content))
+
+        doc.insert_endnote("End A", at="Para one")
+        doc.insert_endnote("End B", at="Para two")
+        doc.insert_endnote("End C", at="Para three")
+
+        assert len(doc.endnotes) == 3
+
+        doc.merge_endnotes([1, 2, 3])
+
+        endnotes = doc.endnotes
+        assert len(endnotes) == 1
+        assert endnotes[0].text == "End A; End B; End C"
+
+    def test_merge_endnotes_keep_last(self):
+        """Test merging endnotes while keeping the last one."""
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("First content", at="test document")
+        doc.insert_endnote("Second content", at="Another paragraph")
+
+        doc.merge_endnotes([1, 2], keep_first=False)
+
+        endnotes = doc.endnotes
+        assert len(endnotes) == 1
+        assert endnotes[0].text == "First content; Second content"
+
+    def test_merge_endnotes_less_than_two_raises(self):
+        """Test that merging fewer than 2 endnotes raises ValueError."""
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("Single endnote", at="test document")
+
+        with pytest.raises(ValueError) as exc_info:
+            doc.merge_endnotes([1])
+
+        assert "at least 2" in str(exc_info.value).lower()
+
+    def test_merge_endnotes_not_found_raises(self):
+        """Test that merging nonexistent endnotes raises NoteNotFoundError."""
+        from python_docx_redline import NoteNotFoundError
+
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("Single endnote", at="test document")
+
+        with pytest.raises(NoteNotFoundError):
+            doc.merge_endnotes([1, 99])
+
+    def test_merge_endnotes_persists_after_save(self):
+        """Test that merged endnotes persist after save/reload."""
+        doc = Document(create_test_docx())
+
+        doc.insert_endnote("Endnote A", at="test document")
+        doc.insert_endnote("Endnote B", at="Another paragraph")
+
+        doc.merge_endnotes([1, 2], separator=" | ")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "merged_endnotes.docx"
+            doc.save(output_path)
+
+            reloaded = Document(output_path)
+            endnotes = reloaded.endnotes
+
+            assert len(endnotes) == 1
+            assert endnotes[0].text == "Endnote A | Endnote B"

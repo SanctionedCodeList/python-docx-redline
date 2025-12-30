@@ -74,6 +74,7 @@ brew install pandoc                    # Text extraction (macOS)
 | **Create new document** | python-docx | [creation.md](./creation.md) |
 | **Edit existing document** | python-docx-redline | [editing.md](./editing.md) |
 | **Edit with tracked changes** | python-docx-redline (track=True) | [tracked-changes.md](./tracked-changes.md) |
+| **Delete entire section** | python-docx-redline delete_section() | [editing.md](./editing.md#section-operations) |
 | **Add comments** | python-docx-redline | [comments.md](./comments.md) |
 | **Footnotes/endnotes** | python-docx-redline | [footnotes.md](./footnotes.md) |
 | **Insert or edit hyperlinks** | python-docx-redline | [hyperlinks.md](./hyperlinks.md) |

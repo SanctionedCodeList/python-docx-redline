@@ -256,6 +256,124 @@ doc.replace("term", "period", show_context=True, context_chars=50)
 | `fuzzy` | `0.9` or `{"threshold": 0.9, ...}` for fuzzy matching |
 | `author` | Author name for tracked changes |
 
+## Section Operations
+
+Delete entire sections (heading + all content until the next heading) with a single call.
+
+### delete_section()
+
+```python
+from python_docx_redline import Document
+
+doc = Document("report.docx")
+
+# Delete section with tracked changes (default)
+doc.delete_section("Methods", track=True)
+
+# Delete section silently (no tracked changes)
+doc.delete_section("Appendix B", track=False)
+
+# With custom author for tracked changes
+doc.delete_section("Old Section", author="Reviewer")
+
+# Scoped deletion (only search within specific area)
+doc.delete_section("Subsection 1.2", scope="section:Chapter 1")
+
+doc.save("cleaned_report.docx")
+```
+
+**Signature:**
+```python
+def delete_section(
+    heading: str,
+    track: bool = True,
+    update_toc: bool = False,
+    author: str | None = None,
+    scope: str | dict | Any | None = None,
+) -> Section
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `heading` | `str` | required | Text of the heading to find and delete |
+| `track` | `bool` | `True` | Delete as tracked change (visible in Word) |
+| `update_toc` | `bool` | `False` | No-op, kept for API compatibility. TOC updates require Word. |
+| `author` | `str \| None` | `None` | Author name for tracked changes (uses doc default if None) |
+| `scope` | `str \| dict \| None` | `None` | Limit search to specific area |
+
+**Returns:** `Section` object representing the deleted section
+
+**Raises:**
+- `TextNotFoundError`: If the heading is not found
+- `AmbiguousTextError`: If multiple sections match the heading text
+
+### How Section Boundaries Work
+
+A section is defined as:
+1. A heading paragraph (using Word heading styles like Heading 1, Heading 2, etc.)
+2. All following paragraphs until the next heading paragraph
+
+When you delete a section, **all** content from the heading through the last paragraph before the next heading is removed.
+
+```
+Document structure:
+  # Introduction        <-- Heading 1
+    Paragraph 1
+    Paragraph 2
+  # Methods             <-- Heading 1 (section boundary)
+    Paragraph 3
+    Paragraph 4
+  # Results             <-- Heading 1 (section boundary)
+    Paragraph 5
+
+doc.delete_section("Methods")
+# Deletes: "Methods" heading + Paragraphs 3 & 4
+# "Results" section is preserved
+```
+
+### Common Use Cases
+
+**Removing an outdated appendix:**
+```python
+doc.delete_section("Appendix A: Legacy Data", track=False)
+```
+
+**Redlining a section for review:**
+```python
+doc.delete_section("Disputed Terms", track=True, author="Legal Review")
+# Section shows as deleted in Word's track changes view
+```
+
+**Removing multiple sections:**
+```python
+sections_to_remove = ["Draft Notes", "Internal Comments", "TODO"]
+for section_name in sections_to_remove:
+    try:
+        doc.delete_section(section_name, track=False)
+    except TextNotFoundError:
+        pass  # Section doesn't exist, skip
+```
+
+**Targeted deletion within a chapter:**
+```python
+# Only delete "Summary" section inside Chapter 2
+doc.delete_section("Summary", scope="section:Chapter 2")
+```
+
+### Handling Ambiguous Headings
+
+If the same heading text appears multiple times, use scope to disambiguate:
+
+```python
+# Fails if "Summary" appears in multiple chapters
+doc.delete_section("Summary")  # Raises AmbiguousTextError
+
+# Use scope to target specific occurrence
+doc.delete_section("Summary", scope="section:Chapter 1")
+```
+
 ## When to Use Raw python-docx
 
 python-docx is still appropriate for:

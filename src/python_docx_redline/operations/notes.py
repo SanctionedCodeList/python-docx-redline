@@ -26,7 +26,13 @@ from ..text_search import TextSpan
 
 if TYPE_CHECKING:
     from ..document import Document
-    from ..models.footnote import Endnote, Footnote, FootnoteReference
+    from ..models.footnote import (
+        Endnote,
+        Footnote,
+        FootnoteReference,
+        OrphanedEndnote,
+        OrphanedFootnote,
+    )
 
 
 class NoteOperations:
@@ -114,6 +120,164 @@ class NoteOperations:
             for elem in endnote_elems
             if elem.get(f"{{{WORD_NAMESPACE}}}type") is None
         ]
+
+    def find_orphaned_footnotes(self) -> list[OrphanedFootnote]:
+        """Find footnotes that have no reference in the document body.
+
+        Orphaned footnotes occur when text containing footnote markers is deleted
+        but the footnote content remains in footnotes.xml. This method detects
+        these orphans by comparing footnote IDs in footnotes.xml against
+        footnoteReference elements in document.xml.
+
+        System footnotes (id=-1 for separator, id=0 for continuationSeparator)
+        are excluded from the results.
+
+        Returns:
+            List of OrphanedFootnote objects with id and text content
+
+        Example:
+            >>> orphans = doc.find_orphaned_footnotes()
+            >>> for orphan in orphans:
+            ...     print(f"Orphaned footnote {orphan.id}: {orphan.text[:50]}...")
+        """
+        from ..models.footnote import OrphanedFootnote
+
+        temp_dir = self._document._temp_dir
+        if not temp_dir:
+            return []
+
+        footnotes_path = temp_dir / "word" / "footnotes.xml"
+        if not footnotes_path.exists():
+            return []
+
+        # Get all footnote IDs from footnotes.xml (excluding system footnotes)
+        tree = etree.parse(str(footnotes_path))
+        root = tree.getroot()
+
+        footnote_ids_in_xml: set[str] = set()
+        footnote_texts: dict[str, str] = {}
+
+        for fn_elem in root.findall(f"{{{WORD_NAMESPACE}}}footnote"):
+            # Skip system footnotes (separator, continuationSeparator)
+            if fn_elem.get(f"{{{WORD_NAMESPACE}}}type") is not None:
+                continue
+
+            fn_id = fn_elem.get(f"{{{WORD_NAMESPACE}}}id")
+            if fn_id:
+                footnote_ids_in_xml.add(fn_id)
+                # Extract text content
+                text_parts = []
+                for para in fn_elem.findall(f"{{{WORD_NAMESPACE}}}p"):
+                    para_text = []
+                    for text_elem in para.iter(f"{{{WORD_NAMESPACE}}}t"):
+                        para_text.append(text_elem.text or "")
+                    text_parts.append("".join(para_text))
+                full_text = "\n".join(text_parts)
+                # Strip leading space added by Word after footnoteRef
+                footnote_texts[fn_id] = (
+                    full_text.lstrip(" ") if full_text.startswith(" ") else full_text
+                )
+
+        # Get all referenced footnote IDs from document.xml
+        referenced_ids: set[str] = set()
+        for ref in self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}footnoteReference"):
+            ref_id = ref.get(f"{{{WORD_NAMESPACE}}}id")
+            if ref_id:
+                referenced_ids.add(ref_id)
+
+        # Find orphaned footnotes (in XML but not referenced)
+        orphaned_ids = footnote_ids_in_xml - referenced_ids
+
+        # Build result list sorted by ID
+        orphans = []
+        for orphan_id in sorted(orphaned_ids, key=lambda x: int(x) if x.isdigit() else 0):
+            orphans.append(
+                OrphanedFootnote(
+                    id=orphan_id,
+                    text=footnote_texts.get(orphan_id, ""),
+                )
+            )
+
+        return orphans
+
+    def find_orphaned_endnotes(self) -> list[OrphanedEndnote]:
+        """Find endnotes that have no reference in the document body.
+
+        Orphaned endnotes occur when text containing endnote markers is deleted
+        but the endnote content remains in endnotes.xml. This method detects
+        these orphans by comparing endnote IDs in endnotes.xml against
+        endnoteReference elements in document.xml.
+
+        System endnotes (id=-1 for separator, id=0 for continuationSeparator)
+        are excluded from the results.
+
+        Returns:
+            List of OrphanedEndnote objects with id and text content
+
+        Example:
+            >>> orphans = doc.find_orphaned_endnotes()
+            >>> for orphan in orphans:
+            ...     print(f"Orphaned endnote {orphan.id}: {orphan.text[:50]}...")
+        """
+        from ..models.footnote import OrphanedEndnote
+
+        temp_dir = self._document._temp_dir
+        if not temp_dir:
+            return []
+
+        endnotes_path = temp_dir / "word" / "endnotes.xml"
+        if not endnotes_path.exists():
+            return []
+
+        # Get all endnote IDs from endnotes.xml (excluding system endnotes)
+        tree = etree.parse(str(endnotes_path))
+        root = tree.getroot()
+
+        endnote_ids_in_xml: set[str] = set()
+        endnote_texts: dict[str, str] = {}
+
+        for en_elem in root.findall(f"{{{WORD_NAMESPACE}}}endnote"):
+            # Skip system endnotes (separator, continuationSeparator)
+            if en_elem.get(f"{{{WORD_NAMESPACE}}}type") is not None:
+                continue
+
+            en_id = en_elem.get(f"{{{WORD_NAMESPACE}}}id")
+            if en_id:
+                endnote_ids_in_xml.add(en_id)
+                # Extract text content
+                text_parts = []
+                for para in en_elem.findall(f"{{{WORD_NAMESPACE}}}p"):
+                    para_text = []
+                    for text_elem in para.iter(f"{{{WORD_NAMESPACE}}}t"):
+                        para_text.append(text_elem.text or "")
+                    text_parts.append("".join(para_text))
+                full_text = "\n".join(text_parts)
+                # Strip leading space added by Word after endnoteRef
+                endnote_texts[en_id] = (
+                    full_text.lstrip(" ") if full_text.startswith(" ") else full_text
+                )
+
+        # Get all referenced endnote IDs from document.xml
+        referenced_ids: set[str] = set()
+        for ref in self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}endnoteReference"):
+            ref_id = ref.get(f"{{{WORD_NAMESPACE}}}id")
+            if ref_id:
+                referenced_ids.add(ref_id)
+
+        # Find orphaned endnotes (in XML but not referenced)
+        orphaned_ids = endnote_ids_in_xml - referenced_ids
+
+        # Build result list sorted by ID
+        orphans = []
+        for orphan_id in sorted(orphaned_ids, key=lambda x: int(x) if x.isdigit() else 0):
+            orphans.append(
+                OrphanedEndnote(
+                    id=orphan_id,
+                    text=endnote_texts.get(orphan_id, ""),
+                )
+            )
+
+        return orphans
 
     def get_footnote(self, note_id: str | int) -> Footnote:
         """Get a specific footnote by ID.
@@ -2298,6 +2462,257 @@ class NoteOperations:
         tree = etree.ElementTree(note_elem.getparent())
         tree.write(
             str(xml_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
+
+    # ==================== Merge Footnotes/Endnotes ====================
+
+    def merge_footnotes(
+        self,
+        footnote_ids: list[int],
+        separator: str = "; ",
+        keep_first: bool = True,
+    ) -> int:
+        """Merge multiple footnotes into one.
+
+        Combines the content of multiple footnotes and removes the extras.
+        Useful for cleaning up adjacent footnotes after text deletion,
+        particularly in legal documents following Bluebook citation style.
+
+        Args:
+            footnote_ids: List of footnote IDs to merge (in order)
+            separator: Text to insert between merged contents (default: "; ")
+            keep_first: If True, keep first footnote and delete others.
+                       If False, keep last footnote.
+
+        Returns:
+            ID of the remaining footnote
+
+        Raises:
+            ValueError: If fewer than 2 footnote IDs provided
+            NoteNotFoundError: If any footnote ID is not found
+
+        Example:
+            >>> # Merge footnotes 15 and 16 into one
+            >>> remaining_id = doc.merge_footnotes([15, 16], separator="; ")
+            >>> print(f"Merged into footnote {remaining_id}")
+        """
+        if len(footnote_ids) < 2:
+            raise ValueError("Must provide at least 2 footnote IDs to merge")
+
+        temp_dir = self._document._temp_dir
+        if not temp_dir:
+            raise ValueError("Cannot merge footnotes in non-ZIP documents")
+
+        footnotes_path = temp_dir / "word" / "footnotes.xml"
+        if not footnotes_path.exists():
+            raise NoteNotFoundError("footnote", str(footnote_ids[0]), [])
+
+        # Verify all footnotes exist and collect their content
+        footnote_contents: list[str] = []
+        for fn_id in footnote_ids:
+            footnote = self.get_footnote(fn_id)  # Raises NoteNotFoundError if not found
+            footnote_contents.append(footnote.text)
+
+        # Determine which footnote to keep
+        if keep_first:
+            keep_id = footnote_ids[0]
+            remove_ids = footnote_ids[1:]
+        else:
+            keep_id = footnote_ids[-1]
+            remove_ids = footnote_ids[:-1]
+
+        # Combine content with separator
+        merged_content = separator.join(footnote_contents)
+
+        # Update the kept footnote with merged content
+        self.edit_footnote(keep_id, merged_content)
+
+        # Update all references in document.xml to point to the kept footnote
+        # This must be done before deleting footnotes to preserve the references
+        for remove_id in remove_ids:
+            self._update_footnote_reference(str(remove_id), str(keep_id))
+
+        # Delete the other footnotes (without renumbering yet)
+        for remove_id in remove_ids:
+            self._delete_footnote_content_only(remove_id)
+
+        # Renumber remaining footnotes
+        self._renumber_footnotes()
+
+        # Return the new ID (after renumbering, it may have changed)
+        # Find the footnote with our merged content
+        for fn in self.footnotes:
+            if fn.text == merged_content:
+                return int(fn.id)
+
+        # Fallback - return original keep_id (should not normally reach here)
+        return keep_id
+
+    def merge_endnotes(
+        self,
+        endnote_ids: list[int],
+        separator: str = "; ",
+        keep_first: bool = True,
+    ) -> int:
+        """Merge multiple endnotes into one.
+
+        Combines the content of multiple endnotes and removes the extras.
+        Useful for cleaning up adjacent endnotes after text deletion.
+
+        Args:
+            endnote_ids: List of endnote IDs to merge (in order)
+            separator: Text to insert between merged contents (default: "; ")
+            keep_first: If True, keep first endnote and delete others.
+                       If False, keep last endnote.
+
+        Returns:
+            ID of the remaining endnote
+
+        Raises:
+            ValueError: If fewer than 2 endnote IDs provided
+            NoteNotFoundError: If any endnote ID is not found
+
+        Example:
+            >>> # Merge endnotes 5 and 6 into one
+            >>> remaining_id = doc.merge_endnotes([5, 6], separator="; ")
+            >>> print(f"Merged into endnote {remaining_id}")
+        """
+        if len(endnote_ids) < 2:
+            raise ValueError("Must provide at least 2 endnote IDs to merge")
+
+        temp_dir = self._document._temp_dir
+        if not temp_dir:
+            raise ValueError("Cannot merge endnotes in non-ZIP documents")
+
+        endnotes_path = temp_dir / "word" / "endnotes.xml"
+        if not endnotes_path.exists():
+            raise NoteNotFoundError("endnote", str(endnote_ids[0]), [])
+
+        # Verify all endnotes exist and collect their content
+        endnote_contents: list[str] = []
+        for en_id in endnote_ids:
+            endnote = self.get_endnote(en_id)  # Raises NoteNotFoundError if not found
+            endnote_contents.append(endnote.text)
+
+        # Determine which endnote to keep
+        if keep_first:
+            keep_id = endnote_ids[0]
+            remove_ids = endnote_ids[1:]
+        else:
+            keep_id = endnote_ids[-1]
+            remove_ids = endnote_ids[:-1]
+
+        # Combine content with separator
+        merged_content = separator.join(endnote_contents)
+
+        # Update the kept endnote with merged content
+        self.edit_endnote(keep_id, merged_content)
+
+        # Update all references in document.xml to point to the kept endnote
+        for remove_id in remove_ids:
+            self._update_endnote_reference(str(remove_id), str(keep_id))
+
+        # Delete the other endnotes (without renumbering yet)
+        for remove_id in remove_ids:
+            self._delete_endnote_content_only(remove_id)
+
+        # Renumber remaining endnotes
+        self._renumber_endnotes()
+
+        # Return the new ID (after renumbering, it may have changed)
+        for en in self.endnotes:
+            if en.text == merged_content:
+                return int(en.id)
+
+        # Fallback
+        return keep_id
+
+    def _update_footnote_reference(self, old_id: str, new_id: str) -> None:
+        """Update a footnote reference in document.xml to point to a new ID.
+
+        Args:
+            old_id: The current footnote ID to find
+            new_id: The new footnote ID to set
+        """
+        for ref in self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}footnoteReference"):
+            if ref.get(f"{{{WORD_NAMESPACE}}}id") == old_id:
+                ref.set(f"{{{WORD_NAMESPACE}}}id", new_id)
+
+    def _update_endnote_reference(self, old_id: str, new_id: str) -> None:
+        """Update an endnote reference in document.xml to point to a new ID.
+
+        Args:
+            old_id: The current endnote ID to find
+            new_id: The new endnote ID to set
+        """
+        for ref in self._document.xml_root.iter(f"{{{WORD_NAMESPACE}}}endnoteReference"):
+            if ref.get(f"{{{WORD_NAMESPACE}}}id") == old_id:
+                ref.set(f"{{{WORD_NAMESPACE}}}id", new_id)
+
+    def _delete_footnote_content_only(self, note_id: int | str) -> None:
+        """Delete footnote content from footnotes.xml without removing reference or renumbering.
+
+        This is used during merge operations where the reference has already been updated.
+
+        Args:
+            note_id: The footnote ID to delete
+        """
+        note_id_str = str(note_id)
+        temp_dir = self._document._temp_dir
+        if not temp_dir:
+            return
+
+        footnotes_path = temp_dir / "word" / "footnotes.xml"
+        if not footnotes_path.exists():
+            return
+
+        tree = etree.parse(str(footnotes_path))
+        root = tree.getroot()
+
+        # Find and remove the footnote element
+        for fn_elem in root.findall(f"{{{WORD_NAMESPACE}}}footnote"):
+            if fn_elem.get(f"{{{WORD_NAMESPACE}}}id") == note_id_str:
+                root.remove(fn_elem)
+                break
+
+        tree.write(
+            str(footnotes_path),
+            encoding="utf-8",
+            xml_declaration=True,
+            pretty_print=True,
+        )
+
+    def _delete_endnote_content_only(self, note_id: int | str) -> None:
+        """Delete endnote content from endnotes.xml without removing reference or renumbering.
+
+        This is used during merge operations where the reference has already been updated.
+
+        Args:
+            note_id: The endnote ID to delete
+        """
+        note_id_str = str(note_id)
+        temp_dir = self._document._temp_dir
+        if not temp_dir:
+            return
+
+        endnotes_path = temp_dir / "word" / "endnotes.xml"
+        if not endnotes_path.exists():
+            return
+
+        tree = etree.parse(str(endnotes_path))
+        root = tree.getroot()
+
+        # Find and remove the endnote element
+        for en_elem in root.findall(f"{{{WORD_NAMESPACE}}}endnote"):
+            if en_elem.get(f"{{{WORD_NAMESPACE}}}id") == note_id_str:
+                root.remove(en_elem)
+                break
+
+        tree.write(
+            str(endnotes_path),
             encoding="utf-8",
             xml_declaration=True,
             pretty_print=True,
