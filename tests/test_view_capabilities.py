@@ -355,3 +355,99 @@ def test_empty_document() -> None:
 
     finally:
         doc_path.unlink()
+
+
+def test_get_text_skip_deleted_paragraphs() -> None:
+    """Test that get_text() skips paragraphs with deleted paragraph marks by default."""
+    doc_path = create_document_with_sections()
+    try:
+        doc = Document(doc_path)
+
+        # Delete a paragraph with tracking
+        doc.delete_ref("p:1", track=True, author="TestAgent")
+
+        # Default behavior: skip deleted paragraphs
+        text = doc.get_text()
+
+        # Should not have excessive empty lines from deleted paragraph
+        # The deleted paragraph mark means the empty paragraph is skipped
+        assert "\n\n\n\n" not in text  # No 3+ consecutive newlines
+
+    finally:
+        doc_path.unlink()
+
+
+def test_get_text_include_deleted_paragraphs() -> None:
+    """Test get_text() can include empty lines for deleted paragraphs."""
+    doc_path = create_document_with_sections()
+    try:
+        doc = Document(doc_path)
+
+        # Count paragraphs before deletion
+        text_before = doc.get_text(skip_deleted_paragraphs=False)
+        para_count_before = text_before.count("\n\n") + 1
+
+        # Delete a paragraph with tracking
+        doc.delete_ref("p:1", track=True, author="TestAgent")
+
+        # With skip_deleted_paragraphs=False, we keep the empty line
+        text_after = doc.get_text(skip_deleted_paragraphs=False)
+        para_count_after = text_after.count("\n\n") + 1
+
+        # Paragraph count should be the same (empty paragraph still counted)
+        assert para_count_after == para_count_before
+
+    finally:
+        doc_path.unlink()
+
+
+def test_get_text_skip_multiple_deleted_paragraphs() -> None:
+    """Test that get_text() skips multiple deleted paragraphs."""
+    doc_path = create_document_with_sections()
+    try:
+        doc = Document(doc_path)
+
+        # Delete multiple paragraphs with tracking (in reverse order to avoid ref shifting)
+        doc.delete_ref("p:3", track=True, author="TestAgent")
+        doc.delete_ref("p:2", track=True, author="TestAgent")
+        doc.delete_ref("p:1", track=True, author="TestAgent")
+
+        # Default behavior: skip deleted paragraphs
+        text = doc.get_text()
+
+        # Count empty lines - with skip_deleted_paragraphs=True,
+        # we shouldn't have excessive empty content
+        lines = text.split("\n")
+        empty_line_count = sum(1 for line in lines if not line.strip())
+
+        # Skip behavior should reduce empty lines significantly
+        text_with_empty = doc.get_text(skip_deleted_paragraphs=False)
+        lines_with_empty = text_with_empty.split("\n")
+        empty_line_count_with = sum(1 for line in lines_with_empty if not line.strip())
+
+        # Should have fewer empty lines when skipping
+        assert empty_line_count <= empty_line_count_with
+
+    finally:
+        doc_path.unlink()
+
+
+def test_get_text_preserves_regular_empty_paragraphs() -> None:
+    """Test that get_text() preserves intentional empty paragraphs (no deleted mark)."""
+    doc_path = create_document_with_sections()
+    try:
+        doc = Document(doc_path)
+
+        # Get text before any deletions
+        text_before = doc.get_text()
+
+        # Should have standard paragraph separations
+        assert "\n\n" in text_before
+
+        # Using skip_deleted_paragraphs=True shouldn't change anything
+        # when there are no deleted paragraphs
+        text_after = doc.get_text(skip_deleted_paragraphs=True)
+        assert text_before == text_after
+
+    finally:
+        doc_path.unlink()

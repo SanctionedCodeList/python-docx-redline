@@ -541,12 +541,18 @@ class Document:
         """
         return self._comment_ops.get(author=author, scope=scope)
 
-    def get_text(self) -> str:
+    def get_text(self, skip_deleted_paragraphs: bool = True) -> str:
         """Extract all visible text content from the document.
 
         Returns plain text with paragraphs separated by double newlines.
         This excludes deleted text (tracked changes) and only returns visible content.
         This is useful for understanding document content before making edits.
+
+        Args:
+            skip_deleted_paragraphs: If True (default), skip paragraphs whose
+                paragraph marks are marked as deleted and have no visible content.
+                This makes the output match what Word shows in "Final" view.
+                Set to False to include empty lines for deleted paragraphs.
 
         Returns:
             Plain text content of the entire document (excluding deletions)
@@ -556,6 +562,9 @@ class Document:
             >>> text = doc.get_text()
             >>> if "confidential" in text.lower():
             ...     print("Document contains confidential information")
+
+            >>> # Include empty lines for deleted paragraphs
+            >>> text_with_gaps = doc.get_text(skip_deleted_paragraphs=False)
         """
         # Extract only visible text (w:t), not deleted text (w:delText)
         paragraphs_text = []
@@ -563,8 +572,39 @@ class Document:
             # Get only w:t elements, not w:delText
             text_elements = para.element.findall(f".//{{{WORD_NAMESPACE}}}t")
             para_text = "".join(elem.text or "" for elem in text_elements)
+
+            # Skip empty paragraphs with deleted paragraph marks
+            if skip_deleted_paragraphs and not para_text.strip():
+                if self._has_deleted_paragraph_mark(para.element):
+                    continue
+
             paragraphs_text.append(para_text)
         return "\n\n".join(paragraphs_text)
+
+    def _has_deleted_paragraph_mark(self, para_element: etree._Element) -> bool:
+        """Check if a paragraph has its paragraph mark marked as deleted.
+
+        A deleted paragraph mark is indicated by a <w:del> element inside
+        <w:pPr>/<w:rPr>. When Word accepts this tracked change, the paragraph
+        merges with the following paragraph.
+
+        Args:
+            para_element: The paragraph XML element to check
+
+        Returns:
+            True if the paragraph mark is marked as deleted, False otherwise
+        """
+        # Look for w:pPr/w:rPr/w:del
+        p_pr = para_element.find(f"{{{WORD_NAMESPACE}}}pPr")
+        if p_pr is None:
+            return False
+
+        r_pr = p_pr.find(f"{{{WORD_NAMESPACE}}}rPr")
+        if r_pr is None:
+            return False
+
+        del_elem = r_pr.find(f"{{{WORD_NAMESPACE}}}del")
+        return del_elem is not None
 
     def has_tracked_changes(self) -> bool:
         """Check if the document contains any tracked changes.
