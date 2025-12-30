@@ -5422,6 +5422,32 @@ class Document:
 
         r_pr.append(del_elem)
 
+    def _is_paragraph_already_deleted(self, para_element: etree._Element) -> bool:
+        """Check if a paragraph is already marked as deleted.
+
+        A paragraph is considered already deleted if:
+        1. It has a deleted paragraph mark (<w:pPr>/<w:rPr>/<w:del>), AND
+        2. It has no direct <w:r> children (all content is wrapped in <w:del>)
+
+        This prevents double-deletion which creates invalid nested <w:del> elements.
+
+        Args:
+            para_element: The paragraph XML element to check
+
+        Returns:
+            True if the paragraph is already deleted, False otherwise
+        """
+        # Check for deleted paragraph mark
+        has_deleted_mark = self._has_deleted_paragraph_mark(para_element)
+
+        # Check for direct run children (not wrapped in w:del)
+        direct_runs = para_element.findall(f"./{{{WORD_NAMESPACE}}}r")
+        has_direct_runs = len(direct_runs) > 0
+
+        # Paragraph is already deleted if it has the deleted mark and no direct runs
+        # (meaning all content is already wrapped in <w:del>)
+        return has_deleted_mark and not has_direct_runs
+
     def _delete_paragraph_ref(
         self,
         element: etree._Element,
@@ -5432,11 +5458,19 @@ class Document:
         from datetime import datetime, timezone
 
         if track:
+            # Check if already deleted to prevent nested <w:del> elements
+            if self._is_paragraph_already_deleted(element):
+                return EditResult(
+                    success=True,
+                    edit_type="delete_ref",
+                    message="Paragraph already deleted, skipping to prevent invalid XML",
+                )
+
             # Tracked deletion: wrap all runs in w:del
             timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             change_id = self._xml_generator.next_change_id
 
-            for run in list(element.findall(f".//{{{WORD_NAMESPACE}}}r")):
+            for run in list(element.findall(f"./{{{WORD_NAMESPACE}}}r")):
                 # Create deletion wrapper
                 del_elem = etree.Element(f"{{{WORD_NAMESPACE}}}del")
                 del_elem.set(f"{{{WORD_NAMESPACE}}}id", str(change_id))

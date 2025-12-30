@@ -1909,3 +1909,116 @@ class TestDeleteRefParagraphMarkDeletion:
             assert del_elem is not None
         finally:
             docx_path.unlink()
+
+
+class TestDoubleDeletePrevention:
+    """Tests for preventing invalid nested w:del from double-deletion."""
+
+    def test_double_delete_ref_skips_already_deleted_paragraph(self) -> None:
+        """Deleting an already-deleted paragraph should skip without error."""
+        docx_path = create_test_docx()
+        try:
+            doc = Document(docx_path)
+
+            # First deletion
+            result1 = doc.delete_ref("p:0", track=True, author="TestAgent")
+            assert result1.success is True
+
+            # Second deletion of same paragraph should skip
+            result2 = doc.delete_ref("p:0", track=True, author="TestAgent")
+            assert result2.success is True
+            assert "already deleted" in result2.message.lower()
+
+        finally:
+            docx_path.unlink()
+
+    def test_double_delete_ref_no_nested_del_elements(self) -> None:
+        """Double deletion should not create nested w:del elements."""
+        docx_path = create_test_docx()
+        try:
+            doc = Document(docx_path)
+
+            # Delete the paragraph
+            doc.delete_ref("p:0", track=True, author="TestAgent")
+
+            # Try to delete again
+            doc.delete_ref("p:0", track=True, author="TestAgent")
+
+            # Check that there's only one level of w:del
+            element = doc.resolve_ref("p:0")
+            del_elements = element.findall(f".//{{{WORD_NAMESPACE}}}del")
+
+            # Should have deletion elements but no nesting
+            for del_elem in del_elements:
+                # No w:del should contain another w:del
+                nested = del_elem.findall(f".//{{{WORD_NAMESPACE}}}del")
+                assert len(nested) == 0, "Found nested w:del elements"
+
+        finally:
+            docx_path.unlink()
+
+    def test_double_delete_ref_single_paragraph_mark_deletion(self) -> None:
+        """Double deletion should not add duplicate paragraph mark deletions."""
+        docx_path = create_test_docx()
+        try:
+            doc = Document(docx_path)
+
+            # Delete the paragraph
+            doc.delete_ref("p:0", track=True, author="TestAgent")
+
+            # Try to delete again
+            doc.delete_ref("p:0", track=True, author="TestAgent")
+
+            # Check that there's only one w:del in w:pPr/w:rPr
+            element = doc.resolve_ref("p:0")
+            p_pr = element.find(f"{{{WORD_NAMESPACE}}}pPr")
+            if p_pr is not None:
+                r_pr = p_pr.find(f"{{{WORD_NAMESPACE}}}rPr")
+                if r_pr is not None:
+                    del_marks = r_pr.findall(f"{{{WORD_NAMESPACE}}}del")
+                    assert (
+                        len(del_marks) == 1
+                    ), f"Expected 1 paragraph mark deletion, found {len(del_marks)}"
+
+        finally:
+            docx_path.unlink()
+
+    def test_reload_and_delete_same_paragraph(self) -> None:
+        """Reloading document and deleting same paragraph should not fail."""
+        docx_path = create_test_docx()
+        try:
+            # First session: delete and save
+            doc = Document(docx_path)
+            doc.delete_ref("p:0", track=True, author="TestAgent")
+            doc.save(docx_path)
+
+            # Second session: reload and try to delete same ref
+            doc2 = Document(docx_path)
+            result = doc2.delete_ref("p:0", track=True, author="TestAgent")
+
+            # Should succeed without creating invalid XML
+            assert result.success is True
+
+            # Should be able to save without validation errors
+            doc2.save(docx_path)  # This would raise if XML is invalid
+
+        finally:
+            docx_path.unlink()
+
+    def test_is_paragraph_already_deleted_detects_deletion(self) -> None:
+        """The _is_paragraph_already_deleted helper should detect deleted paragraphs."""
+        docx_path = create_test_docx()
+        try:
+            doc = Document(docx_path)
+
+            # Before deletion
+            element = doc.resolve_ref("p:0")
+            assert doc._is_paragraph_already_deleted(element) is False
+
+            # After deletion
+            doc.delete_ref("p:0", track=True, author="TestAgent")
+            element = doc.resolve_ref("p:0")
+            assert doc._is_paragraph_already_deleted(element) is True
+
+        finally:
+            docx_path.unlink()
