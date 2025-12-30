@@ -47,6 +47,10 @@ dev = [
 fuzzy = [
     "rapidfuzz>=3.0.0",
 ]
+templating = [
+    "markdown-it-py>=3.0.0",
+    "htmldocx>=0.0.6",
+]
 docs = [
     "mkdocs>=1.5.0",
     "mkdocs-material>=9.5.0",

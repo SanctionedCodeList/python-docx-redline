@@ -12,7 +12,7 @@ Example:
     >>> doc.save("contract_edited.docx")
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Parker Hancock"
 __all__ = [
     "Document",
@@ -80,6 +80,8 @@ __all__ = [
     "get_endnote_text_style",
     "get_endnote_text_char_style",
     "get_hyperlink_style",
+    # Templating
+    "DocxBuilder",
 ]
 
 # Import author identity
@@ -166,6 +168,9 @@ from .style_templates import (
 
 # Import suggestion generator
 from .suggestions import SuggestionGenerator
+
+# Import templating
+from .templating import DocxBuilder
 from .text_search import TextSearch, TextSpan
 
 # Import XML generation

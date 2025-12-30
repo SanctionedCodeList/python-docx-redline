@@ -72,6 +72,7 @@ brew install pandoc                    # Text extraction (macOS)
 | **Large document navigation** | OutlineTree | [accessibility.md](./accessibility.md) |
 | **Ref-based precise editing** | python-docx-redline refs | [accessibility.md](./accessibility.md) |
 | **Create new document** | python-docx | [creation.md](./creation.md) |
+| **Generate from data/template** | DocxBuilder | [templating.md](./templating.md) |
 | **Edit existing document** | python-docx-redline | [editing.md](./editing.md) |
 | **Edit with tracked changes** | python-docx-redline (track=True) | [tracked-changes.md](./tracked-changes.md) |
 | **Delete entire section** | python-docx-redline delete_section() | [editing.md](./editing.md#section-operations) |
@@ -103,6 +104,17 @@ doc = Document("styles/corporate.docx")
 doc.add_heading("Title", 0)
 doc.add_paragraph("Content here.")
 doc.save("new.docx")
+```
+
+### Generate from Data (DocxBuilder)
+```python
+from python_docx_redline import DocxBuilder
+
+doc = DocxBuilder()
+doc.heading("Sales Report")
+doc.markdown("Revenue **exceeded** targets by 12%.")
+doc.table_from(items, ["product", "revenue", "growth"])
+doc.save("report.docx")
 ```
 
 ### Edit Existing Document (Silent)
@@ -225,6 +237,7 @@ Guidance on creating effective, professional documents:
 Detailed workflows for document manipulation:
 
 - **[accessibility.md](./accessibility.md)** — DocTree accessibility layer: YAML output, refs, OutlineTree for large docs
+- **[templating.md](./templating.md)** — DocxBuilder: generate documents from data with markdown support
 - **[creation.md](./creation.md)** — Creating new documents with style templates
 - **[reading.md](./reading.md)** — Text extraction, find_all(), document structure, tables
 - **[editing.md](./editing.md)** — All editing with python-docx-redline (both tracked and untracked)
