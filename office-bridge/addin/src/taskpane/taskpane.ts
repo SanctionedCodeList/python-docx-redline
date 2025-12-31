@@ -39,6 +39,12 @@ import * as DocTreeScope from "@accessibility/scope";
   // Text search
   findText: DocTreeEditing.findText,
   findAndHighlight: DocTreeEditing.findAndHighlight,
+  // Tracked changes
+  acceptAllChanges: DocTreeEditing.acceptAllChanges,
+  rejectAllChanges: DocTreeEditing.rejectAllChanges,
+  acceptNextChange: DocTreeEditing.acceptNextChange,
+  rejectNextChange: DocTreeEditing.rejectNextChange,
+  getTrackedChangesInfo: DocTreeEditing.getTrackedChangesInfo,
   // Scope functions
   parseScope: DocTreeScope.parseScope,
   parseNoteScope: DocTreeScope.parseNoteScope,

@@ -1815,3 +1815,345 @@ export async function findAndHighlight(
 
   return searchResults.items.length;
 }
+
+// =============================================================================
+// Tracked Changes Operations
+// =============================================================================
+
+/**
+ * Office.js TrackedChange interface
+ */
+interface WordTrackedChange {
+  type: 'Inserted' | 'Deleted';
+  text: string;
+  author: string;
+  date: Date;
+  accept(): void;
+  reject(): void;
+  getRange(): WordRange;
+  load(properties: string): WordTrackedChange;
+}
+
+interface WordTrackedChangeCollection {
+  load(properties: string): WordTrackedChangeCollection;
+  items: WordTrackedChange[];
+  acceptAll(): void;
+  rejectAll(): void;
+  getFirst(): WordTrackedChange;
+  getFirstOrNullObject(): WordTrackedChange;
+}
+
+interface WordDocumentWithTrackedChanges {
+  body: WordBody & {
+    getTrackedChanges?(): WordTrackedChangeCollection;
+  };
+  getTrackedChanges?(): WordTrackedChangeCollection;
+}
+
+/**
+ * Result of tracked change operations.
+ */
+export interface TrackedChangeResult {
+  /** Whether the operation succeeded */
+  success: boolean;
+  /** Number of changes affected */
+  count: number;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
+ * Accept all tracked changes in the document.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @returns TrackedChangeResult with count of accepted changes
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const result = await acceptAllChanges(context);
+ *   console.log(`Accepted ${result.count} changes`);
+ * });
+ * ```
+ */
+export async function acceptAllChanges(
+  context: WordRequestContext
+): Promise<TrackedChangeResult> {
+  try {
+    const doc = context.document as unknown as WordDocumentWithTrackedChanges;
+
+    // Try document-level tracked changes first
+    if (doc.getTrackedChanges) {
+      const changes = doc.getTrackedChanges();
+      changes.load('items');
+      await context.sync();
+
+      const count = changes.items.length;
+      if (count > 0) {
+        changes.acceptAll();
+        await context.sync();
+      }
+
+      return { success: true, count };
+    }
+
+    // Try body-level tracked changes
+    if (doc.body.getTrackedChanges) {
+      const changes = doc.body.getTrackedChanges();
+      changes.load('items');
+      await context.sync();
+
+      const count = changes.items.length;
+      if (count > 0) {
+        changes.acceptAll();
+        await context.sync();
+      }
+
+      return { success: true, count };
+    }
+
+    return {
+      success: false,
+      count: 0,
+      error: 'Tracked changes API not available in this version of Word',
+    };
+  } catch (err) {
+    return {
+      success: false,
+      count: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Reject all tracked changes in the document.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @returns TrackedChangeResult with count of rejected changes
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const result = await rejectAllChanges(context);
+ *   console.log(`Rejected ${result.count} changes`);
+ * });
+ * ```
+ */
+export async function rejectAllChanges(
+  context: WordRequestContext
+): Promise<TrackedChangeResult> {
+  try {
+    const doc = context.document as unknown as WordDocumentWithTrackedChanges;
+
+    // Try document-level tracked changes first
+    if (doc.getTrackedChanges) {
+      const changes = doc.getTrackedChanges();
+      changes.load('items');
+      await context.sync();
+
+      const count = changes.items.length;
+      if (count > 0) {
+        changes.rejectAll();
+        await context.sync();
+      }
+
+      return { success: true, count };
+    }
+
+    // Try body-level tracked changes
+    if (doc.body.getTrackedChanges) {
+      const changes = doc.body.getTrackedChanges();
+      changes.load('items');
+      await context.sync();
+
+      const count = changes.items.length;
+      if (count > 0) {
+        changes.rejectAll();
+        await context.sync();
+      }
+
+      return { success: true, count };
+    }
+
+    return {
+      success: false,
+      count: 0,
+      error: 'Tracked changes API not available in this version of Word',
+    };
+  } catch (err) {
+    return {
+      success: false,
+      count: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Accept the next (first) tracked change in the document.
+ *
+ * Useful for stepping through changes one at a time.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @returns TrackedChangeResult indicating success and remaining count
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const result = await acceptNextChange(context);
+ *   if (result.success) {
+ *     console.log(`Accepted 1 change, ${result.count} remaining`);
+ *   }
+ * });
+ * ```
+ */
+export async function acceptNextChange(
+  context: WordRequestContext
+): Promise<TrackedChangeResult> {
+  try {
+    const doc = context.document as unknown as WordDocumentWithTrackedChanges;
+
+    const getChanges = doc.getTrackedChanges || doc.body.getTrackedChanges;
+    if (!getChanges) {
+      return {
+        success: false,
+        count: 0,
+        error: 'Tracked changes API not available',
+      };
+    }
+
+    const changes = getChanges.call(doc.getTrackedChanges ? doc : doc.body);
+    const first = changes.getFirstOrNullObject();
+    first.load('type');
+    await context.sync();
+
+    // Check if there was a change
+    if ((first as unknown as { isNullObject?: boolean }).isNullObject) {
+      return { success: true, count: 0 };
+    }
+
+    first.accept();
+    await context.sync();
+
+    // Get remaining count
+    changes.load('items');
+    await context.sync();
+
+    return { success: true, count: changes.items.length };
+  } catch (err) {
+    return {
+      success: false,
+      count: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Reject the next (first) tracked change in the document.
+ *
+ * Useful for stepping through changes one at a time.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @returns TrackedChangeResult indicating success and remaining count
+ */
+export async function rejectNextChange(
+  context: WordRequestContext
+): Promise<TrackedChangeResult> {
+  try {
+    const doc = context.document as unknown as WordDocumentWithTrackedChanges;
+
+    const getChanges = doc.getTrackedChanges || doc.body.getTrackedChanges;
+    if (!getChanges) {
+      return {
+        success: false,
+        count: 0,
+        error: 'Tracked changes API not available',
+      };
+    }
+
+    const changes = getChanges.call(doc.getTrackedChanges ? doc : doc.body);
+    const first = changes.getFirstOrNullObject();
+    first.load('type');
+    await context.sync();
+
+    // Check if there was a change
+    if ((first as unknown as { isNullObject?: boolean }).isNullObject) {
+      return { success: true, count: 0 };
+    }
+
+    first.reject();
+    await context.sync();
+
+    // Get remaining count
+    changes.load('items');
+    await context.sync();
+
+    return { success: true, count: changes.items.length };
+  } catch (err) {
+    return {
+      success: false,
+      count: 0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Get information about tracked changes in the document.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @returns Information about tracked changes
+ */
+export async function getTrackedChangesInfo(
+  context: WordRequestContext
+): Promise<{
+  available: boolean;
+  count: number;
+  insertions: number;
+  deletions: number;
+  changes: Array<{ type: string; text: string; author: string }>;
+}> {
+  try {
+    const doc = context.document as unknown as WordDocumentWithTrackedChanges;
+
+    const getChanges = doc.getTrackedChanges || doc.body.getTrackedChanges;
+    if (!getChanges) {
+      return { available: false, count: 0, insertions: 0, deletions: 0, changes: [] };
+    }
+
+    const changes = getChanges.call(doc.getTrackedChanges ? doc : doc.body);
+    changes.load('items');
+    await context.sync();
+
+    // Load details for each change
+    for (const change of changes.items) {
+      change.load('type,text,author');
+    }
+    await context.sync();
+
+    const insertions = changes.items.filter((c) => c.type === 'Inserted').length;
+    const deletions = changes.items.filter((c) => c.type === 'Deleted').length;
+
+    return {
+      available: true,
+      count: changes.items.length,
+      insertions,
+      deletions,
+      changes: changes.items.map((c) => ({
+        type: c.type,
+        text: c.text,
+        author: c.author,
+      })),
+    };
+  } catch (err) {
+    return {
+      available: false,
+      count: 0,
+      insertions: 0,
+      deletions: 0,
+      changes: [],
+    };
+  }
+}
