@@ -309,6 +309,10 @@ function findLCS(a: string[], b: string[]): string[] {
  * 1. Gets original and current text for each paragraph
  * 2. Compares to detect insertions/deletions
  * 3. Returns change info for each paragraph and overall change list
+ *
+ * PERFORMANCE: Uses batched context.sync() calls to avoid O(n) round-trips.
+ * Previously called context.sync() per paragraph, causing 3+ minute delays
+ * for large documents.
  */
 export async function collectTrackedChanges(
   context: WordRequestContext,
@@ -326,6 +330,16 @@ export async function collectTrackedChanges(
   const paragraphs = context.document.body.paragraphs.load('items/text,items/style');
   await context.sync();
 
+  // BATCHED APPROACH: Queue all getReviewedText calls, then sync once
+  // This reduces O(n) sync calls to O(1)
+  const reviewedTextResults: Array<{
+    ref: Ref;
+    paraText: string;
+    originalResult: WordStringResult;
+    currentResult: WordStringResult;
+  }> = [];
+
+  // Phase 1: Queue all getReviewedText calls (no sync yet)
   for (let i = 0; i < paragraphs.items.length && i < paragraphRefs.length; i++) {
     const para = paragraphs.items[i];
     const ref = paragraphRefs[i];
@@ -333,13 +347,52 @@ export async function collectTrackedChanges(
     if (!para || !ref) continue;
 
     try {
-      // Get text in different versions
+      // Queue both version requests (Office.js batches these)
       const originalResult = para.getReviewedText('Original');
       const currentResult = para.getReviewedText('Current');
-      await context.sync();
 
-      const originalText = originalResult.value;
-      const currentText = currentResult.value;
+      reviewedTextResults.push({
+        ref,
+        paraText: para.text,
+        originalResult,
+        currentResult,
+      });
+    } catch {
+      // getReviewedText may not be available - use plain text
+      paragraphChanges.set(ref, {
+        originalText: para.text,
+        currentText: para.text,
+        hasChanges: false,
+        changes: [],
+        markedUpText: para.text,
+      });
+    }
+  }
+
+  // Phase 2: Single sync for all batched operations
+  if (reviewedTextResults.length > 0) {
+    try {
+      await context.sync();
+    } catch {
+      // If batched sync fails, fall back to plain text for all
+      for (const item of reviewedTextResults) {
+        paragraphChanges.set(item.ref, {
+          originalText: item.paraText,
+          currentText: item.paraText,
+          hasChanges: false,
+          changes: [],
+          markedUpText: item.paraText,
+        });
+      }
+      return { paragraphChanges, allChanges };
+    }
+  }
+
+  // Phase 3: Process all results (synchronous - no more API calls)
+  for (const item of reviewedTextResults) {
+    try {
+      const originalText = item.originalResult.value;
+      const currentText = item.currentResult.value;
       const hasChanges = originalText !== currentText;
 
       let changes: TrackedChange[] = [];
@@ -349,7 +402,7 @@ export async function collectTrackedChanges(
         const detected = detectChanges(
           originalText,
           currentText,
-          ref,
+          item.ref,
           changeIndex
         );
         changes = detected.changes;
@@ -358,7 +411,7 @@ export async function collectTrackedChanges(
         allChanges.push(...changes);
       }
 
-      paragraphChanges.set(ref, {
+      paragraphChanges.set(item.ref, {
         originalText,
         currentText,
         hasChanges,
@@ -366,14 +419,13 @@ export async function collectTrackedChanges(
         markedUpText,
       });
     } catch {
-      // getReviewedText may not be available in all Office.js versions
-      // Fall back to using plain text
-      paragraphChanges.set(ref, {
-        originalText: para.text,
-        currentText: para.text,
+      // Individual result access failed - use plain text
+      paragraphChanges.set(item.ref, {
+        originalText: item.paraText,
+        currentText: item.paraText,
         hasChanges: false,
         changes: [],
-        markedUpText: para.text,
+        markedUpText: item.paraText,
       });
     }
   }
@@ -387,6 +439,9 @@ export async function collectTrackedChanges(
 
 /**
  * Collect all comments from the document.
+ *
+ * PERFORMANCE: Uses batched context.sync() calls to minimize round-trips.
+ * Previously called context.sync() per comment for replies and ranges.
  */
 export async function collectComments(
   context: WordRequestContext
@@ -394,19 +449,49 @@ export async function collectComments(
   const comments: Comment[] = [];
 
   try {
-    // Load comments
+    // Phase 1: Load comments
     const wordComments = context.document.body.getComments();
     wordComments.load('items/id,items/authorName,items/content,items/createdDate,items/resolved');
     await context.sync();
 
-    let commentIndex = 0;
+    if (wordComments.items.length === 0) {
+      return comments;
+    }
+
+    // Phase 2: Queue loading all replies (batched)
     for (const wc of wordComments.items) {
-      // Load replies for this comment
-      let replies: CommentReply[] = [];
       try {
         wc.replies.load('items/id,items/authorName,items/content,items/createdDate');
-        await context.sync();
+      } catch {
+        // Replies may not be supported for this comment
+      }
+    }
 
+    // Phase 3: Queue loading all ranges (batched)
+    const ranges: WordRange[] = [];
+    for (const wc of wordComments.items) {
+      try {
+        const range = wc.getRange();
+        range.load('text');
+        ranges.push(range);
+      } catch {
+        // Range may not be available - push null placeholder
+        ranges.push(null as unknown as WordRange);
+      }
+    }
+
+    // Single sync for all replies and ranges
+    await context.sync();
+
+    // Phase 4: Process all results (synchronous)
+    let commentIndex = 0;
+    for (let i = 0; i < wordComments.items.length; i++) {
+      const wc = wordComments.items[i];
+      if (!wc) continue;
+
+      // Process replies
+      let replies: CommentReply[] = [];
+      try {
         let replyIndex = 0;
         for (const wr of wc.replies.items) {
           replies.push({
@@ -418,18 +503,18 @@ export async function collectComments(
           replyIndex++;
         }
       } catch {
-        // Replies may not be supported
+        // Replies access failed
       }
 
-      // Get the text the comment is attached to
+      // Get range text
       let onText: string | undefined;
       try {
-        const range = wc.getRange();
-        range.load('text');
-        await context.sync();
-        onText = range.text;
+        const range = ranges[i];
+        if (range) {
+          onText = range.text;
+        }
       } catch {
-        // Range may not be available
+        // Range access failed
       }
 
       comments.push({

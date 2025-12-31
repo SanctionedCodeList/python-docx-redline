@@ -9,20 +9,41 @@ import * as DocTreeBuilder from "@accessibility/builder";
 import * as DocTreeSerializer from "@accessibility/serializer";
 import * as DocTreeEditing from "@accessibility/editing";
 import * as DocTreeChanges from "@accessibility/changes";
+import * as DocTreeScope from "@accessibility/scope";
 
 // Expose DocTree globally for remote execution
 (window as unknown as Record<string, unknown>).DocTree = {
+  // Builder
   buildTree: DocTreeBuilder.buildTree,
+  // Serializer
   treeToYaml: DocTreeSerializer.treeToYaml,
   toMinimalYaml: DocTreeSerializer.toMinimalYaml,
   toStandardYaml: DocTreeSerializer.toStandardYaml,
   toFullYaml: DocTreeSerializer.toFullYaml,
+  // Ref-based editing
   replaceByRef: DocTreeEditing.replaceByRef,
   insertAfterRef: DocTreeEditing.insertAfterRef,
   insertBeforeRef: DocTreeEditing.insertBeforeRef,
   deleteByRef: DocTreeEditing.deleteByRef,
   formatByRef: DocTreeEditing.formatByRef,
   getTextByRef: DocTreeEditing.getTextByRef,
+  // Scope-aware editing
+  replaceByScope: DocTreeEditing.replaceByScope,
+  deleteByScope: DocTreeEditing.deleteByScope,
+  formatByScope: DocTreeEditing.formatByScope,
+  searchReplaceByScope: DocTreeEditing.searchReplaceByScope,
+  // Scope functions
+  parseScope: DocTreeScope.parseScope,
+  parseNoteScope: DocTreeScope.parseNoteScope,
+  isNoteScope: DocTreeScope.isNoteScope,
+  resolveScope: DocTreeScope.resolveScope,
+  filterByScope: DocTreeScope.filterByScope,
+  findFirstByScope: DocTreeScope.findFirstByScope,
+  countByScope: DocTreeScope.countByScope,
+  getRefsByScope: DocTreeScope.getRefsByScope,
+  isInSection: DocTreeScope.isInSection,
+  findSectionHeading: DocTreeScope.findSectionHeading,
+  // Changes
   collectTrackedChanges: DocTreeChanges.collectTrackedChanges,
   collectComments: DocTreeChanges.collectComments,
 };
