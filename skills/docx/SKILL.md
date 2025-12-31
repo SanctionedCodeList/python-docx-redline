@@ -50,6 +50,9 @@ See [references/design-principles.md](references/design-principles.md) for guide
 - **Wall of text**: No headings, no structure, no scanability
 - **Hedge-everything language**: "We might consider potentially..." — take a position
 - **Inconsistent formatting**: Mixed fonts, random spacing signals carelessness
+- **AI writing tells**: Words like "delve," "tapestry," "multifaceted"; patterns like "It's not X, it's Y"
+
+See [references/ai-antipatterns.md](references/ai-antipatterns.md) for comprehensive AI writing tells to avoid.
 
 ---
 
@@ -232,6 +235,7 @@ Guidance on creating effective, professional documents:
 - **[references/executive-summaries.md](references/executive-summaries.md)** — Crafting standalone summaries
 - **[references/industry-styles.md](references/industry-styles.md)** — Consulting, banking, legal, VC conventions
 - **[references/design-principles.md](references/design-principles.md)** — Typography, layout, visual hierarchy
+- **[references/ai-antipatterns.md](references/ai-antipatterns.md)** — AI writing tells to avoid and edit out
 
 ## Technical Guides
 

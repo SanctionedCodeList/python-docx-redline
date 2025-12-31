@@ -1,0 +1,13 @@
+{
+  "name": "python-docx-redline-marketplace",
+  "owner": {
+    "name": "Parker Hancock"
+  },
+  "plugins": [
+    {
+      "name": "python-docx-redline",
+      "source": "./",
+      "description": "Word document editing with tracked changes. Use python-docx for creation, python-docx-redline for redlining."
+    }
+  ]
+}
