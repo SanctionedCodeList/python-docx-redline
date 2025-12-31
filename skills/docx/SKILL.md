@@ -1,6 +1,6 @@
 ---
 name: docx
-description: "Document creation, editing, and analysis with tracked changes. Use for .docx files: creating documents, editing with or without tracked changes, adding comments, text extraction, template population, or CriticMarkup round-trip workflows (export/import tracked changes as markdown). python-docx-redline is the recommended tool for ALL editing tasks - it handles run fragmentation that breaks python-docx find/replace, with optional tracked changes via track=True."
+description: "Document creation, editing, and analysis with tracked changes. Use for .docx files: creating documents, editing with or without tracked changes, adding comments, text extraction, template population, Table of Contents (insert/update/remove TOC), or CriticMarkup round-trip workflows (export/import tracked changes as markdown). python-docx-redline is the recommended tool for ALL editing tasks - it handles run fragmentation that breaks python-docx find/replace, with optional tracked changes via track=True."
 ---
 
 # DOCX Skill
@@ -79,6 +79,7 @@ brew install pandoc                    # Text extraction (macOS)
 | **Add comments** | python-docx-redline | [comments.md](./comments.md) |
 | **Footnotes/endnotes** | python-docx-redline | [footnotes.md](./footnotes.md) |
 | **Insert or edit hyperlinks** | python-docx-redline | [hyperlinks.md](./hyperlinks.md) |
+| **Table of Contents** | python-docx-redline | [toc.md](./toc.md) |
 | **Create or manage styles** | python-docx-redline StyleManager | [styles.md](./styles.md) |
 | **CriticMarkup workflow** | python-docx-redline | [criticmarkup.md](./criticmarkup.md) |
 | **Use both libraries together** | from_python_docx / to_python_docx | [integration.md](./integration.md) |
@@ -183,6 +184,23 @@ matches = doc.find_all("reference", scope="footnotes")
 matches = doc.find_all("citation", include_footnotes=True)
 ```
 
+### Table of Contents
+```python
+# Insert TOC at start of document
+doc.insert_toc(levels=(1, 3), title="Contents")
+
+# Inspect existing TOC
+toc = doc.get_toc()
+if toc:
+    print(f"Levels: {toc.levels}, Dirty: {toc.is_dirty}")
+
+# Update TOC settings in place
+doc.update_toc(levels=(1, 5), hyperlinks=False)
+
+# Remove TOC
+doc.remove_toc()
+```
+
 ## Common Patterns
 
 ### Handle Ambiguous Text
@@ -245,6 +263,7 @@ Detailed workflows for document manipulation:
 - **[comments.md](./comments.md)** — Adding comments, occurrence parameter, replies, resolution
 - **[footnotes.md](./footnotes.md)** — Footnotes/endnotes: CRUD, tracked changes, rich content, search
 - **[hyperlinks.md](./hyperlinks.md)** — Hyperlink operations: insert, edit, remove in body, headers, footers, footnotes
+- **[toc.md](./toc.md)** — Table of Contents: insert, inspect, update, remove TOC
 - **[styles.md](./styles.md)** — Style management: reading, creating, ensuring styles exist, formatting options
 - **[criticmarkup.md](./criticmarkup.md)** — Export/import with CriticMarkup, round-trip workflows
 - **[integration.md](./integration.md)** — python-docx integration: from_python_docx, to_python_docx, workflows
