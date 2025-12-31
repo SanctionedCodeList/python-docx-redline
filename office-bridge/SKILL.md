@@ -55,7 +55,7 @@ Before using this skill, start the bridge server:
 ./office-bridge/server.sh &
 ```
 
-**Wait for the startup message showing the connection token.** The user must enter this token in the Word add-in taskpane.
+The add-in auto-connects when loaded (no token needed - localhost only auth).
 
 ## Writing Scripts
 
@@ -195,7 +195,7 @@ if (docs.length === 0) {
   console.log("No documents connected!");
   console.log("1. Make sure Word is open with a document");
   console.log("2. Open the Office Bridge add-in taskpane");
-  console.log("3. Enter the connection token from the server");
+  console.log("3. The add-in should auto-connect to the server");
 }
 
 await bridge.close();
@@ -204,7 +204,7 @@ EOF
 
 ## Troubleshooting
 
-- **"No documents connected"**: Open Word, click the Office Bridge add-in, enter the token from server.sh output
+- **"No documents connected"**: Open Word and click the Office Bridge add-in. It auto-connects when the server is running.
 - **"Execution failed"**: Check the Office.js code syntax. Use try/catch in your code for detailed errors.
 - **Server not running**: Run `./office-bridge/server.sh &` first
-- **Token mismatch**: Restart server.sh to get a new token, enter it in the add-in
+- **Add-in not connecting**: Make sure both the bridge server (port 3847) and dev server (port 3000) are running

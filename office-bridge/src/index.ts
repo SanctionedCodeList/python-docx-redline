@@ -14,14 +14,12 @@ export interface ServerOptions {
 
 export interface BridgeServer {
   port: number;
-  token: string;
   registry: DocumentRegistry;
   close: () => Promise<void>;
 }
 
 export async function serve(options: ServerOptions = {}): Promise<BridgeServer> {
   const port = options.port ?? 3847;
-  const token = uuidv4().slice(0, 12);
   const registry = new DocumentRegistry();
 
   const app = express();
@@ -31,7 +29,6 @@ export async function serve(options: ServerOptions = {}): Promise<BridgeServer> 
   app.get('/', (_req, res) => {
     const info: ServerInfo = {
       port,
-      token,
       documents: registry.listConnected().length,
     };
     res.json(info);
@@ -79,13 +76,8 @@ export async function serve(options: ServerOptions = {}): Promise<BridgeServer> 
 
         switch (message.type) {
           case 'register': {
-            // Verify token (token is at root level, not in payload)
-            const registerMsg = message as { type: 'register'; token: string; document: { filename: string; url?: string } };
-            if (registerMsg.token !== token) {
-              ws.send(JSON.stringify({ type: 'error', payload: { message: 'Invalid token' } }));
-              ws.close();
-              return;
-            }
+            // No token validation - localhost only
+            const registerMsg = message as { type: 'register'; document: { filename: string; url?: string } };
 
             const id = uuidv4();
             registry.register(id, ws, registerMsg.document.filename, registerMsg.document.url);
@@ -164,13 +156,12 @@ export async function serve(options: ServerOptions = {}): Promise<BridgeServer> 
   console.log('  Office Bridge Server Started');
   console.log('=================================');
   console.log(`  Port: ${port}`);
-  console.log(`  Token: ${token}`);
+  console.log('  Auth: localhost only (no token)');
   console.log('=================================');
   console.log('');
 
   return {
     port,
-    token,
     registry,
     close: async () => {
       return new Promise((resolve, reject) => {

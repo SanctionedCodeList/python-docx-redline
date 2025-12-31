@@ -38,17 +38,22 @@ Office.onReady((info) => {
     documentIdDisplay = document.getElementById("document-id") as HTMLElement;
     lastActivityDisplay = document.getElementById("last-activity") as HTMLElement;
 
+    // Hide token input (no longer needed - localhost only auth)
+    if (tokenInput) {
+      tokenInput.style.display = "none";
+    }
+
     // Set up event handlers
     connectBtn.onclick = handleConnect;
-    tokenInput.onkeypress = (e) => {
-      if (e.key === "Enter") handleConnect();
-    };
 
     // Update initial UI
     updateUI();
 
     // Override console methods to forward to bridge
     setupConsoleForwarding();
+
+    // Auto-connect on load (no token needed)
+    connect();
   }
 });
 
@@ -150,12 +155,6 @@ function handleConnect() {
 }
 
 function connect() {
-  const token = tokenInput.value.trim();
-  if (!token) {
-    statusText.textContent = "Please enter a token";
-    return;
-  }
-
   connectionState = "connecting";
   updateUI();
 
@@ -168,12 +167,11 @@ function connect() {
       updateUI();
       updateLastActivity("Connected");
 
-      // Send registration message
+      // Send registration message (no token needed - localhost only)
       const filename = getDocumentFilename();
       ws!.send(
         JSON.stringify({
           type: "register",
-          token: token,
           document: {
             filename: filename,
             url: Office.context.document.url || null,

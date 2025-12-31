@@ -3,7 +3,6 @@
 export interface RegisterMessage {
   type: 'register';
   payload: {
-    token: string;
     filename: string;
     path: string;
   };
@@ -75,6 +74,5 @@ export interface DocumentInfo {
 // Server info response
 export interface ServerInfo {
   port: number;
-  token: string;
   documents: number;
 }
