@@ -27,6 +27,7 @@ import {
   applyCommentsToNode,
   type ParagraphChanges,
 } from './changes';
+import { resolveScope } from './scope';
 
 // =============================================================================
 // Style to Role Mapping (Section 3.2 of spec)
@@ -835,7 +836,7 @@ export async function buildTree(
 
   // Apply changes and comments to nodes
   const changeViewMode = opts.changeViewMode ?? 'markup';
-  const processedContent = content.map((node) => {
+  let processedContent = content.map((node) => {
     let processed = node;
 
     // Apply tracked changes
@@ -850,6 +851,38 @@ export async function buildTree(
 
     return processed;
   });
+
+  // Apply scope filtering if specified
+  if (opts.scopeFilter) {
+    // Build temporary tree to run scope resolution
+    const tempTree: AccessibilityTree = {
+      document: {
+        verbosity: opts.verbosity ?? 'standard',
+        stats: toDocumentStats(stats),
+      },
+      content: processedContent,
+    };
+    const scopeResult = resolveScope(tempTree, opts.scopeFilter);
+    processedContent = scopeResult.nodes;
+
+    // Update stats to reflect scoped content
+    stats.paragraphs = processedContent.filter(
+      (n) => n.role === Role.Paragraph || n.role === Role.Heading
+    ).length;
+    stats.tables = processedContent.filter((n) => n.role === Role.Table).length;
+  }
+
+  // Apply legacy scopeRefs filtering if specified
+  if (opts.scopeRefs && opts.scopeRefs.length > 0) {
+    const scopeSet = new Set(opts.scopeRefs);
+    processedContent = processedContent.filter((n) => scopeSet.has(n.ref));
+
+    // Update stats
+    stats.paragraphs = processedContent.filter(
+      (n) => n.role === Role.Paragraph || n.role === Role.Heading
+    ).length;
+    stats.tables = processedContent.filter((n) => n.role === Role.Table).length;
+  }
 
   // Build document metadata
   const metadata: DocumentMetadata = {

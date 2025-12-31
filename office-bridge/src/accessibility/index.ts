@@ -10,3 +10,4 @@ export * from './builder';
 export * from './changes';
 export * from './serializer';
 export * from './editing';
+export * from './scope';

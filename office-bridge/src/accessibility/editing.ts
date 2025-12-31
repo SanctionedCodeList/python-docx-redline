@@ -12,7 +12,10 @@ import type {
   EditResult,
   InsertPosition,
   NodeStyle,
+  AccessibilityTree,
+  ScopeSpec,
 } from './types';
+import { resolveScope } from './scope';
 
 // =============================================================================
 // Office.js Type Declarations
@@ -880,11 +883,13 @@ async function getFootnoteText(
     const fnPattern = new RegExp(
       `<w:footnote[^>]*w:id="${footnoteId}"[^>]*>([\\s\\S]*?)<\\/w:footnote>`
     );
-    const fnMatch = footnotesMatch[1].match(fnPattern);
-    if (!fnMatch) return undefined;
+    const fnContent = footnotesMatch[1];
+    if (!fnContent) return undefined;
+    const fnMatch = fnContent.match(fnPattern);
+    if (!fnMatch?.[1]) return undefined;
 
     // Extract text from the footnote
-    const textParts = fnMatch[1].match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
+    const textParts = fnMatch[1].match(/<w:t[^>]*>([^<]*)<\/w:t>/g) ?? [];
     const text = textParts
       .map((t) => t.replace(/<[^>]+>/g, ''))
       .join('')
@@ -894,4 +899,192 @@ async function getFootnoteText(
   } catch {
     return undefined;
   }
+}
+
+// =============================================================================
+// Scope-Aware Editing Methods
+// =============================================================================
+
+/**
+ * Replace text in all nodes matching a scope.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param tree - Accessibility tree to search in
+ * @param scope - Scope specification to match nodes
+ * @param newText - New text to replace with
+ * @param options - Editing options (track changes, author, etc.)
+ * @returns Array of EditResults for each matched node
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const tree = await buildTree(context);
+ *   const results = await replaceByScope(
+ *     context,
+ *     tree,
+ *     "section:Methods",
+ *     "Updated methods text",
+ *     { track: true }
+ *   );
+ * });
+ * ```
+ */
+export async function replaceByScope(
+  context: WordRequestContext,
+  tree: AccessibilityTree,
+  scope: ScopeSpec,
+  newText: string,
+  options?: EditOptions
+): Promise<EditResult[]> {
+  const scopeResult = resolveScope(tree, scope);
+  const results: EditResult[] = [];
+
+  for (const node of scopeResult.nodes) {
+    const result = await replaceByRef(context, node.ref, newText, options);
+    results.push(result);
+  }
+
+  return results;
+}
+
+/**
+ * Delete all nodes matching a scope.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param tree - Accessibility tree to search in
+ * @param scope - Scope specification to match nodes
+ * @param options - Editing options (track changes, author, etc.)
+ * @returns Array of EditResults for each deleted node
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const tree = await buildTree(context);
+ *   // Delete all paragraphs containing "DRAFT"
+ *   const results = await deleteByScope(context, tree, "DRAFT", { track: true });
+ * });
+ * ```
+ */
+export async function deleteByScope(
+  context: WordRequestContext,
+  tree: AccessibilityTree,
+  scope: ScopeSpec,
+  options?: EditOptions
+): Promise<EditResult[]> {
+  const scopeResult = resolveScope(tree, scope);
+  const results: EditResult[] = [];
+
+  // Delete in reverse order to preserve indices
+  const sortedNodes = [...scopeResult.nodes].sort((a, b) => {
+    // Extract index from ref (e.g., "p:5" -> 5)
+    const aMatch = a.ref.match(/:(\d+)/);
+    const bMatch = b.ref.match(/:(\d+)/);
+    const aIndex = aMatch?.[1] ? parseInt(aMatch[1], 10) : 0;
+    const bIndex = bMatch?.[1] ? parseInt(bMatch[1], 10) : 0;
+    return bIndex - aIndex; // Reverse order
+  });
+
+  for (const node of sortedNodes) {
+    const result = await deleteByRef(context, node.ref, options);
+    results.push(result);
+  }
+
+  return results;
+}
+
+/**
+ * Apply formatting to all nodes matching a scope.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param tree - Accessibility tree to search in
+ * @param scope - Scope specification to match nodes
+ * @param formatting - Formatting options to apply
+ * @returns Array of EditResults for each formatted node
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const tree = await buildTree(context);
+ *   // Make all headings in "Results" section bold and blue
+ *   const results = await formatByScope(
+ *     context,
+ *     tree,
+ *     { section: "Results", role: "heading" },
+ *     { bold: true, color: "#0000FF" }
+ *   );
+ * });
+ * ```
+ */
+export async function formatByScope(
+  context: WordRequestContext,
+  tree: AccessibilityTree,
+  scope: ScopeSpec,
+  formatting: FormatOptions
+): Promise<EditResult[]> {
+  const scopeResult = resolveScope(tree, scope);
+  const results: EditResult[] = [];
+
+  for (const node of scopeResult.nodes) {
+    const result = await formatByRef(context, node.ref, formatting);
+    results.push(result);
+  }
+
+  return results;
+}
+
+/**
+ * Search and replace text within all nodes matching a scope.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param tree - Accessibility tree to search in
+ * @param scope - Scope specification to match nodes
+ * @param searchText - Text to find within matching nodes
+ * @param replaceText - Text to replace with
+ * @param options - Editing options (track changes, etc.)
+ * @returns Array of EditResults for each modified node
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const tree = await buildTree(context);
+ *   // Replace "Plaintiff" with "Defendant" only in section "Parties"
+ *   const results = await searchReplaceByScope(
+ *     context,
+ *     tree,
+ *     "section:Parties",
+ *     "Plaintiff",
+ *     "Defendant",
+ *     { track: true }
+ *   );
+ * });
+ * ```
+ */
+export async function searchReplaceByScope(
+  context: WordRequestContext,
+  tree: AccessibilityTree,
+  scope: ScopeSpec,
+  searchText: string,
+  replaceText: string,
+  options?: EditOptions
+): Promise<EditResult[]> {
+  const scopeResult = resolveScope(tree, scope);
+  const results: EditResult[] = [];
+
+  for (const node of scopeResult.nodes) {
+    // Only process if the node contains the search text
+    if (node.text && node.text.includes(searchText)) {
+      const newText = node.text.replace(new RegExp(escapeRegExp(searchText), 'g'), replaceText);
+      const result = await replaceByRef(context, node.ref, newText, options);
+      results.push(result);
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Escape special regex characters in a string.
+ */
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

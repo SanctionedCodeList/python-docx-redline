@@ -189,8 +189,10 @@ export interface TreeOptions {
   maxTokens?: number;
   /** Section detection configuration */
   sectionDetection?: SectionDetectionConfig;
-  /** Scope to specific refs only */
+  /** Scope to specific refs only (legacy, use scopeFilter instead) */
   scopeRefs?: Ref[];
+  /** Filter tree by scope specification */
+  scopeFilter?: ScopeSpec;
 }
 
 // =============================================================================
@@ -609,4 +611,107 @@ export interface EditResult {
   newRef?: Ref;
   /** Error message if failed */
   error?: string;
+}
+
+// =============================================================================
+// Scope System (Section 7 of spec)
+// =============================================================================
+
+/**
+ * Dictionary-based filter with AND logic.
+ * All specified criteria must match for a node to be included.
+ *
+ * @example
+ * // Find paragraphs in "Methods" section containing "results"
+ * { section: "Methods", contains: "results" }
+ *
+ * // Find headings with tracked changes
+ * { role: SemanticRole.Heading, hasChanges: true }
+ */
+export interface ScopeFilter {
+  /** Text that must be contained in the node */
+  contains?: string;
+  /** Text that must NOT be in the node */
+  notContains?: string;
+  /** Section heading name (node must be under this heading) */
+  section?: string;
+  /** Semantic role(s) to match */
+  role?: SemanticRole | SemanticRole[];
+  /** Style name(s) to match */
+  style?: string | string[];
+  /** Only nodes with tracked changes */
+  hasChanges?: boolean;
+  /** Only nodes with comments */
+  hasComments?: boolean;
+  /** Heading level(s) to match (for heading role) */
+  level?: number | number[];
+  /** Regex pattern to match against text */
+  pattern?: string;
+  /** Specific refs to include */
+  refs?: Ref[];
+  /** Minimum text length */
+  minLength?: number;
+  /** Maximum text length */
+  maxLength?: number;
+}
+
+/**
+ * Custom predicate function for flexible node filtering.
+ *
+ * @example
+ * // Custom filter for paragraphs starting with "WHEREAS"
+ * (node) => node.text?.startsWith("WHEREAS")
+ */
+export type ScopePredicate = (node: AccessibilityNode) => boolean;
+
+/**
+ * Union type for all scope specification formats.
+ *
+ * Supports:
+ * - String shortcuts: "keyword", "section:Name", "role:heading"
+ * - Dictionary filters: { contains: "text", section: "Intro" }
+ * - Predicate functions: (node) => boolean
+ *
+ * @example
+ * // String shortcut
+ * "section:Introduction"
+ *
+ * // Dictionary filter
+ * { contains: "payment", notContains: "Exhibit" }
+ *
+ * // Predicate function
+ * (node) => node.text?.length > 100
+ */
+export type ScopeSpec = string | ScopeFilter | ScopePredicate;
+
+/**
+ * Options for scope resolution.
+ */
+export interface ScopeOptions {
+  /** Whether to include heading nodes when scoping by section (default: false) */
+  includeHeadings?: boolean;
+  /** Case-insensitive text matching (default: true) */
+  caseInsensitive?: boolean;
+}
+
+/**
+ * Result of scope resolution with metadata.
+ */
+export interface ScopeResult {
+  /** Matching nodes */
+  nodes: AccessibilityNode[];
+  /** Total nodes evaluated */
+  totalEvaluated: number;
+  /** Normalized scope filter used */
+  scope: ScopeFilter;
+}
+
+/**
+ * Result of parsing a note-related scope (footnotes/endnotes).
+ */
+export interface NoteScope {
+  /** Type of note scope */
+  scopeType: 'footnotes' | 'endnotes' | 'notes' | 'footnote' | 'endnote';
+  /** Specific note ID (for 'footnote:N' or 'endnote:N' scopes) */
+  noteId?: string;
 }
