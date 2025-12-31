@@ -908,6 +908,10 @@ async function getFootnoteText(
 /**
  * Replace text in all nodes matching a scope.
  *
+ * PERFORMANCE: Uses batched paragraph loading and operations.
+ * Reduces O(n) sync calls to O(1) by loading all paragraphs once
+ * and queuing all operations before a single sync.
+ *
  * @param context - Word.RequestContext from Office.js
  * @param tree - Accessibility tree to search in
  * @param scope - Scope specification to match nodes
@@ -939,9 +943,54 @@ export async function replaceByScope(
   const scopeResult = resolveScope(tree, scope);
   const results: EditResult[] = [];
 
+  if (scopeResult.nodes.length === 0) {
+    return results;
+  }
+
+  // BATCHED: Load all paragraphs once
+  const paragraphs = context.document.body.paragraphs.load('items');
+  await context.sync();
+
+  // Enable tracked changes if requested
+  if (options?.track && context.trackedChanges) {
+    context.trackedChanges.enabled = true;
+  }
+
+  // BATCHED: Queue all range loads
+  const ranges: Array<{ ref: Ref; range: WordRange }> = [];
   for (const node of scopeResult.nodes) {
-    const result = await replaceByRef(context, node.ref, newText, options);
-    results.push(result);
+    try {
+      const parsed = parseRef(node.ref);
+      if (parsed.type === 'p' && parsed.index < paragraphs.items.length) {
+        const para = paragraphs.items[parsed.index];
+        if (para) {
+          const range = para.getRange('Content');
+          ranges.push({ ref: node.ref, range });
+        }
+      }
+    } catch {
+      results.push({ success: false, error: `Invalid ref: ${node.ref}` });
+    }
+  }
+
+  // Single sync to load all ranges
+  if (ranges.length > 0) {
+    await context.sync();
+  }
+
+  // BATCHED: Queue all replacements
+  for (const { ref, range } of ranges) {
+    try {
+      range.insertText(newText, 'Replace');
+      results.push({ success: true, newRef: ref });
+    } catch (err) {
+      results.push({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  // Single sync for all operations
+  if (ranges.length > 0) {
+    await context.sync();
   }
 
   return results;
@@ -949,6 +998,10 @@ export async function replaceByScope(
 
 /**
  * Delete all nodes matching a scope.
+ *
+ * PERFORMANCE: Uses batched paragraph loading and deletion.
+ * Reduces O(n) sync calls to O(1) by loading all paragraphs once
+ * and queuing all deletions before a single sync.
  *
  * @param context - Word.RequestContext from Office.js
  * @param tree - Accessibility tree to search in
@@ -974,6 +1027,10 @@ export async function deleteByScope(
   const scopeResult = resolveScope(tree, scope);
   const results: EditResult[] = [];
 
+  if (scopeResult.nodes.length === 0) {
+    return results;
+  }
+
   // Delete in reverse order to preserve indices
   const sortedNodes = [...scopeResult.nodes].sort((a, b) => {
     // Extract index from ref (e.g., "p:5" -> 5)
@@ -984,16 +1041,43 @@ export async function deleteByScope(
     return bIndex - aIndex; // Reverse order
   });
 
-  for (const node of sortedNodes) {
-    const result = await deleteByRef(context, node.ref, options);
-    results.push(result);
+  // BATCHED: Load all paragraphs once
+  const paragraphs = context.document.body.paragraphs.load('items');
+  await context.sync();
+
+  // Enable tracked changes if requested
+  if (options?.track && context.trackedChanges) {
+    context.trackedChanges.enabled = true;
   }
+
+  // BATCHED: Queue all deletions (no sync needed between)
+  for (const node of sortedNodes) {
+    try {
+      const parsed = parseRef(node.ref);
+      if (parsed.type === 'p' && parsed.index < paragraphs.items.length) {
+        const para = paragraphs.items[parsed.index];
+        if (para) {
+          para.delete();
+          results.push({ success: true });
+        }
+      }
+    } catch (err) {
+      results.push({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  // Single sync for all deletions
+  await context.sync();
 
   return results;
 }
 
 /**
  * Apply formatting to all nodes matching a scope.
+ *
+ * PERFORMANCE: Uses batched paragraph loading and formatting.
+ * Reduces O(n) sync calls to O(1) by loading all paragraphs once
+ * and queuing all formatting operations before a single sync.
  *
  * @param context - Word.RequestContext from Office.js
  * @param tree - Accessibility tree to search in
@@ -1024,16 +1108,59 @@ export async function formatByScope(
   const scopeResult = resolveScope(tree, scope);
   const results: EditResult[] = [];
 
-  for (const node of scopeResult.nodes) {
-    const result = await formatByRef(context, node.ref, formatting);
-    results.push(result);
+  if (scopeResult.nodes.length === 0) {
+    return results;
   }
+
+  // BATCHED: Load all paragraphs once with font properties
+  const paragraphs = context.document.body.paragraphs.load('items');
+  await context.sync();
+
+  // Build font properties object once
+  const fontProps: Partial<WordFont> = {};
+  if (formatting.bold !== undefined) fontProps.bold = formatting.bold;
+  if (formatting.italic !== undefined) fontProps.italic = formatting.italic;
+  if (formatting.underline !== undefined) fontProps.underline = formatting.underline ? 'Single' : 'None';
+  if (formatting.strikethrough !== undefined) fontProps.strikeThrough = formatting.strikethrough;
+  if (formatting.font !== undefined) fontProps.name = formatting.font;
+  if (formatting.size !== undefined) fontProps.size = formatting.size;
+  if (formatting.color !== undefined) fontProps.color = formatting.color;
+  if (formatting.highlight !== undefined) fontProps.highlightColor = formatting.highlight;
+  const hasFontProps = Object.keys(fontProps).length > 0;
+
+  // BATCHED: Queue all formatting operations (no sync between)
+  for (const node of scopeResult.nodes) {
+    try {
+      const parsed = parseRef(node.ref);
+      if (parsed.type === 'p' && parsed.index < paragraphs.items.length) {
+        const para = paragraphs.items[parsed.index];
+        if (para) {
+          if (hasFontProps) {
+            para.font.set(fontProps);
+          }
+          if (formatting.style !== undefined) {
+            para.style = formatting.style;
+          }
+          results.push({ success: true, newRef: node.ref });
+        }
+      }
+    } catch (err) {
+      results.push({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  // Single sync for all formatting
+  await context.sync();
 
   return results;
 }
 
 /**
  * Search and replace text within all nodes matching a scope.
+ *
+ * PERFORMANCE: Uses batched paragraph loading and replacement.
+ * Reduces O(n) sync calls to O(1) by loading all paragraphs once
+ * and queuing all replacements before a single sync.
  *
  * @param context - Word.RequestContext from Office.js
  * @param tree - Accessibility tree to search in
@@ -1070,13 +1197,62 @@ export async function searchReplaceByScope(
   const scopeResult = resolveScope(tree, scope);
   const results: EditResult[] = [];
 
-  for (const node of scopeResult.nodes) {
-    // Only process if the node contains the search text
-    if (node.text && node.text.includes(searchText)) {
-      const newText = node.text.replace(new RegExp(escapeRegExp(searchText), 'g'), replaceText);
-      const result = await replaceByRef(context, node.ref, newText, options);
-      results.push(result);
+  // Filter to only nodes containing the search text
+  const nodesToReplace = scopeResult.nodes.filter(
+    (node) => node.text && node.text.includes(searchText)
+  );
+
+  if (nodesToReplace.length === 0) {
+    return results;
+  }
+
+  // BATCHED: Load all paragraphs once
+  const paragraphs = context.document.body.paragraphs.load('items');
+  await context.sync();
+
+  // Enable tracked changes if requested
+  if (options?.track && context.trackedChanges) {
+    context.trackedChanges.enabled = true;
+  }
+
+  // BATCHED: Queue all range loads
+  const ranges: Array<{ ref: Ref; range: WordRange; newText: string }> = [];
+  const searchRegex = new RegExp(escapeRegExp(searchText), 'g');
+
+  for (const node of nodesToReplace) {
+    try {
+      const parsed = parseRef(node.ref);
+      if (parsed.type === 'p' && parsed.index < paragraphs.items.length) {
+        const para = paragraphs.items[parsed.index];
+        if (para && node.text) {
+          const range = para.getRange('Content');
+          const newText = node.text.replace(searchRegex, replaceText);
+          ranges.push({ ref: node.ref, range, newText });
+        }
+      }
+    } catch {
+      results.push({ success: false, error: `Invalid ref: ${node.ref}` });
     }
+  }
+
+  // Single sync to load all ranges
+  if (ranges.length > 0) {
+    await context.sync();
+  }
+
+  // BATCHED: Queue all replacements
+  for (const { ref, range, newText } of ranges) {
+    try {
+      range.insertText(newText, 'Replace');
+      results.push({ success: true, newRef: ref });
+    } catch (err) {
+      results.push({ success: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  // Single sync for all operations
+  if (ranges.length > 0) {
+    await context.sync();
   }
 
   return results;
