@@ -710,6 +710,257 @@ class TestEditFootnoteEndnote:
             assert endnotes[0].text == "Edited text"
 
 
+class TestEditFootnotePreservesStructure:
+    """Tests for edit_footnote and edit_endnote structure preservation.
+
+    These tests verify that the _replace_note_content method preserves:
+    - pStyle=FootnoteText/EndnoteText paragraph properties
+    - footnoteRef/endnoteRef element
+    - rStyle=FootnoteReference/EndnoteReference run properties
+    - Space run after the reference
+    """
+
+    def _get_footnote_xml(self, doc: Document, note_id: str) -> etree._Element:
+        """Helper to get raw footnote XML element from document."""
+        temp_dir = doc._temp_dir
+        if not temp_dir:
+            raise ValueError("Document has no temp dir")
+        footnotes_path = temp_dir / "word" / "footnotes.xml"
+        if not footnotes_path.exists():
+            raise ValueError("No footnotes.xml found")
+        tree = etree.parse(str(footnotes_path))
+        root = tree.getroot()
+        for fn in root.findall(f"{{{WORD_NAMESPACE}}}footnote"):
+            if fn.get(f"{{{WORD_NAMESPACE}}}id") == note_id:
+                return fn
+        raise ValueError(f"Footnote {note_id} not found")
+
+    def _get_endnote_xml(self, doc: Document, note_id: str) -> etree._Element:
+        """Helper to get raw endnote XML element from document."""
+        temp_dir = doc._temp_dir
+        if not temp_dir:
+            raise ValueError("Document has no temp dir")
+        endnotes_path = temp_dir / "word" / "endnotes.xml"
+        if not endnotes_path.exists():
+            raise ValueError("No endnotes.xml found")
+        tree = etree.parse(str(endnotes_path))
+        root = tree.getroot()
+        for en in root.findall(f"{{{WORD_NAMESPACE}}}endnote"):
+            if en.get(f"{{{WORD_NAMESPACE}}}id") == note_id:
+                return en
+        raise ValueError(f"Endnote {note_id} not found")
+
+    def test_edit_preserves_footnote_text_style(self):
+        """Test that editing footnote preserves pStyle=FootnoteText."""
+        doc = Document(create_test_docx())
+        doc.insert_footnote("Original text", at="test document")
+
+        # Verify original has FootnoteText style
+        fn_xml = self._get_footnote_xml(doc, "1")
+        para = fn_xml.find(f"{{{WORD_NAMESPACE}}}p")
+        ppr = para.find(f"{{{WORD_NAMESPACE}}}pPr")
+        pstyle = ppr.find(f"{{{WORD_NAMESPACE}}}pStyle")
+        assert pstyle.get(f"{{{WORD_NAMESPACE}}}val") == "FootnoteText"
+
+        # Edit the footnote
+        doc.edit_footnote(1, "Updated text")
+
+        # Verify pStyle is preserved
+        fn_xml = self._get_footnote_xml(doc, "1")
+        para = fn_xml.find(f"{{{WORD_NAMESPACE}}}p")
+        ppr = para.find(f"{{{WORD_NAMESPACE}}}pPr")
+        assert ppr is not None, "pPr should be preserved"
+        pstyle = ppr.find(f"{{{WORD_NAMESPACE}}}pStyle")
+        assert pstyle is not None, "pStyle should be preserved"
+        assert pstyle.get(f"{{{WORD_NAMESPACE}}}val") == "FootnoteText"
+
+    def test_edit_preserves_footnote_ref_element(self):
+        """Test that editing footnote preserves the w:footnoteRef element."""
+        doc = Document(create_test_docx())
+        doc.insert_footnote("Original text", at="test document")
+
+        doc.edit_footnote(1, "Updated text")
+
+        fn_xml = self._get_footnote_xml(doc, "1")
+        # Find footnoteRef in any run within the paragraph
+        footnote_ref = fn_xml.find(f".//{{{WORD_NAMESPACE}}}footnoteRef")
+        assert footnote_ref is not None, "footnoteRef element should be preserved"
+
+    def test_edit_preserves_footnote_reference_style(self):
+        """Test that editing footnote preserves rStyle=FootnoteReference."""
+        doc = Document(create_test_docx())
+        doc.insert_footnote("Original text", at="test document")
+
+        doc.edit_footnote(1, "Updated text")
+
+        fn_xml = self._get_footnote_xml(doc, "1")
+        # Find the run containing footnoteRef
+        for run in fn_xml.findall(f".//{{{WORD_NAMESPACE}}}r"):
+            if run.find(f"{{{WORD_NAMESPACE}}}footnoteRef") is not None:
+                rpr = run.find(f"{{{WORD_NAMESPACE}}}rPr")
+                assert rpr is not None, "Run properties should be preserved"
+                rstyle = rpr.find(f"{{{WORD_NAMESPACE}}}rStyle")
+                assert rstyle is not None, "rStyle should be preserved"
+                assert rstyle.get(f"{{{WORD_NAMESPACE}}}val") == "FootnoteReference", (
+                    "FootnoteReference style should be preserved"
+                )
+                break
+        else:
+            pytest.fail("No run with footnoteRef found")
+
+    def test_edit_preserves_space_after_ref(self):
+        """Test that editing footnote preserves the space run after footnoteRef."""
+        doc = Document(create_test_docx())
+        doc.insert_footnote("Original text", at="test document")
+
+        doc.edit_footnote(1, "Updated text")
+
+        fn_xml = self._get_footnote_xml(doc, "1")
+        para = fn_xml.find(f"{{{WORD_NAMESPACE}}}p")
+        runs = para.findall(f"{{{WORD_NAMESPACE}}}r")
+
+        # Find the run with footnoteRef
+        ref_run_index = None
+        for i, run in enumerate(runs):
+            if run.find(f"{{{WORD_NAMESPACE}}}footnoteRef") is not None:
+                ref_run_index = i
+                break
+
+        assert ref_run_index is not None, "Should have a run with footnoteRef"
+        assert len(runs) > ref_run_index + 1, "Should have a run after footnoteRef"
+
+        # The next run should be the space run
+        space_run = runs[ref_run_index + 1]
+        t_elem = space_run.find(f"{{{WORD_NAMESPACE}}}t")
+        assert t_elem is not None, "Space run should have a text element"
+        assert t_elem.text == " ", "Space run should contain a single space"
+
+    def test_edit_with_markdown_formatting(self):
+        """Test that edited footnote supports markdown formatting."""
+        doc = Document(create_test_docx())
+        doc.insert_footnote("Original text", at="test document")
+
+        doc.edit_footnote(1, "**Bold** and *italic* text")
+
+        fn = doc.get_footnote(1)
+        # The text property strips formatting, so just check it contains the words
+        assert "Bold" in fn.text
+        assert "italic" in fn.text
+
+        # Check the XML has formatting elements
+        fn_xml = self._get_footnote_xml(doc, "1")
+        bold_elem = fn_xml.find(f".//{{{WORD_NAMESPACE}}}b")
+        italic_elem = fn_xml.find(f".//{{{WORD_NAMESPACE}}}i")
+        assert bold_elem is not None, "Should have bold formatting"
+        assert italic_elem is not None, "Should have italic formatting"
+
+    def test_edit_with_empty_text(self):
+        """Test that editing footnote with empty text preserves structure."""
+        doc = Document(create_test_docx())
+        doc.insert_footnote("Original text", at="test document")
+
+        doc.edit_footnote(1, "")
+
+        fn_xml = self._get_footnote_xml(doc, "1")
+        # Should still have footnoteRef
+        footnote_ref = fn_xml.find(f".//{{{WORD_NAMESPACE}}}footnoteRef")
+        assert footnote_ref is not None, "footnoteRef should be preserved even with empty text"
+        # Should still have FootnoteText style
+        pstyle = fn_xml.find(f".//{{{WORD_NAMESPACE}}}pStyle")
+        assert pstyle is not None, "pStyle should be preserved even with empty text"
+
+    def test_edit_endnote_preserves_structure(self):
+        """Test that editing endnote preserves EndnoteText style and endnoteRef."""
+        doc = Document(create_test_docx())
+        doc.insert_endnote("Original text", at="test document")
+
+        doc.edit_endnote(1, "Updated text")
+
+        en_xml = self._get_endnote_xml(doc, "1")
+
+        # Check EndnoteText style
+        pstyle = en_xml.find(f".//{{{WORD_NAMESPACE}}}pStyle")
+        assert pstyle is not None, "pStyle should be preserved"
+        assert pstyle.get(f"{{{WORD_NAMESPACE}}}val") == "EndnoteText"
+
+        # Check endnoteRef element
+        endnote_ref = en_xml.find(f".//{{{WORD_NAMESPACE}}}endnoteRef")
+        assert endnote_ref is not None, "endnoteRef should be preserved"
+
+        # Check EndnoteReference style
+        for run in en_xml.findall(f".//{{{WORD_NAMESPACE}}}r"):
+            if run.find(f"{{{WORD_NAMESPACE}}}endnoteRef") is not None:
+                rpr = run.find(f"{{{WORD_NAMESPACE}}}rPr")
+                assert rpr is not None, "Run properties should be preserved"
+                rstyle = rpr.find(f"{{{WORD_NAMESPACE}}}rStyle")
+                assert rstyle is not None, "rStyle should be preserved"
+                assert rstyle.get(f"{{{WORD_NAMESPACE}}}val") == "EndnoteReference"
+                break
+
+    def test_edit_preserves_structure_after_save_reload(self):
+        """Test that footnote structure is preserved through save/reload."""
+        doc = Document(create_test_docx())
+        doc.insert_footnote("Original text", at="test document")
+        doc.edit_footnote(1, "**Edited** text")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = Path(tmpdir) / "edited_footnote.docx"
+            doc.save(output_path)
+
+            # Reload and check structure
+            reloaded = Document(output_path)
+            fn = reloaded.get_footnote(1)
+            assert "Edited" in fn.text
+
+            # Check the raw XML structure
+            fn_xml = self._get_footnote_xml(reloaded, "1")
+
+            # Verify structure elements
+            pstyle = fn_xml.find(f".//{{{WORD_NAMESPACE}}}pStyle")
+            assert pstyle is not None
+            assert pstyle.get(f"{{{WORD_NAMESPACE}}}val") == "FootnoteText"
+
+            footnote_ref = fn_xml.find(f".//{{{WORD_NAMESPACE}}}footnoteRef")
+            assert footnote_ref is not None
+
+            bold_elem = fn_xml.find(f".//{{{WORD_NAMESPACE}}}b")
+            assert bold_elem is not None
+
+    def test_edit_with_underline_and_strikethrough(self):
+        """Test that footnote edit supports underline and strikethrough markdown."""
+        doc = Document(create_test_docx())
+        doc.insert_footnote("Original text", at="test document")
+
+        doc.edit_footnote(1, "++underlined++ and ~~strikethrough~~ text")
+
+        fn_xml = self._get_footnote_xml(doc, "1")
+        underline_elem = fn_xml.find(f".//{{{WORD_NAMESPACE}}}u")
+        strike_elem = fn_xml.find(f".//{{{WORD_NAMESPACE}}}strike")
+        assert underline_elem is not None, "Should have underline formatting"
+        assert strike_elem is not None, "Should have strikethrough formatting"
+
+    def test_edit_multiple_times_preserves_structure(self):
+        """Test that editing a footnote multiple times still preserves structure."""
+        doc = Document(create_test_docx())
+        doc.insert_footnote("First text", at="test document")
+
+        # Edit multiple times
+        doc.edit_footnote(1, "Second text")
+        doc.edit_footnote(1, "Third text")
+        doc.edit_footnote(1, "Final text")
+
+        fn = doc.get_footnote(1)
+        assert fn.text == "Final text"
+
+        fn_xml = self._get_footnote_xml(doc, "1")
+        # Structure should still be intact
+        pstyle = fn_xml.find(f".//{{{WORD_NAMESPACE}}}pStyle")
+        assert pstyle is not None
+        assert pstyle.get(f"{{{WORD_NAMESPACE}}}val") == "FootnoteText"
+        footnote_ref = fn_xml.find(f".//{{{WORD_NAMESPACE}}}footnoteRef")
+        assert footnote_ref is not None
+
+
 class TestNoteNotFoundError:
     """Tests for NoteNotFoundError exception."""
 

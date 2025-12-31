@@ -128,11 +128,11 @@ class BaseSchemaValidator:
                 lxml.etree.parse(str(xml_file))
             except lxml.etree.XMLSyntaxError as e:
                 errors.append(
-                    f"  {xml_file.relative_to(self.unpacked_dir)}: " f"Line {e.lineno}: {e.msg}"
+                    f"  {xml_file.relative_to(self.unpacked_dir)}: Line {e.lineno}: {e.msg}"
                 )
             except Exception as e:
                 errors.append(
-                    f"  {xml_file.relative_to(self.unpacked_dir)}: " f"Unexpected error: {str(e)}"
+                    f"  {xml_file.relative_to(self.unpacked_dir)}: Unexpected error: {str(e)}"
                 )
 
         if errors:

@@ -361,9 +361,9 @@ class TestStandardStylesDict:
         """Test that all factories return Style objects."""
         for style_id, factory in STANDARD_STYLES.items():
             style = factory()
-            assert (
-                style.style_id == style_id
-            ), f"Factory for {style_id} returned style with id {style.style_id}"
+            assert style.style_id == style_id, (
+                f"Factory for {style_id} returned style with id {style.style_id}"
+            )
 
     def test_footnote_reference_mapping(self) -> None:
         """Test FootnoteReference maps to correct factory."""

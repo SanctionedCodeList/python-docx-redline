@@ -240,11 +240,11 @@ class Table:
         """
         rows = self.rows
         if row < 0 or row >= len(rows):
-            raise IndexError(f"Row index {row} out of range (0-{len(rows)-1})")
+            raise IndexError(f"Row index {row} out of range (0-{len(rows) - 1})")
 
         cells = rows[row].cells
         if col < 0 or col >= len(cells):
-            raise IndexError(f"Column index {col} out of range (0-{len(cells)-1})")
+            raise IndexError(f"Column index {col} out of range (0-{len(cells) - 1})")
 
         return cells[col]
 

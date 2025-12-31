@@ -110,9 +110,9 @@ def test_delete_all_comments_removes_comment_relationships() -> None:
             # Check no comment relationships exist
             for rel in rels_tree:
                 rel_type = rel.get("Type")
-                assert (
-                    "comment" not in rel_type.lower()
-                ), f"Comment relationship should be removed: {rel_type}"
+                assert "comment" not in rel_type.lower(), (
+                    f"Comment relationship should be removed: {rel_type}"
+                )
 
         output_path.unlink()
 
@@ -140,9 +140,9 @@ def test_delete_all_comments_removes_comment_content_types() -> None:
             for override in ct_tree:
                 if override.tag == f"{{{ct_ns}}}Override":
                     part_name = override.get("PartName")
-                    assert (
-                        "comment" not in part_name.lower()
-                    ), f"Comment content type should be removed: {part_name}"
+                    assert "comment" not in part_name.lower(), (
+                        f"Comment content type should be removed: {part_name}"
+                    )
 
         output_path.unlink()
 
@@ -195,9 +195,9 @@ def test_delete_all_comments_complete_cleanup() -> None:
             file_list = docx.namelist()
 
             # No comment files
-            assert not any(
-                "comment" in f.lower() for f in file_list
-            ), "No comment-related files should exist"
+            assert not any("comment" in f.lower() for f in file_list), (
+                "No comment-related files should exist"
+            )
 
             # No comment relationships
             rels_content = docx.read("word/_rels/document.xml.rels")

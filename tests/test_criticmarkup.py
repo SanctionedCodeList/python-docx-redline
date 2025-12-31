@@ -162,13 +162,7 @@ class TestParseMixed:
 
     def test_all_operation_types(self):
         """Parse all five operation types in one text."""
-        text = (
-            "{++inserted++} "
-            "{--deleted--} "
-            "{~~old~>new~~} "
-            "{>>comment<<} "
-            "{==highlighted==}"
-        )
+        text = "{++inserted++} {--deleted--} {~~old~>new~~} {>>comment<<} {==highlighted==}"
         ops = parse_criticmarkup(text)
         assert len(ops) == 5
 
