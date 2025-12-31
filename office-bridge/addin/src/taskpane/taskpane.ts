@@ -45,6 +45,14 @@ import * as DocTreeScope from "@accessibility/scope";
   acceptNextChange: DocTreeEditing.acceptNextChange,
   rejectNextChange: DocTreeEditing.rejectNextChange,
   getTrackedChangesInfo: DocTreeEditing.getTrackedChangesInfo,
+  // Comments
+  addComment: DocTreeEditing.addComment,
+  addCommentToSelection: DocTreeEditing.addCommentToSelection,
+  replyToComment: DocTreeEditing.replyToComment,
+  resolveComment: DocTreeEditing.resolveComment,
+  unresolveComment: DocTreeEditing.unresolveComment,
+  deleteComment: DocTreeEditing.deleteComment,
+  getComments: DocTreeEditing.getComments,
   // Scope functions
   parseScope: DocTreeScope.parseScope,
   parseNoteScope: DocTreeScope.parseNoteScope,

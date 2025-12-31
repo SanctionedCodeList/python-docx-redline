@@ -2157,3 +2157,404 @@ export async function getTrackedChangesInfo(
     };
   }
 }
+
+// =============================================================================
+// Comment Operations
+// =============================================================================
+
+/**
+ * Office.js Comment interface for editing operations.
+ */
+interface WordCommentForEdit {
+  id: string;
+  content: string;
+  authorName: string;
+  resolved: boolean;
+  replies: WordCommentReplyCollection;
+  getRange(): WordRange;
+  delete(): void;
+  reply(replyText: string): void;
+  load(properties: string): WordCommentForEdit;
+}
+
+interface WordCommentReplyCollection {
+  load(properties: string): WordCommentReplyCollection;
+  items: WordCommentReplyForEdit[];
+}
+
+interface WordCommentReplyForEdit {
+  id: string;
+  content: string;
+  authorName: string;
+  delete(): void;
+}
+
+interface WordCommentCollection {
+  load(properties: string): WordCommentCollection;
+  items: WordCommentForEdit[];
+  getFirst(): WordCommentForEdit;
+  getFirstOrNullObject(): WordCommentForEdit;
+}
+
+interface WordBodyWithComments {
+  getComments(): WordCommentCollection;
+  insertComment(commentText: string): WordCommentForEdit;
+}
+
+interface WordRangeWithComments extends WordRange {
+  insertComment(commentText: string): WordCommentForEdit;
+}
+
+/**
+ * Result of a comment operation.
+ */
+export interface CommentOperationResult {
+  /** Whether the operation succeeded */
+  success: boolean;
+  /** ID of the affected comment (if applicable) */
+  commentId?: string;
+  /** Error message if failed */
+  error?: string;
+}
+
+/**
+ * Add a comment to a paragraph by ref.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param ref - Reference to the paragraph to comment on
+ * @param commentText - The comment text
+ * @returns CommentOperationResult with the new comment ID
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const result = await addComment(context, "p:5", "Please review this section");
+ *   if (result.success) {
+ *     console.log(`Added comment: ${result.commentId}`);
+ *   }
+ * });
+ * ```
+ */
+export async function addComment(
+  context: WordRequestContext,
+  ref: Ref,
+  commentText: string
+): Promise<CommentOperationResult> {
+  try {
+    const parsed = parseRef(ref);
+
+    if (parsed.type !== 'p') {
+      return {
+        success: false,
+        error: `Comments can only be added to paragraphs, got: ${parsed.type}`,
+      };
+    }
+
+    const paragraph = await resolveParagraphRef(context, ref);
+    const range = paragraph.getRange('Content') as unknown as WordRangeWithComments;
+
+    if (!range.insertComment) {
+      return {
+        success: false,
+        error: 'Comment API not available in this version of Word',
+      };
+    }
+
+    const comment = range.insertComment(commentText);
+    comment.load('id');
+    await context.sync();
+
+    return {
+      success: true,
+      commentId: comment.id,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Add a comment to the current selection.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param commentText - The comment text
+ * @returns CommentOperationResult with the new comment ID
+ */
+export async function addCommentToSelection(
+  context: WordRequestContext,
+  commentText: string
+): Promise<CommentOperationResult> {
+  try {
+    const selection = context.document.getSelection() as unknown as WordRangeWithComments;
+
+    if (!selection.insertComment) {
+      return {
+        success: false,
+        error: 'Comment API not available in this version of Word',
+      };
+    }
+
+    const comment = selection.insertComment(commentText);
+    comment.load('id');
+    await context.sync();
+
+    return {
+      success: true,
+      commentId: comment.id,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Reply to an existing comment.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param commentId - ID of the comment to reply to
+ * @param replyText - The reply text
+ * @returns CommentOperationResult
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const result = await replyToComment(context, "comment-123", "I've addressed this");
+ * });
+ * ```
+ */
+export async function replyToComment(
+  context: WordRequestContext,
+  commentId: string,
+  replyText: string
+): Promise<CommentOperationResult> {
+  try {
+    const body = context.document.body as unknown as WordBodyWithComments;
+    const comments = body.getComments();
+    comments.load('items/id');
+    await context.sync();
+
+    // Find the target comment
+    const comment = comments.items.find((c) => c.id === commentId);
+    if (!comment) {
+      return {
+        success: false,
+        error: `Comment not found: ${commentId}`,
+      };
+    }
+
+    if (!comment.reply) {
+      return {
+        success: false,
+        error: 'Reply API not available in this version of Word',
+      };
+    }
+
+    comment.reply(replyText);
+    await context.sync();
+
+    return {
+      success: true,
+      commentId,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Resolve a comment (mark as resolved).
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param commentId - ID of the comment to resolve
+ * @returns CommentOperationResult
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const result = await resolveComment(context, "comment-123");
+ * });
+ * ```
+ */
+export async function resolveComment(
+  context: WordRequestContext,
+  commentId: string
+): Promise<CommentOperationResult> {
+  try {
+    const body = context.document.body as unknown as WordBodyWithComments;
+    const comments = body.getComments();
+    comments.load('items/id,items/resolved');
+    await context.sync();
+
+    // Find the target comment
+    const comment = comments.items.find((c) => c.id === commentId);
+    if (!comment) {
+      return {
+        success: false,
+        error: `Comment not found: ${commentId}`,
+      };
+    }
+
+    // Set resolved to true
+    (comment as unknown as { resolved: boolean }).resolved = true;
+    await context.sync();
+
+    return {
+      success: true,
+      commentId,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Unresolve a comment (mark as open).
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param commentId - ID of the comment to unresolve
+ * @returns CommentOperationResult
+ */
+export async function unresolveComment(
+  context: WordRequestContext,
+  commentId: string
+): Promise<CommentOperationResult> {
+  try {
+    const body = context.document.body as unknown as WordBodyWithComments;
+    const comments = body.getComments();
+    comments.load('items/id,items/resolved');
+    await context.sync();
+
+    // Find the target comment
+    const comment = comments.items.find((c) => c.id === commentId);
+    if (!comment) {
+      return {
+        success: false,
+        error: `Comment not found: ${commentId}`,
+      };
+    }
+
+    // Set resolved to false
+    (comment as unknown as { resolved: boolean }).resolved = false;
+    await context.sync();
+
+    return {
+      success: true,
+      commentId,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Delete a comment.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param commentId - ID of the comment to delete
+ * @returns CommentOperationResult
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const result = await deleteComment(context, "comment-123");
+ * });
+ * ```
+ */
+export async function deleteComment(
+  context: WordRequestContext,
+  commentId: string
+): Promise<CommentOperationResult> {
+  try {
+    const body = context.document.body as unknown as WordBodyWithComments;
+    const comments = body.getComments();
+    comments.load('items/id');
+    await context.sync();
+
+    // Find the target comment
+    const comment = comments.items.find((c) => c.id === commentId);
+    if (!comment) {
+      return {
+        success: false,
+        error: `Comment not found: ${commentId}`,
+      };
+    }
+
+    comment.delete();
+    await context.sync();
+
+    return {
+      success: true,
+      commentId,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Get all comments in the document.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @returns Array of comment information
+ */
+export async function getComments(
+  context: WordRequestContext
+): Promise<{
+  success: boolean;
+  comments: Array<{
+    id: string;
+    content: string;
+    author: string;
+    resolved: boolean;
+    replyCount: number;
+  }>;
+  error?: string;
+}> {
+  try {
+    const body = context.document.body as unknown as WordBodyWithComments;
+    const comments = body.getComments();
+    comments.load('items/id,items/content,items/authorName,items/resolved,items/replies');
+    await context.sync();
+
+    // Load reply counts
+    for (const c of comments.items) {
+      c.replies.load('items');
+    }
+    await context.sync();
+
+    return {
+      success: true,
+      comments: comments.items.map((c) => ({
+        id: c.id,
+        content: c.content,
+        author: c.authorName,
+        resolved: c.resolved,
+        replyCount: c.replies.items.length,
+      })),
+    };
+  } catch (err) {
+    return {
+      success: false,
+      comments: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
