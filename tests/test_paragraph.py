@@ -285,4 +285,147 @@ def test_paragraph_repr_no_style():
     assert "style=" not in repr_str
 
 
+# === Tests for Issue #6: Paragraph.text setter preserving pPr and markdown support ===
+
+
+def test_paragraph_text_setter_preserves_ppr():
+    """Test that setting text preserves paragraph properties (w:pPr)."""
+    # Create paragraph with style and other pPr properties
+    p = etree.Element(f"{{{WORD_NAMESPACE}}}p")
+    p_pr = etree.SubElement(p, f"{{{WORD_NAMESPACE}}}pPr")
+    p_style = etree.SubElement(p_pr, f"{{{WORD_NAMESPACE}}}pStyle")
+    p_style.set(f"{{{WORD_NAMESPACE}}}val", "Heading1")
+    # Add justification property
+    jc = etree.SubElement(p_pr, f"{{{WORD_NAMESPACE}}}jc")
+    jc.set(f"{{{WORD_NAMESPACE}}}val", "center")
+    # Add original text
+    r = etree.SubElement(p, f"{{{WORD_NAMESPACE}}}r")
+    t = etree.SubElement(r, f"{{{WORD_NAMESPACE}}}t")
+    t.text = "Original text"
+
+    para = Paragraph(p)
+
+    # Verify initial state
+    assert para.style == "Heading1"
+
+    # Set new text
+    para.text = "New text"
+
+    # Verify text was updated
+    assert para.text == "New text"
+
+    # Verify pPr was preserved
+    assert para.style == "Heading1"
+
+    # Verify justification was also preserved
+    p_pr = para.element.find(f"{{{WORD_NAMESPACE}}}pPr")
+    assert p_pr is not None
+    jc = p_pr.find(f"{{{WORD_NAMESPACE}}}jc")
+    assert jc is not None
+    assert jc.get(f"{{{WORD_NAMESPACE}}}val") == "center"
+
+
+def test_paragraph_text_setter_markdown_bold():
+    """Test that setting text with **bold** creates bold formatting."""
+    elem = create_paragraph_element("Old text")
+    para = Paragraph(elem)
+
+    para.text = "This is **bold** text"
+
+    # Should have multiple runs for different formatting
+    runs = para.runs
+    assert len(runs) == 3  # "This is ", "bold", " text"
+
+    # Second run should have bold formatting
+    bold_run = runs[1]
+    rpr = bold_run.find(f"{{{WORD_NAMESPACE}}}rPr")
+    assert rpr is not None
+    b_elem = rpr.find(f"{{{WORD_NAMESPACE}}}b")
+    assert b_elem is not None
+
+    # Text should read correctly
+    assert para.text == "This is bold text"
+
+
+def test_paragraph_text_setter_markdown_italic():
+    """Test that setting text with *italic* creates italic formatting."""
+    elem = create_paragraph_element("Old text")
+    para = Paragraph(elem)
+
+    para.text = "This is *italic* text"
+
+    # Should have multiple runs
+    runs = para.runs
+    assert len(runs) == 3  # "This is ", "italic", " text"
+
+    # Second run should have italic formatting
+    italic_run = runs[1]
+    rpr = italic_run.find(f"{{{WORD_NAMESPACE}}}rPr")
+    assert rpr is not None
+    i_elem = rpr.find(f"{{{WORD_NAMESPACE}}}i")
+    assert i_elem is not None
+
+    # Text should read correctly
+    assert para.text == "This is italic text"
+
+
+def test_paragraph_text_setter_markdown_mixed():
+    """Test that setting text with mixed markdown works."""
+    elem = create_paragraph_element("Old text")
+    para = Paragraph(elem)
+
+    para.text = "**bold** and *italic*"
+
+    # Text should read correctly
+    assert para.text == "bold and italic"
+
+    # Should have multiple runs
+    runs = para.runs
+    assert len(runs) >= 3  # "bold", " and ", "italic"
+
+
+def test_paragraph_text_setter_empty_string():
+    """Test that setting empty string doesn't break the paragraph."""
+    elem = create_paragraph_element("Some text", style="Normal")
+    para = Paragraph(elem)
+
+    para.text = ""
+
+    # Text should be empty
+    assert para.text == ""
+
+    # Style should be preserved
+    assert para.style == "Normal"
+
+    # Should still have at least one run
+    runs = para.runs
+    assert len(runs) >= 1
+
+
+def test_paragraph_text_setter_removes_hyperlinks():
+    """Test that setting text removes hyperlinks but preserves pPr."""
+    p = etree.Element(f"{{{WORD_NAMESPACE}}}p")
+    p_pr = etree.SubElement(p, f"{{{WORD_NAMESPACE}}}pPr")
+    p_style = etree.SubElement(p_pr, f"{{{WORD_NAMESPACE}}}pStyle")
+    p_style.set(f"{{{WORD_NAMESPACE}}}val", "Normal")
+
+    # Add a hyperlink element (simplified)
+    hyperlink = etree.SubElement(p, f"{{{WORD_NAMESPACE}}}hyperlink")
+    r = etree.SubElement(hyperlink, f"{{{WORD_NAMESPACE}}}r")
+    t = etree.SubElement(r, f"{{{WORD_NAMESPACE}}}t")
+    t.text = "Link text"
+
+    para = Paragraph(p)
+
+    # Set new text
+    para.text = "New text without link"
+
+    # Hyperlink should be removed
+    hyperlinks = para.element.findall(f"{{{WORD_NAMESPACE}}}hyperlink")
+    assert len(hyperlinks) == 0
+
+    # Style should be preserved
+    assert para.style == "Normal"
+
+
 # Run tests with: pytest tests/test_paragraph.py -v

@@ -2789,3 +2789,200 @@ class TestEditHyperlinkInvalidRef:
 
         finally:
             doc_path.unlink()
+
+
+# === Tests for Issue #6: edit_hyperlink_text preserving style and markdown support ===
+
+
+class TestEditHyperlinkTextIssue6:
+    """Tests for Issue #6: edit_hyperlink_text preserving Hyperlink style and markdown."""
+
+    def test_edit_hyperlink_text_untracked_preserves_style(self) -> None:
+        """Test that untracked edit preserves Hyperlink rStyle."""
+        doc_path = create_document_with_external_hyperlink()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            # Edit hyperlink text without tracking
+            doc.edit_hyperlink_text("lnk:0", "Replaced Text", track=False)
+            # Use validate=False since test document doesn't have styles.xml
+            doc.save(output_path, validate=False)
+
+            # Reload and verify
+            doc2 = Document(output_path)
+            hyperlinks = list(doc2.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            assert len(hyperlinks) == 1
+
+            hyperlink = hyperlinks[0]
+            runs = hyperlink.findall(f".//{{{WORD_NS}}}r")
+            assert len(runs) >= 1
+
+            # All runs should have Hyperlink rStyle
+            for run in runs:
+                rpr = run.find(f"{{{WORD_NS}}}rPr")
+                assert rpr is not None, "Run should have rPr"
+                rstyle = rpr.find(f"{{{WORD_NS}}}rStyle")
+                assert rstyle is not None, "Run should have rStyle"
+                assert rstyle.get(f"{{{WORD_NS}}}val") == "Hyperlink"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_edit_hyperlink_text_untracked_markdown_bold(self) -> None:
+        """Test that untracked edit supports **bold** markdown."""
+        doc_path = create_document_with_external_hyperlink()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            # Edit with bold markdown
+            doc.edit_hyperlink_text("lnk:0", "Click **here**", track=False)
+            # Use validate=False since test document doesn't have styles.xml
+            doc.save(output_path, validate=False)
+
+            # Reload and verify
+            doc2 = Document(output_path)
+            hyperlinks = list(doc2.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            hyperlink = hyperlinks[0]
+
+            # Text should read correctly
+            text_elems = hyperlink.findall(f".//{{{WORD_NS}}}t")
+            text = "".join(t.text or "" for t in text_elems)
+            assert text == "Click here"  # No markdown markers
+
+            # Should have multiple runs
+            runs = hyperlink.findall(f".//{{{WORD_NS}}}r")
+            assert len(runs) >= 2
+
+            # Find bold run
+            bold_found = False
+            for run in runs:
+                rpr = run.find(f"{{{WORD_NS}}}rPr")
+                if rpr is not None:
+                    if rpr.find(f"{{{WORD_NS}}}b") is not None:
+                        bold_found = True
+                        # Should also have Hyperlink style
+                        rstyle = rpr.find(f"{{{WORD_NS}}}rStyle")
+                        assert rstyle is not None
+                        assert rstyle.get(f"{{{WORD_NS}}}val") == "Hyperlink"
+                        break
+
+            assert bold_found, "Expected bold formatting in hyperlink"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_edit_hyperlink_text_untracked_markdown_italic(self) -> None:
+        """Test that untracked edit supports *italic* markdown."""
+        doc_path = create_document_with_external_hyperlink()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        try:
+            doc = Document(doc_path)
+
+            # Edit with italic markdown
+            doc.edit_hyperlink_text("lnk:0", "Click *here*", track=False)
+            # Use validate=False since test document doesn't have styles.xml
+            doc.save(output_path, validate=False)
+
+            # Reload and verify
+            doc2 = Document(output_path)
+            hyperlinks = list(doc2.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            hyperlink = hyperlinks[0]
+
+            # Find italic run
+            runs = hyperlink.findall(f".//{{{WORD_NS}}}r")
+            italic_found = False
+            for run in runs:
+                rpr = run.find(f"{{{WORD_NS}}}rPr")
+                if rpr is not None:
+                    if rpr.find(f"{{{WORD_NS}}}i") is not None:
+                        italic_found = True
+                        break
+
+            assert italic_found, "Expected italic formatting in hyperlink"
+
+        finally:
+            doc_path.unlink()
+            if output_path.exists():
+                output_path.unlink()
+
+    def test_edit_hyperlink_text_multi_run_to_single_preserves_style(self) -> None:
+        """Test that editing multi-run hyperlink to single text preserves style."""
+        # Create document with multi-run hyperlink
+        doc_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:body>
+<w:p>
+  <w:hyperlink r:id="rId5">
+    <w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr><w:t>First</w:t></w:r>
+    <w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr><w:t> Part</w:t></w:r>
+  </w:hyperlink>
+</w:p>
+</w:body>
+</w:document>"""
+
+        doc_path = Path(tempfile.mktemp(suffix=".docx"))
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+
+        # Create docx file
+        content_types = """<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>"""
+
+        root_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>"""
+
+        doc_rels = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com" TargetMode="External"/>
+</Relationships>"""
+
+        with zipfile.ZipFile(doc_path, "w") as docx:
+            docx.writestr("[Content_Types].xml", content_types)
+            docx.writestr("_rels/.rels", root_rels)
+            docx.writestr("word/document.xml", doc_xml)
+            docx.writestr("word/_rels/document.xml.rels", doc_rels)
+
+        try:
+            doc = Document(doc_path)
+
+            # Edit to single simple text
+            doc.edit_hyperlink_text("lnk:0", "Simple Link", track=False)
+            doc.save(output_path)
+
+            # Reload and verify
+            doc2 = Document(output_path)
+            hyperlinks = list(doc2.xml_root.iter(f"{{{WORD_NS}}}hyperlink"))
+            hyperlink = hyperlinks[0]
+
+            # Verify text
+            text_elems = hyperlink.findall(f".//{{{WORD_NS}}}t")
+            text = "".join(t.text or "" for t in text_elems)
+            assert text == "Simple Link"
+
+            # Verify Hyperlink style preserved
+            runs = hyperlink.findall(f".//{{{WORD_NS}}}r")
+            for run in runs:
+                rpr = run.find(f"{{{WORD_NS}}}rPr")
+                assert rpr is not None
+                rstyle = rpr.find(f"{{{WORD_NS}}}rStyle")
+                assert rstyle is not None
+                assert rstyle.get(f"{{{WORD_NS}}}val") == "Hyperlink"
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)

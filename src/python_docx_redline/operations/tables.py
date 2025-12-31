@@ -216,14 +216,24 @@ class TableOperations:
     def _replace_match_untracked(self, match: TextSpan, new_text: str) -> None:
         """Replace a text match without tracking.
 
+        Uses create_plain_runs to properly handle markdown formatting and preserve
+        source run formatting.
+
         Args:
             match: The TextSpan representing the matched text
-            new_text: The replacement text
+            new_text: The replacement text (may include markdown formatting)
         """
-        new_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
-        new_t = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}t")
-        new_t.text = new_text
-        self._document._replace_match_with_element(match, new_run)
+        # Get source run for formatting inheritance
+        source_run = match.runs[match.start_run_index] if match.runs else None
+
+        # Create runs using xml_generator for proper markdown support
+        new_runs = self._document._xml_generator.create_plain_runs(new_text, source_run=source_run)
+
+        # Replace matched text with the new runs
+        if len(new_runs) == 1:
+            self._document._replace_match_with_element(match, new_runs[0])
+        else:
+            self._document._replace_match_with_elements(match, new_runs)
 
     def insert_row(
         self,

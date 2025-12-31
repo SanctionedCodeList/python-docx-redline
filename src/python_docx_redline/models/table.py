@@ -2,11 +2,13 @@
 Table wrapper classes for convenient access to table elements.
 """
 
+import copy
 from typing import TYPE_CHECKING
 
 from lxml import etree
 
 from python_docx_redline.constants import WORD_NAMESPACE
+from python_docx_redline.markdown_parser import parse_markdown
 
 if TYPE_CHECKING:
     from python_docx_redline.models.paragraph import Paragraph
@@ -64,20 +66,71 @@ class TableCell:
     def text(self, value: str) -> None:
         """Set the text content of the cell.
 
-        This replaces all paragraphs with a single paragraph containing the new text.
+        This replaces all paragraphs with a single paragraph containing the new text,
+        while preserving cell properties (w:tcPr) and the first paragraph's properties
+        (w:pPr). Supports markdown formatting:
+        - **bold** -> bold text
+        - *italic* -> italic text
+        - ++underline++ -> underlined text
+        - ~~strikethrough~~ -> strikethrough text
 
         Args:
-            value: New text content
+            value: New text content (may include markdown formatting)
         """
-        # Remove all existing paragraphs
+        # Preserve first paragraph's properties (w:pPr) if it exists
+        first_para = self._element.find(f"{{{WORD_NAMESPACE}}}p")
+        preserved_ppr = None
+        if first_para is not None:
+            ppr = first_para.find(f"{{{WORD_NAMESPACE}}}pPr")
+            if ppr is not None:
+                preserved_ppr = copy.deepcopy(ppr)
+
+        # Remove all existing paragraphs (tcPr is NOT a paragraph, so it's safe)
         for para in self._element.findall(f"{{{WORD_NAMESPACE}}}p"):
             self._element.remove(para)
 
         # Create new paragraph with text
         para = etree.SubElement(self._element, f"{{{WORD_NAMESPACE}}}p")
-        run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
-        t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-        t.text = value
+
+        # Restore preserved paragraph properties
+        if preserved_ppr is not None:
+            para.insert(0, preserved_ppr)
+
+        # Parse markdown and create runs
+        segments = parse_markdown(value)
+
+        # Handle empty text case
+        if not segments:
+            run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+            t.text = value
+            return
+
+        for segment in segments:
+            run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+
+            # Add run properties if any formatting is applied
+            if segment.has_formatting():
+                rpr = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}rPr")
+                if segment.bold:
+                    etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}b")
+                if segment.italic:
+                    etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}i")
+                if segment.underline:
+                    u_elem = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}u")
+                    u_elem.set(f"{{{WORD_NAMESPACE}}}val", "single")
+                if segment.strikethrough:
+                    etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}strike")
+
+            # Handle linebreak segments
+            if segment.is_linebreak:
+                etree.SubElement(run, f"{{{WORD_NAMESPACE}}}br")
+            else:
+                t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+                # Preserve whitespace if needed
+                if segment.text and (segment.text[0].isspace() or segment.text[-1].isspace()):
+                    t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                t.text = segment.text
 
     @property
     def paragraphs(self) -> list["Paragraph"]:

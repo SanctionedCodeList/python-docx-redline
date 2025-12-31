@@ -15,6 +15,7 @@ OOXML Structure:
 
 from __future__ import annotations
 
+import copy
 import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -24,6 +25,7 @@ from lxml import etree
 from ..accessibility.bookmarks import BookmarkRegistry
 from ..constants import OFFICE_RELATIONSHIPS_NAMESPACE, WORD_NAMESPACE
 from ..errors import AmbiguousTextError, NoteNotFoundError, TextNotFoundError
+from ..markdown_parser import parse_markdown
 from ..relationships import RelationshipManager, RelationshipTypes
 from ..scope import ScopeEvaluator
 from ..style_templates import ensure_standard_styles
@@ -809,41 +811,81 @@ class HyperlinkOperations:
                 hyperlink_elem.insert(insert_pos, elem)
                 insert_pos += 1
         else:
-            # Untracked edit: simply replace text content in runs
-            # Strategy: clear all runs except the first, then set new text in the first
-            # while preserving the Hyperlink style
+            # Untracked edit: replace text content while preserving Hyperlink style
+            # Strategy: preserve rStyle from first run, remove all runs, create new runs
+            # for markdown-parsed content with Hyperlink style applied to each
 
-            # Keep the first run and remove the rest
+            # Preserve rStyle from first run (should be "Hyperlink")
             first_run = runs[0]
-            for run in runs[1:]:
+            first_rpr = first_run.find(f"{{{WORD_NAMESPACE}}}rPr")
+            preserved_rstyle = None
+            if first_rpr is not None:
+                rstyle = first_rpr.find(f"{{{WORD_NAMESPACE}}}rStyle")
+                if rstyle is not None:
+                    preserved_rstyle = copy.deepcopy(rstyle)
+
+            # Get first run position for insertion
+            first_run_index = list(hyperlink_elem).index(runs[0])
+
+            # Remove all existing runs
+            for run in runs:
                 hyperlink_elem.remove(run)
 
-            # Find or create the text element in the first run
-            t_elem = first_run.find(f"{{{WORD_NAMESPACE}}}t")
-            if t_elem is None:
-                t_elem = etree.SubElement(first_run, f"{{{WORD_NAMESPACE}}}t")
+            # Parse markdown and create new runs
+            segments = parse_markdown(new_text)
 
-            # Set the new text
-            t_elem.text = new_text
+            # Handle empty text case
+            if not segments:
+                new_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
+                # Add Hyperlink style
+                rpr = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}rPr")
+                if preserved_rstyle is not None:
+                    rpr.append(copy.deepcopy(preserved_rstyle))
+                else:
+                    rstyle = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}rStyle")
+                    rstyle.set(f"{{{WORD_NAMESPACE}}}val", "Hyperlink")
+                t_elem = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}t")
+                t_elem.text = new_text
+                hyperlink_elem.insert(first_run_index, new_run)
+                return
 
-            # Handle xml:space for leading/trailing whitespace
-            if new_text and (new_text[0].isspace() or new_text[-1].isspace()):
-                t_elem.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-            else:
-                # Remove the attribute if it exists and is not needed
-                if "{http://www.w3.org/XML/1998/namespace}space" in t_elem.attrib:
-                    del t_elem.attrib["{http://www.w3.org/XML/1998/namespace}space"]
+            insert_pos = first_run_index
+            for segment in segments:
+                new_run = etree.Element(f"{{{WORD_NAMESPACE}}}r")
 
-            # Ensure the Hyperlink style is applied
-            rpr = first_run.find(f"{{{WORD_NAMESPACE}}}rPr")
-            if rpr is None:
-                rpr = etree.Element(f"{{{WORD_NAMESPACE}}}rPr")
-                first_run.insert(0, rpr)
+                # Add run properties with Hyperlink style and any formatting
+                rpr = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}rPr")
 
-            rstyle = rpr.find(f"{{{WORD_NAMESPACE}}}rStyle")
-            if rstyle is None:
-                rstyle = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}rStyle")
-            rstyle.set(f"{{{WORD_NAMESPACE}}}val", "Hyperlink")
+                # Always apply the Hyperlink style first
+                if preserved_rstyle is not None:
+                    rpr.append(copy.deepcopy(preserved_rstyle))
+                else:
+                    rstyle = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}rStyle")
+                    rstyle.set(f"{{{WORD_NAMESPACE}}}val", "Hyperlink")
+
+                # Add any markdown formatting
+                if segment.bold:
+                    etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}b")
+                if segment.italic:
+                    etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}i")
+                if segment.underline:
+                    u_elem = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}u")
+                    u_elem.set(f"{{{WORD_NAMESPACE}}}val", "single")
+                if segment.strikethrough:
+                    etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}strike")
+
+                # Handle linebreak segments
+                if segment.is_linebreak:
+                    etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}br")
+                else:
+                    t_elem = etree.SubElement(new_run, f"{{{WORD_NAMESPACE}}}t")
+                    # Preserve whitespace if needed
+                    if segment.text and (segment.text[0].isspace() or segment.text[-1].isspace()):
+                        t_elem.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                    t_elem.text = segment.text
+
+                hyperlink_elem.insert(insert_pos, new_run)
+                insert_pos += 1
 
     def edit_hyperlink_anchor(self, ref: str, new_anchor: str) -> None:
         """Change the target bookmark of an internal hyperlink.

@@ -2,11 +2,13 @@
 Paragraph wrapper class for convenient access to paragraph elements.
 """
 
+import copy
 from typing import TYPE_CHECKING
 
 from lxml import etree
 
 from python_docx_redline.constants import WORD_NAMESPACE
+from python_docx_redline.markdown_parser import parse_markdown
 
 if TYPE_CHECKING:
     from python_docx_redline.models.section import Section
@@ -55,19 +57,72 @@ class Paragraph:
     def text(self, value: str) -> None:
         """Set the text content of the paragraph.
 
-        This replaces all runs with a single run containing the new text.
+        This replaces all content with new runs while preserving paragraph
+        properties (w:pPr). Supports markdown formatting:
+        - **bold** -> bold text
+        - *italic* -> italic text
+        - ++underline++ -> underlined text
+        - ~~strikethrough~~ -> strikethrough text
 
         Args:
-            value: New text content
+            value: New text content (may include markdown formatting)
         """
-        # Remove all existing runs
-        for run in self._element.findall(f"{{{WORD_NAMESPACE}}}r"):
-            self._element.remove(run)
+        # Preserve paragraph properties (w:pPr)
+        ppr = self._element.find(f"{{{WORD_NAMESPACE}}}pPr")
+        preserved_ppr = copy.deepcopy(ppr) if ppr is not None else None
 
-        # Create new run with text
-        run = etree.SubElement(self._element, f"{{{WORD_NAMESPACE}}}r")
-        t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-        t.text = value
+        # Remove all content elements EXCEPT pPr
+        # This includes runs, hyperlinks, bookmarks, tracked changes, etc.
+        elements_to_remove = []
+        for child in self._element:
+            if child.tag != f"{{{WORD_NAMESPACE}}}pPr":
+                elements_to_remove.append(child)
+        for elem in elements_to_remove:
+            self._element.remove(elem)
+
+        # Restore pPr if it was removed or ensure it's first
+        if preserved_ppr is not None:
+            # Check if pPr still exists (it shouldn't have been removed, but ensure position)
+            existing_ppr = self._element.find(f"{{{WORD_NAMESPACE}}}pPr")
+            if existing_ppr is None:
+                self._element.insert(0, preserved_ppr)
+
+        # Parse markdown and create runs
+        segments = parse_markdown(value)
+
+        # Handle empty text case
+        if not segments:
+            # Create a single empty run to maintain valid structure
+            run = etree.SubElement(self._element, f"{{{WORD_NAMESPACE}}}r")
+            t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+            t.text = value
+            return
+
+        for segment in segments:
+            run = etree.SubElement(self._element, f"{{{WORD_NAMESPACE}}}r")
+
+            # Add run properties if any formatting is applied
+            if segment.has_formatting():
+                rpr = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}rPr")
+                if segment.bold:
+                    etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}b")
+                if segment.italic:
+                    etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}i")
+                if segment.underline:
+                    u_elem = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}u")
+                    u_elem.set(f"{{{WORD_NAMESPACE}}}val", "single")
+                if segment.strikethrough:
+                    etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}strike")
+
+            # Handle linebreak segments
+            if segment.is_linebreak:
+                etree.SubElement(run, f"{{{WORD_NAMESPACE}}}br")
+            else:
+                t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+                # Preserve whitespace if needed
+                if segment.text and (segment.text[0].isspace() or segment.text[-1].isspace()):
+                    t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                t.text = segment.text
 
     @property
     def style(self) -> str | None:

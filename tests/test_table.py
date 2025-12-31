@@ -1070,4 +1070,167 @@ def test_column_operations_update_tbl_grid():
         docx_path.unlink(missing_ok=True)
 
 
+# === Tests for Issue #6: TableCell.text setter preserving tcPr and pPr, markdown support ===
+
+
+def test_table_cell_text_setter_preserves_tcpr():
+    """Test that setting cell text preserves cell properties (w:tcPr)."""
+    # Create a document with a table cell that has tcPr
+    doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:tbl>
+      <w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>
+      <w:tblGrid><w:gridCol w:w="5000"/></w:tblGrid>
+      <w:tr>
+        <w:tc>
+          <w:tcPr>
+            <w:tcW w:w="5000" w:type="dxa"/>
+            <w:shd w:fill="FFFF00" w:val="clear"/>
+          </w:tcPr>
+          <w:p><w:r><w:t>Original text</w:t></w:r></w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>"""
+
+    docx_path = create_test_docx(doc_xml)
+    output_path = docx_path.parent / "output.docx"
+
+    try:
+        doc = Document(docx_path)
+        table = doc.tables[0]
+        cell = table.get_cell(0, 0)
+
+        # Set new text
+        cell.text = "New text"
+        doc.save(output_path)
+
+        # Reload and verify
+        doc2 = Document(output_path)
+        table2 = doc2.tables[0]
+        cell2 = table2.get_cell(0, 0)
+
+        # Verify text was updated
+        assert cell2.text == "New text"
+
+        # Verify tcPr was preserved (check for shading element)
+        word_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        tc_pr = cell2.element.find(f"{{{word_ns}}}tcPr")
+        assert tc_pr is not None
+
+        shd = tc_pr.find(f"{{{word_ns}}}shd")
+        assert shd is not None
+        assert shd.get(f"{{{word_ns}}}fill") == "FFFF00"
+    finally:
+        docx_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+
+def test_table_cell_text_setter_preserves_ppr():
+    """Test that setting cell text preserves first paragraph properties."""
+    # Create a document with a table cell that has paragraph properties
+    doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:tbl>
+      <w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>
+      <w:tblGrid><w:gridCol w:w="5000"/></w:tblGrid>
+      <w:tr>
+        <w:tc>
+          <w:tcPr><w:tcW w:w="5000" w:type="dxa"/></w:tcPr>
+          <w:p>
+            <w:pPr>
+              <w:jc w:val="center"/>
+            </w:pPr>
+            <w:r><w:t>Centered text</w:t></w:r>
+          </w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+  </w:body>
+</w:document>"""
+
+    docx_path = create_test_docx(doc_xml)
+    output_path = docx_path.parent / "output.docx"
+
+    try:
+        doc = Document(docx_path)
+        table = doc.tables[0]
+        cell = table.get_cell(0, 0)
+
+        # Set new text
+        cell.text = "Still centered"
+        doc.save(output_path)
+
+        # Reload and verify
+        doc2 = Document(output_path)
+        table2 = doc2.tables[0]
+        cell2 = table2.get_cell(0, 0)
+
+        # Verify text was updated
+        assert cell2.text == "Still centered"
+
+        # Verify paragraph properties were preserved
+        word_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        para = cell2.element.find(f"{{{word_ns}}}p")
+        assert para is not None
+
+        ppr = para.find(f"{{{word_ns}}}pPr")
+        assert ppr is not None
+
+        jc = ppr.find(f"{{{word_ns}}}jc")
+        assert jc is not None
+        assert jc.get(f"{{{word_ns}}}val") == "center"
+    finally:
+        docx_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+
+def test_table_cell_text_setter_markdown_support():
+    """Test that setting cell text supports markdown formatting."""
+    docx_path = create_test_docx()
+    output_path = docx_path.parent / "output.docx"
+
+    try:
+        doc = Document(docx_path)
+        table = doc.tables[0]
+        cell = table.get_cell(0, 0)
+
+        # Set text with markdown
+        cell.text = "This is **bold** and *italic*"
+        doc.save(output_path)
+
+        # Reload and verify
+        doc2 = Document(output_path)
+        table2 = doc2.tables[0]
+        cell2 = table2.get_cell(0, 0)
+
+        # Text should read correctly (without markdown markers)
+        assert cell2.text == "This is bold and italic"
+
+        # Verify formatting in XML
+        word_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        runs = cell2.element.findall(f".//{{{word_ns}}}r")
+        assert len(runs) >= 3  # Multiple runs for different formatting
+
+        # Find bold run
+        bold_found = False
+        italic_found = False
+        for run in runs:
+            rpr = run.find(f"{{{word_ns}}}rPr")
+            if rpr is not None:
+                if rpr.find(f"{{{word_ns}}}b") is not None:
+                    bold_found = True
+                if rpr.find(f"{{{word_ns}}}i") is not None:
+                    italic_found = True
+
+        assert bold_found, "Expected bold formatting"
+        assert italic_found, "Expected italic formatting"
+    finally:
+        docx_path.unlink(missing_ok=True)
+        output_path.unlink(missing_ok=True)
+
+
 # Run tests with: pytest tests/test_table.py -v
