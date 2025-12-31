@@ -354,25 +354,22 @@ function processParagraph(
 
 /**
  * Process a table cell into an AccessibilityNode.
+ * Called after cell paragraphs have been pre-loaded.
  */
-async function processCell(
+function processCellSync(
   cell: WordCell,
   tableIndex: number,
   rowIndex: number,
   cellIndex: number,
-  context: WordRequestContext,
   options: TreeOptions,
   stats: StatsCollector
-): Promise<AccessibilityNode> {
+): AccessibilityNode {
   const ref = makeCellRef(tableIndex, rowIndex, cellIndex);
-
-  // Load cell paragraphs
-  const paragraphs = cell.body.paragraphs.load('items/text,items/style');
-  await context.sync();
+  const paragraphs = cell.body.paragraphs.items;
 
   // In minimal mode, just concatenate text
   if (options.verbosity === 'minimal') {
-    const text = paragraphs.items.map((p) => p.text).join(' ');
+    const text = paragraphs.map((p) => p.text).join(' ');
     return {
       ref,
       role: Role.Cell,
@@ -382,8 +379,8 @@ async function processCell(
 
   // In standard/full mode, include child paragraphs
   const children: AccessibilityNode[] = [];
-  for (let pIdx = 0; pIdx < paragraphs.items.length; pIdx++) {
-    const p = paragraphs.items[pIdx];
+  for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+    const p = paragraphs[pIdx];
     if (!p) continue;
     const pRef = makeCellParagraphRef(tableIndex, rowIndex, cellIndex, pIdx);
     const { role, level } = getRoleFromStyle(p.style);
@@ -424,31 +421,26 @@ async function processCell(
 
 /**
  * Process a table row into an AccessibilityNode.
+ * Called after row cells have been pre-loaded.
  */
-async function processRow(
+function processRowSync(
   row: WordRow,
   tableIndex: number,
   rowIndex: number,
-  context: WordRequestContext,
   options: TreeOptions,
   stats: StatsCollector
-): Promise<AccessibilityNode> {
+): AccessibilityNode {
   const ref = makeRowRef(tableIndex, rowIndex);
-
-  // Load cells
-  row.cells.load('items');
-  await context.sync();
 
   const cells: AccessibilityNode[] = [];
   for (let cellIdx = 0; cellIdx < row.cells.items.length; cellIdx++) {
     const cell = row.cells.items[cellIdx];
     if (!cell) continue;
-    const cellNode = await processCell(
+    const cellNode = processCellSync(
       cell,
       tableIndex,
       rowIndex,
       cellIdx,
-      context,
       options,
       stats
     );
@@ -469,42 +461,78 @@ async function processRow(
 }
 
 /**
- * Process a table into an AccessibilityNode.
+ * Process all tables with batched loading.
+ *
+ * Uses 3 context.sync() calls instead of O(tables * rows * cells):
+ * 1. Load all table rows
+ * 2. Load all row cells
+ * 3. Load all cell paragraphs
  */
-async function processTable(
-  table: WordTable,
-  tableIndex: number,
+async function processAllTables(
+  tables: WordTableCollection,
   context: WordRequestContext,
   options: TreeOptions,
   stats: StatsCollector
-): Promise<AccessibilityNode> {
-  stats.tables++;
-  const ref = makeTableRef(tableIndex);
-
-  // Load rows
-  table.rows.load('items/isHeader,items/cellCount');
-  await context.sync();
-
-  // Get column count from first row
-  const colCount = table.rows.items[0]?.cellCount ?? 0;
-
-  const rows: AccessibilityNode[] = [];
-  for (let rowIdx = 0; rowIdx < table.rows.items.length; rowIdx++) {
-    const row = table.rows.items[rowIdx];
-    if (!row) continue;
-    const rowNode = await processRow(row, tableIndex, rowIdx, context, options, stats);
-    rows.push(rowNode);
+): Promise<AccessibilityNode[]> {
+  if (tables.items.length === 0) {
+    return [];
   }
 
-  return {
-    ref,
-    role: Role.Table,
-    dimensions: {
-      rows: table.rowCount,
-      cols: colCount,
-    },
-    children: rows,
-  };
+  // Phase 1: Queue loading rows for all tables
+  for (const table of tables.items) {
+    table.rows.load('items/isHeader,items/cellCount');
+  }
+  await context.sync();
+
+  // Phase 2: Queue loading cells for all rows
+  for (const table of tables.items) {
+    for (const row of table.rows.items) {
+      row.cells.load('items');
+    }
+  }
+  await context.sync();
+
+  // Phase 3: Queue loading paragraphs for all cells
+  for (const table of tables.items) {
+    for (const row of table.rows.items) {
+      for (const cell of row.cells.items) {
+        cell.body.paragraphs.load('items/text,items/style');
+      }
+    }
+  }
+  await context.sync();
+
+  // Phase 4: Build nodes synchronously (no more async calls needed)
+  const tableNodes: AccessibilityNode[] = [];
+
+  for (let tableIndex = 0; tableIndex < tables.items.length; tableIndex++) {
+    const table = tables.items[tableIndex];
+    if (!table) continue;
+
+    stats.tables++;
+    const ref = makeTableRef(tableIndex);
+    const colCount = table.rows.items[0]?.cellCount ?? 0;
+
+    const rows: AccessibilityNode[] = [];
+    for (let rowIdx = 0; rowIdx < table.rows.items.length; rowIdx++) {
+      const row = table.rows.items[rowIdx];
+      if (!row) continue;
+      const rowNode = processRowSync(row, tableIndex, rowIdx, options, stats);
+      rows.push(rowNode);
+    }
+
+    tableNodes.push({
+      ref,
+      role: Role.Table,
+      dimensions: {
+        rows: table.rowCount,
+        cols: colCount,
+      },
+      children: rows,
+    });
+  }
+
+  return tableNodes;
 }
 
 // =============================================================================
@@ -761,13 +789,9 @@ export async function buildTree(
     paragraphRefs.push(pNode.ref);
   }
 
-  // Process tables
-  for (let i = 0; i < tables.items.length; i++) {
-    const tbl = tables.items[i];
-    if (!tbl) continue;
-    const tableNode = await processTable(tbl, i, context, opts, stats);
-    content.push(tableNode);
-  }
+  // Process tables with batched loading (3 sync calls instead of O(tables*rows*cells))
+  const tableNodes = await processAllTables(tables, context, opts, stats);
+  content.push(...tableNodes);
 
   // Extract footnotes from OOXML
   const { footnotes, paragraphFootnotes } = await extractFootnotes(context);
