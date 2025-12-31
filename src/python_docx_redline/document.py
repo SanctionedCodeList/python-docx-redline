@@ -43,6 +43,7 @@ from .operations.notes import NoteOperations
 from .operations.patterns import PatternOperations
 from .operations.section import SectionOperations
 from .operations.tables import TableOperations
+from .operations.toc import TOC, TOCOperations
 from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
 from .results import ComparisonStats, EditResult, FormatResult
@@ -384,6 +385,13 @@ class Document:
         if not hasattr(self, "_hyperlink_ops_instance"):
             self._hyperlink_ops_instance = HyperlinkOperations(self)
         return self._hyperlink_ops_instance
+
+    @property
+    def _toc_ops(self) -> TOCOperations:
+        """Get the TOCOperations instance (lazy initialization)."""
+        if not hasattr(self, "_toc_ops_instance"):
+            self._toc_ops_instance = TOCOperations(self)
+        return self._toc_ops_instance
 
     @property
     def styles(self) -> StyleManager:
@@ -4892,6 +4900,136 @@ class Document:
             track=track,
             author=author,
         )
+
+    # ========================================================================
+    # TABLE OF CONTENTS METHODS
+    # ========================================================================
+
+    def insert_toc(
+        self,
+        position: int | str = 0,
+        levels: tuple[int, int] = (1, 3),
+        title: str | None = "Table of Contents",
+        hyperlinks: bool = True,
+        show_page_numbers: bool = True,
+        use_outline_levels: bool = True,
+        update_on_open: bool = True,
+    ) -> None:
+        """Insert a Table of Contents field that Word will populate on open.
+
+        This method inserts a TOC field into the document at the specified
+        position. The TOC is wrapped in a Structured Document Tag (SDT) that
+        Word recognizes as a TOC content control.
+
+        The TOC field is marked as dirty, meaning Word will update it when the
+        document is opened. Page numbers are calculated by Word's layout engine.
+
+        Args:
+            position: Where to insert the TOC. Can be:
+                     - int: Paragraph index (0 = beginning of document)
+                     - "start": Beginning of document body
+                     - "end": End of document body (before sectPr)
+            levels: Tuple of (min_level, max_level) for heading levels to include.
+                   Default (1, 3) includes Heading 1, 2, and 3.
+            title: Optional title text to display above the TOC.
+                  Set to None for no title. Default is "Table of Contents".
+            hyperlinks: If True (default), TOC entries link to their headings.
+            show_page_numbers: If True (default), show page numbers.
+            use_outline_levels: If True (default), include paragraphs with
+                               outline levels.
+            update_on_open: If True (default), sets w:updateFields in settings.xml
+                           so Word updates all fields when opening the document.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> # Simple TOC with defaults
+            >>> doc.insert_toc()
+            >>> doc.save("report_with_toc.docx")
+            >>>
+            >>> # TOC without title, including more heading levels
+            >>> doc.insert_toc(title=None, levels=(1, 5))
+            >>>
+            >>> # TOC at end of document without page numbers
+            >>> doc.insert_toc(position="end", show_page_numbers=False)
+        """
+        return self._toc_ops.insert_toc(
+            position=position,
+            levels=levels,
+            title=title,
+            hyperlinks=hyperlinks,
+            show_page_numbers=show_page_numbers,
+            use_outline_levels=use_outline_levels,
+            update_on_open=update_on_open,
+        )
+
+    def remove_toc(self) -> bool:
+        """Remove the Table of Contents from the document.
+
+        This method finds and removes the TOC SDT (Structured Document Tag)
+        from the document, along with any title paragraph that precedes it.
+
+        Returns:
+            True if a TOC was found and removed, False if no TOC exists.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> if doc.remove_toc():
+            ...     print("TOC removed successfully")
+            ... else:
+            ...     print("No TOC found in document")
+            >>> doc.save("report_no_toc.docx")
+        """
+        return self._toc_ops.remove_toc()
+
+    def mark_toc_dirty(self) -> bool:
+        """Mark the TOC field as dirty so Word will recalculate it on open.
+
+        This method sets w:dirty="true" on the TOC field's begin marker.
+        When the document is opened in Word, this tells Word to recalculate
+        the TOC to reflect current document structure.
+
+        This is useful after modifying document content (adding/removing
+        headings) to ensure the TOC reflects the current state.
+
+        Returns:
+            True if a TOC was found and marked dirty, False if no TOC exists.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> # After making changes to document headings
+            >>> if doc.mark_toc_dirty():
+            ...     print("TOC marked for update")
+            >>> doc.save("report_updated.docx")
+        """
+        return self._toc_ops.mark_toc_dirty()
+
+    def get_toc(self) -> TOC | None:
+        """Get information about an existing Table of Contents in the document.
+
+        This method finds and parses an existing TOC, extracting:
+        - Position in the document
+        - Field switches (levels, hyperlinks, etc.)
+        - Whether it's marked dirty
+        - Cached entries (text, level, page number, bookmark)
+
+        Note that the entries are cached values from when Word last updated
+        the TOC. They may be stale if the document has been modified.
+
+        Returns:
+            A TOC object containing the parsed information, or None if no TOC
+            is found in the document.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> toc = doc.get_toc()
+            >>> if toc:
+            ...     print(f"TOC at paragraph {toc.position}")
+            ...     print(f"Levels: {toc.levels}")
+            ...     print(f"Dirty: {toc.is_dirty}")
+            ...     for entry in toc.entries:
+            ...         print(f"  L{entry.level}: {entry.text} ... {entry.page_number}")
+        """
+        return self._toc_ops.get_toc()
 
     # ========================================================================
     # Ref-based editing operations (DocTree accessibility layer)

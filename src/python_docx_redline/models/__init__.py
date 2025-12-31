@@ -13,6 +13,7 @@ from python_docx_redline.models.style import (
     RunFormatting,
     Style,
     StyleType,
+    TabStop,
 )
 from python_docx_redline.models.table import Table, TableCell, TableRow
 from python_docx_redline.models.tracked_change import ChangeType, TrackedChange
@@ -34,4 +35,5 @@ __all__ = [
     "StyleType",
     "RunFormatting",
     "ParagraphFormatting",
+    "TabStop",
 ]

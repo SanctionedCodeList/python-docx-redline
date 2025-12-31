@@ -35,6 +35,7 @@ from .models.style import (
     RunFormatting,
     Style,
     StyleType,
+    TabStop,
 )
 
 if TYPE_CHECKING:
@@ -257,6 +258,101 @@ def get_hyperlink_style() -> Style:
     )
 
 
+# =============================================================================
+# TOC (Table of Contents) Styles
+# =============================================================================
+
+
+def get_toc_heading_style() -> Style:
+    """Get the standard TOCHeading style definition.
+
+    This is a paragraph style used for the TOC title (e.g., "Table of Contents").
+    It's based on Heading1 but with outline_level=9 to exclude it from the TOC
+    itself.
+
+    Returns:
+        A Style object configured as a TOC heading paragraph style.
+
+    Example:
+        >>> style = get_toc_heading_style()
+        >>> style.style_id
+        'TOCHeading'
+        >>> style.paragraph_formatting.outline_level
+        9
+    """
+    return Style(
+        style_id="TOCHeading",
+        name="TOC Heading",
+        style_type=StyleType.PARAGRAPH,
+        based_on="Heading1",
+        next_style="Normal",
+        paragraph_formatting=ParagraphFormatting(
+            outline_level=9,  # Excludes from TOC itself
+            spacing_before=24.0,
+            spacing_after=12.0,
+        ),
+        run_formatting=RunFormatting(bold=True, font_size=14.0),
+        ui_priority=39,
+        semi_hidden=True,
+        unhide_when_used=True,
+    )
+
+
+def get_toc_level_style(level: int) -> Style:
+    """Get the standard TOC level style definition (TOC1, TOC2, etc.).
+
+    This is a paragraph style for TOC entries at a specific level. Each level
+    has progressively more left indent (0.25 inches per level), and level 1
+    entries are bold.
+
+    Args:
+        level: The TOC level (1-9). Level 1 is for top-level headings.
+
+    Returns:
+        A Style object configured as a TOC entry paragraph style.
+
+    Raises:
+        ValueError: If level is not between 1 and 9.
+
+    Example:
+        >>> style = get_toc_level_style(1)
+        >>> style.style_id
+        'TOC1'
+        >>> style.paragraph_formatting.indent_left
+        0.0
+        >>> style.run_formatting.bold
+        True
+
+        >>> style = get_toc_level_style(2)
+        >>> style.style_id
+        'TOC2'
+        >>> style.paragraph_formatting.indent_left
+        0.25
+    """
+    if level < 1 or level > 9:
+        raise ValueError(f"TOC level must be between 1 and 9, got {level}")
+
+    # Calculate left indent: 0 for level 1, 0.25 inches for each additional level
+    indent = (level - 1) * 0.25
+
+    return Style(
+        style_id=f"TOC{level}",
+        name=f"toc {level}",
+        style_type=StyleType.PARAGRAPH,
+        based_on="Normal",
+        next_style="Normal",
+        paragraph_formatting=ParagraphFormatting(
+            indent_left=indent,
+            spacing_after=5.0,
+            tab_stops=[TabStop(position=6.5, alignment="right", leader="dot")],
+        ),
+        run_formatting=RunFormatting(bold=(level == 1)),  # Bold for level 1 only
+        ui_priority=39,
+        semi_hidden=True,
+        unhide_when_used=True,
+    )
+
+
 # Dictionary mapping style IDs to factory functions
 STANDARD_STYLES: dict[str, Callable[[], Style]] = {
     "FootnoteReference": get_footnote_reference_style,
@@ -266,6 +362,17 @@ STANDARD_STYLES: dict[str, Callable[[], Style]] = {
     "EndnoteText": get_endnote_text_style,
     "EndnoteTextChar": get_endnote_text_char_style,
     "Hyperlink": get_hyperlink_style,
+    # TOC styles
+    "TOCHeading": get_toc_heading_style,
+    "TOC1": lambda: get_toc_level_style(1),
+    "TOC2": lambda: get_toc_level_style(2),
+    "TOC3": lambda: get_toc_level_style(3),
+    "TOC4": lambda: get_toc_level_style(4),
+    "TOC5": lambda: get_toc_level_style(5),
+    "TOC6": lambda: get_toc_level_style(6),
+    "TOC7": lambda: get_toc_level_style(7),
+    "TOC8": lambda: get_toc_level_style(8),
+    "TOC9": lambda: get_toc_level_style(9),
 }
 
 
@@ -303,3 +410,38 @@ def ensure_standard_styles(style_manager: StyleManager, *style_ids: str) -> None
         if style_id not in style_manager:
             style = STANDARD_STYLES[style_id]()
             style_manager.add(style)
+
+
+def ensure_toc_styles(style_manager: StyleManager, levels: int = 3) -> None:
+    """Ensure TOCHeading and TOC level styles exist in the document.
+
+    This is a convenience function for ensuring that the TOC title style
+    (TOCHeading) and entry styles (TOC1, TOC2, etc.) exist in the document.
+    If any style doesn't already exist, it will be created using the
+    predefined template.
+
+    Args:
+        style_manager: The StyleManager to add styles to
+        levels: Number of TOC levels to ensure (1-9). Default is 3,
+            which creates TOCHeading, TOC1, TOC2, and TOC3.
+
+    Raises:
+        ValueError: If levels is not between 1 and 9.
+
+    Example:
+        >>> ensure_toc_styles(doc.styles)  # Ensures TOCHeading, TOC1-3
+        >>> ensure_toc_styles(doc.styles, levels=5)  # Ensures TOCHeading, TOC1-5
+        >>> "TOCHeading" in doc.styles
+        True
+        >>> "TOC1" in doc.styles
+        True
+    """
+    if levels < 1 or levels > 9:
+        raise ValueError(f"levels must be between 1 and 9, got {levels}")
+
+    # Ensure TOCHeading style
+    ensure_standard_styles(style_manager, "TOCHeading")
+
+    # Ensure TOC level styles (TOC1 through TOC{levels})
+    for level in range(1, levels + 1):
+        ensure_standard_styles(style_manager, f"TOC{level}")
