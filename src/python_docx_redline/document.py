@@ -43,7 +43,7 @@ from .operations.notes import NoteOperations
 from .operations.patterns import PatternOperations
 from .operations.section import SectionOperations
 from .operations.tables import TableOperations
-from .operations.toc import TOCOperations
+from .operations.toc import TOC, TOCOperations
 from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
 from .results import ComparisonStats, EditResult, FormatResult
@@ -4961,6 +4961,75 @@ class Document:
             use_outline_levels=use_outline_levels,
             update_on_open=update_on_open,
         )
+
+    def remove_toc(self) -> bool:
+        """Remove the Table of Contents from the document.
+
+        This method finds and removes the TOC SDT (Structured Document Tag)
+        from the document, along with any title paragraph that precedes it.
+
+        Returns:
+            True if a TOC was found and removed, False if no TOC exists.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> if doc.remove_toc():
+            ...     print("TOC removed successfully")
+            ... else:
+            ...     print("No TOC found in document")
+            >>> doc.save("report_no_toc.docx")
+        """
+        return self._toc_ops.remove_toc()
+
+    def mark_toc_dirty(self) -> bool:
+        """Mark the TOC field as dirty so Word will recalculate it on open.
+
+        This method sets w:dirty="true" on the TOC field's begin marker.
+        When the document is opened in Word, this tells Word to recalculate
+        the TOC to reflect current document structure.
+
+        This is useful after modifying document content (adding/removing
+        headings) to ensure the TOC reflects the current state.
+
+        Returns:
+            True if a TOC was found and marked dirty, False if no TOC exists.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> # After making changes to document headings
+            >>> if doc.mark_toc_dirty():
+            ...     print("TOC marked for update")
+            >>> doc.save("report_updated.docx")
+        """
+        return self._toc_ops.mark_toc_dirty()
+
+    def get_toc(self) -> TOC | None:
+        """Get information about an existing Table of Contents in the document.
+
+        This method finds and parses an existing TOC, extracting:
+        - Position in the document
+        - Field switches (levels, hyperlinks, etc.)
+        - Whether it's marked dirty
+        - Cached entries (text, level, page number, bookmark)
+
+        Note that the entries are cached values from when Word last updated
+        the TOC. They may be stale if the document has been modified.
+
+        Returns:
+            A TOC object containing the parsed information, or None if no TOC
+            is found in the document.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> toc = doc.get_toc()
+            >>> if toc:
+            ...     print(f"TOC at paragraph {toc.position}")
+            ...     print(f"Levels: {toc.levels}")
+            ...     print(f"Dirty: {toc.is_dirty}")
+            ...     for entry in toc.entries:
+            ...         print(f"  L{entry.level}: {entry.text} ... {entry.page_number}")
+        """
+        return self._toc_ops.get_toc()
 
     # ========================================================================
     # Ref-based editing operations (DocTree accessibility layer)

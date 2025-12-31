@@ -3,6 +3,7 @@ TOCOperations class for handling Table of Contents manipulation.
 
 This module provides a dedicated class for TOC operations, including:
 - Inserting a TOC field that Word will populate on open
+- Inspecting existing TOCs in a document
 - Managing settings.xml for field update behavior
 - Ensuring required styles exist
 
@@ -15,6 +16,8 @@ The generated TOC uses Word's field codes, which means:
 from __future__ import annotations
 
 import logging
+import re
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from lxml import etree
@@ -26,6 +29,91 @@ if TYPE_CHECKING:
     from ..document import Document
 
 logger = logging.getLogger(__name__)
+
+# Namespace for hyperlinks (relationships)
+HYPERLINK_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+
+@dataclass
+class TOCEntry:
+    """A single entry in a Table of Contents.
+
+    Represents one cached entry from an existing TOC. Note that page numbers
+    are cached values that may be stale if the document has been modified.
+
+    Attributes:
+        text: The entry text (heading text)
+        level: Hierarchy level (1-9), corresponds to heading level
+        page_number: Cached page number (may be stale), or None if not present
+        bookmark: Target bookmark name (e.g., "_Toc123456"), or None
+        style: Applied paragraph style (e.g., "TOC1", "TOC2")
+    """
+
+    text: str
+    level: int
+    page_number: str | None = None
+    bookmark: str | None = None
+    style: str = ""
+
+
+@dataclass
+class TOC:
+    """Represents an existing Table of Contents in a document.
+
+    Provides access to TOC metadata, field switches, and cached entries.
+    The entries list contains cached values that may be stale if the
+    document has been modified since Word last updated the TOC.
+
+    Attributes:
+        position: Paragraph index where the TOC is located
+        levels: Tuple of (min_level, max_level) for heading levels included
+        switches: Raw field instruction string
+        is_dirty: Whether the TOC is marked for update when opened
+        entries: List of cached TOC entries (may be stale)
+
+    Example:
+        >>> toc = doc.get_toc()
+        >>> if toc:
+        ...     print(f"TOC at paragraph {toc.position}")
+        ...     print(f"Includes heading levels {toc.levels}")
+        ...     for entry in toc.entries:
+        ...         print(f"  L{entry.level}: {entry.text}")
+    """
+
+    position: int
+    levels: tuple[int, int]
+    switches: str
+    is_dirty: bool
+    entries: list[TOCEntry] = field(default_factory=list)
+    _sdt_element: etree._Element | None = field(default=None, repr=False)
+
+    def get_switch(self, name: str) -> str | None:
+        """Get the value of a specific TOC switch.
+
+        Args:
+            name: Switch name without backslash (e.g., "o", "h", "t")
+
+        Returns:
+            Switch value if present (e.g., "1-3" for \\o), empty string for
+            switches without values (e.g., "\\h"), or None if not present.
+
+        Example:
+            >>> toc.get_switch("o")  # Returns "1-3"
+            >>> toc.get_switch("h")  # Returns "" (switch present but no value)
+            >>> toc.get_switch("b")  # Returns None (switch not present)
+        """
+        # Handle switches with quoted values like \o "1-3" or \t "Style,1"
+        pattern_with_value = rf'\\{re.escape(name)}\s+"([^"]*)"'
+        match = re.search(pattern_with_value, self.switches)
+        if match:
+            return match.group(1)
+
+        # Handle switches without values like \h, \z, \u, \n
+        pattern_no_value = rf"\\{re.escape(name)}(?:\s|$)"
+        if re.search(pattern_no_value, self.switches):
+            return ""
+
+        return None
 
 
 class TOCOperations:
@@ -448,3 +536,370 @@ class TOCOperations:
             xml_declaration=True,
             standalone=True,
         )
+
+    def remove_toc(self) -> bool:
+        """Remove the Table of Contents from the document.
+
+        This method finds and removes the TOC SDT (Structured Document Tag)
+        from the document, along with any title paragraph that precedes it.
+
+        The TOC is identified by its SDT properties which include a
+        docPartGallery with value "Table of Contents".
+
+        Returns:
+            True if a TOC was found and removed, False if no TOC exists.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> if doc.remove_toc():
+            ...     print("TOC removed successfully")
+            ... else:
+            ...     print("No TOC found in document")
+            >>> doc.save("report_no_toc.docx")
+        """
+        body = self._document.xml_root.find(f".//{{{WORD_NAMESPACE}}}body")
+        if body is None:
+            return False
+
+        # Find the TOC SDT element
+        toc_sdt = self._find_toc_sdt(body)
+        if toc_sdt is None:
+            logger.debug("No TOC found in document")
+            return False
+
+        # Check for a title paragraph immediately before the TOC
+        # The title paragraph has TOCHeading style and is typically right before the SDT
+        children = list(body)
+        toc_index = children.index(toc_sdt)
+
+        title_para = None
+        if toc_index > 0:
+            preceding = children[toc_index - 1]
+            if preceding.tag == w("p"):
+                pstyle = preceding.find(f".//{{{WORD_NAMESPACE}}}pStyle")
+                if pstyle is not None and pstyle.get(w("val")) == "TOCHeading":
+                    title_para = preceding
+
+        # Remove the TOC SDT
+        body.remove(toc_sdt)
+
+        # Remove the title paragraph if found
+        if title_para is not None:
+            body.remove(title_para)
+
+        # Save changes to document.xml
+        self._save_document_xml()
+
+        logger.info("Removed TOC from document")
+        return True
+
+    def mark_toc_dirty(self) -> bool:
+        """Mark the TOC field as dirty so Word will recalculate it on open.
+
+        This method finds the TOC field's begin marker (w:fldChar with
+        fldCharType="begin") and sets w:dirty="true" on it. When the document
+        is opened in Word, this tells Word to recalculate the TOC.
+
+        This is useful after modifying document content (adding/removing
+        headings) to ensure the TOC reflects the current document structure.
+
+        Returns:
+            True if a TOC was found and marked dirty, False if no TOC exists.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> # After making changes to document headings
+            >>> if doc.mark_toc_dirty():
+            ...     print("TOC marked for update")
+            >>> doc.save("report_updated.docx")
+        """
+        body = self._document.xml_root.find(f".//{{{WORD_NAMESPACE}}}body")
+        if body is None:
+            return False
+
+        # Find the TOC SDT element
+        toc_sdt = self._find_toc_sdt(body)
+        if toc_sdt is None:
+            logger.debug("No TOC found in document")
+            return False
+
+        # Find the begin fldChar within the TOC
+        begin_fld = toc_sdt.find(
+            f".//{{{WORD_NAMESPACE}}}fldChar[@{{{WORD_NAMESPACE}}}fldCharType='begin']"
+        )
+        if begin_fld is None:
+            logger.warning("TOC found but no begin field marker")
+            return False
+
+        # Set dirty flag
+        begin_fld.set(w("dirty"), "true")
+
+        # Save changes to document.xml
+        self._save_document_xml()
+
+        logger.info("Marked TOC as dirty for update")
+        return True
+
+    def _find_toc_sdt(self, body: etree._Element) -> etree._Element | None:
+        """Find the TOC SDT element in the document body.
+
+        The TOC is identified by its SDT properties which contain a
+        docPartGallery element with value "Table of Contents".
+
+        Args:
+            body: The w:body element to search within
+
+        Returns:
+            The TOC w:sdt element, or None if not found
+        """
+        for sdt in body.findall(f"{{{WORD_NAMESPACE}}}sdt"):
+            # Check for docPartGallery with "Table of Contents"
+            # Per OOXML schema, docPartGallery is inside docPartObj
+            doc_part_obj = sdt.find(f".//{{{WORD_NAMESPACE}}}docPartObj")
+            if doc_part_obj is not None:
+                doc_part_gallery = doc_part_obj.find(f"{{{WORD_NAMESPACE}}}docPartGallery")
+                if doc_part_gallery is not None:
+                    val = doc_part_gallery.get(w("val"))
+                    if val == "Table of Contents":
+                        return sdt
+        return None
+
+    def get_toc(self) -> TOC | None:
+        """Get information about an existing Table of Contents in the document.
+
+        This method finds and parses an existing TOC, extracting:
+        - Position in the document
+        - Field switches (levels, hyperlinks, etc.)
+        - Whether it's marked dirty
+        - Cached entries (text, level, page number, bookmark)
+
+        Note that the entries are cached values from when Word last updated
+        the TOC. They may be stale if the document has been modified.
+
+        Returns:
+            A TOC object containing the parsed information, or None if no TOC
+            is found in the document.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> toc = doc.get_toc()
+            >>> if toc:
+            ...     print(f"TOC at paragraph {toc.position}")
+            ...     print(f"Levels: {toc.levels}")
+            ...     print(f"Dirty: {toc.is_dirty}")
+            ...     for entry in toc.entries:
+            ...         print(f"  L{entry.level}: {entry.text} ... {entry.page_number}")
+        """
+        body = self._document.xml_root.find(f".//{{{WORD_NAMESPACE}}}body")
+        if body is None:
+            return None
+
+        # Find the TOC SDT
+        toc_sdt = self._find_toc_sdt(body)
+        if toc_sdt is None:
+            return None
+
+        # Find position in body
+        children = list(body)
+        position = children.index(toc_sdt)
+
+        # Parse field instruction
+        switches = self._extract_field_instruction(toc_sdt)
+        levels = self._parse_levels_from_switches(switches)
+
+        # Check if dirty
+        is_dirty = self._is_toc_dirty(toc_sdt)
+
+        # Extract cached entries
+        entries = self._extract_toc_entries(toc_sdt)
+
+        return TOC(
+            position=position,
+            levels=levels,
+            switches=switches,
+            is_dirty=is_dirty,
+            entries=entries,
+            _sdt_element=toc_sdt,
+        )
+
+    def _extract_field_instruction(self, sdt: etree._Element) -> str:
+        """Extract the TOC field instruction string from an SDT element.
+
+        Args:
+            sdt: The TOC SDT element
+
+        Returns:
+            The field instruction string (e.g., ' TOC \\o "1-3" \\h \\z \\u ')
+        """
+        # Field instruction may be split across multiple instrText elements
+        instr_texts = sdt.findall(f".//{{{WORD_NAMESPACE}}}instrText")
+        instruction = ""
+        for instr in instr_texts:
+            if instr.text:
+                instruction += instr.text
+        return instruction
+
+    def _parse_levels_from_switches(self, switches: str) -> tuple[int, int]:
+        """Parse heading levels from the \\o switch in field instruction.
+
+        Args:
+            switches: The field instruction string
+
+        Returns:
+            Tuple of (min_level, max_level), defaults to (1, 3) if not found
+        """
+        # Match \o "1-3" pattern
+        match = re.search(r'\\o\s+"(\d+)-(\d+)"', switches)
+        if match:
+            return (int(match.group(1)), int(match.group(2)))
+        return (1, 3)  # Default
+
+    def _is_toc_dirty(self, sdt: etree._Element) -> bool:
+        """Check if the TOC field is marked as dirty.
+
+        Args:
+            sdt: The TOC SDT element
+
+        Returns:
+            True if dirty flag is set, False otherwise
+        """
+        begin_fld = sdt.find(
+            f".//{{{WORD_NAMESPACE}}}fldChar[@{{{WORD_NAMESPACE}}}fldCharType='begin']"
+        )
+        if begin_fld is not None:
+            dirty = begin_fld.get(w("dirty"))
+            return dirty == "true"
+        return False
+
+    def _extract_toc_entries(self, sdt: etree._Element) -> list[TOCEntry]:
+        """Extract cached TOC entries from the SDT content.
+
+        TOC entries are paragraphs within the SDT content that have TOC styles
+        (TOC1, TOC2, etc.). Each entry may contain:
+        - Text content
+        - Page number (at end, after tab)
+        - Hyperlink with bookmark target
+
+        Args:
+            sdt: The TOC SDT element
+
+        Returns:
+            List of TOCEntry objects
+        """
+        entries: list[TOCEntry] = []
+
+        sdt_content = sdt.find(f"{{{WORD_NAMESPACE}}}sdtContent")
+        if sdt_content is None:
+            return entries
+
+        # Find all paragraphs in the SDT content
+        for para in sdt_content.findall(f".//{{{WORD_NAMESPACE}}}p"):
+            entry = self._parse_toc_entry_paragraph(para)
+            if entry is not None:
+                entries.append(entry)
+
+        return entries
+
+    def _parse_toc_entry_paragraph(self, para: etree._Element) -> TOCEntry | None:
+        """Parse a single paragraph as a TOC entry.
+
+        Args:
+            para: A w:p element from the TOC content
+
+        Returns:
+            TOCEntry if this is a valid TOC entry, None otherwise
+        """
+        # Get paragraph style
+        style = ""
+        level = 1
+        pstyle = para.find(f".//{{{WORD_NAMESPACE}}}pStyle")
+        if pstyle is not None:
+            style = pstyle.get(w("val"), "")
+            # Extract level from style name (e.g., "TOC1" -> 1)
+            if style.upper().startswith("TOC"):
+                try:
+                    level = int(style[3:])
+                except ValueError:
+                    pass
+
+        # Skip if not a TOC entry style (TOC1-TOC9)
+        if not style.upper().startswith("TOC"):
+            return None
+
+        # Skip placeholder text (field content before Word updates)
+        # These typically contain just "Update this table" or similar
+        all_text = self._get_paragraph_text(para)
+        if not all_text or all_text.strip().lower().startswith("update"):
+            return None
+
+        # Extract text, page number, and bookmark
+        text = ""
+        page_number = None
+        bookmark = None
+
+        # Check for hyperlink (contains bookmark target)
+        hyperlink = para.find(f".//{{{WORD_NAMESPACE}}}hyperlink")
+        if hyperlink is not None:
+            # Get the anchor (bookmark name)
+            bookmark = hyperlink.get(w("anchor"))
+            # Get text from inside the hyperlink
+            text = self._get_element_text(hyperlink)
+        else:
+            # No hyperlink, get all text from runs
+            text = all_text
+
+        # Find page number - typically at the end after a tab
+        # The page number is often in a separate run after the main text
+        runs = para.findall(f".//{{{WORD_NAMESPACE}}}r")
+        if runs:
+            last_run_text = self._get_element_text(runs[-1])
+            # Check if it looks like a page number (just digits)
+            if last_run_text and last_run_text.strip().isdigit():
+                page_number = last_run_text.strip()
+                # Remove page number from main text if present
+                if text.endswith(page_number):
+                    text = text[: -len(page_number)].rstrip()
+
+        # Clean up text (remove tabs and extra whitespace)
+        text = text.replace("\t", " ").strip()
+
+        if not text:
+            return None
+
+        return TOCEntry(
+            text=text,
+            level=level,
+            page_number=page_number,
+            bookmark=bookmark,
+            style=style,
+        )
+
+    def _get_paragraph_text(self, para: etree._Element) -> str:
+        """Get all text content from a paragraph element.
+
+        Args:
+            para: A w:p element
+
+        Returns:
+            Combined text from all w:t elements
+        """
+        text_parts = []
+        for t_elem in para.findall(f".//{{{WORD_NAMESPACE}}}t"):
+            if t_elem.text:
+                text_parts.append(t_elem.text)
+        return "".join(text_parts)
+
+    def _get_element_text(self, elem: etree._Element) -> str:
+        """Get all text content from an element and its descendants.
+
+        Args:
+            elem: An XML element
+
+        Returns:
+            Combined text from all w:t elements within
+        """
+        text_parts = []
+        for t_elem in elem.findall(f".//{{{WORD_NAMESPACE}}}t"):
+            if t_elem.text:
+                text_parts.append(t_elem.text)
+        return "".join(text_parts)
