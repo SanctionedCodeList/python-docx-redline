@@ -53,6 +53,16 @@ import * as DocTreeScope from "@accessibility/scope";
   unresolveComment: DocTreeEditing.unresolveComment,
   deleteComment: DocTreeEditing.deleteComment,
   getComments: DocTreeEditing.getComments,
+  // Navigation helpers
+  getNextRef: DocTreeEditing.getNextRef,
+  getPrevRef: DocTreeEditing.getPrevRef,
+  getSiblingRefs: DocTreeEditing.getSiblingRefs,
+  getSectionForRef: DocTreeEditing.getSectionForRef,
+  getRefRange: DocTreeEditing.getRefRange,
+  isRefInRange: DocTreeEditing.isRefInRange,
+  // Document summary
+  getDocumentSummary: DocTreeEditing.getDocumentSummary,
+  getWordCount: DocTreeEditing.getWordCount,
   // Scope functions
   parseScope: DocTreeScope.parseScope,
   parseNoteScope: DocTreeScope.parseNoteScope,

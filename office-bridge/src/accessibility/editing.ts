@@ -2558,3 +2558,334 @@ export async function getComments(
     };
   }
 }
+
+// =============================================================================
+// Navigation Helpers
+// =============================================================================
+
+/**
+ * Get the next paragraph ref after the given ref.
+ *
+ * @param ref - Current paragraph ref
+ * @param totalParagraphs - Total number of paragraphs (optional, for bounds checking)
+ * @returns Next ref or null if at end
+ *
+ * @example
+ * ```typescript
+ * const nextRef = getNextRef("p:5");  // Returns "p:6"
+ * const lastRef = getNextRef("p:100", 100);  // Returns null (out of bounds)
+ * ```
+ */
+export function getNextRef(ref: Ref, totalParagraphs?: number): Ref | null {
+  const parsed = parseRef(ref);
+
+  if (parsed.type !== 'p') {
+    return null;
+  }
+
+  const nextIndex = parsed.index + 1;
+
+  // If we know the total, check bounds
+  if (totalParagraphs !== undefined && nextIndex >= totalParagraphs) {
+    return null;
+  }
+
+  return `p:${nextIndex}`;
+}
+
+/**
+ * Get the previous paragraph ref before the given ref.
+ *
+ * @param ref - Current paragraph ref
+ * @returns Previous ref or null if at beginning
+ *
+ * @example
+ * ```typescript
+ * const prevRef = getPrevRef("p:5");  // Returns "p:4"
+ * const firstRef = getPrevRef("p:0");  // Returns null
+ * ```
+ */
+export function getPrevRef(ref: Ref): Ref | null {
+  const parsed = parseRef(ref);
+
+  if (parsed.type !== 'p') {
+    return null;
+  }
+
+  if (parsed.index <= 0) {
+    return null;
+  }
+
+  return `p:${parsed.index - 1}`;
+}
+
+/**
+ * Get sibling refs (previous and next) for a given ref.
+ *
+ * @param ref - Current paragraph ref
+ * @param totalParagraphs - Total number of paragraphs (optional)
+ * @returns Object with prev and next refs (null if at boundary)
+ */
+export function getSiblingRefs(
+  ref: Ref,
+  totalParagraphs?: number
+): { prev: Ref | null; next: Ref | null } {
+  return {
+    prev: getPrevRef(ref),
+    next: getNextRef(ref, totalParagraphs),
+  };
+}
+
+/**
+ * Get the section heading for a given paragraph.
+ *
+ * Walks backwards through the tree to find the nearest heading-style paragraph.
+ *
+ * @param tree - Accessibility tree
+ * @param ref - Reference to the paragraph
+ * @returns Section heading info or null if not in a section
+ */
+export function getSectionForRef(
+  tree: AccessibilityTree,
+  ref: Ref
+): { headingRef: Ref; headingText: string; level: number } | null {
+  const parsed = parseRef(ref);
+
+  if (parsed.type !== 'p') {
+    return null;
+  }
+
+  // Walk backwards from the ref to find a heading
+  for (let i = parsed.index - 1; i >= 0; i--) {
+    const node = tree.content[i];
+    if (!node) continue;
+
+    // Check if this is a heading (by role or style)
+    const isHeading =
+      node.role === 'heading' ||
+      (node.style?.name && /^Heading\s*\d*$/i.test(node.style.name));
+
+    if (isHeading) {
+      // Try to extract level from style name
+      let level = 1;
+      if (node.style?.name) {
+        const match = node.style.name.match(/Heading\s*(\d+)/i);
+        if (match?.[1]) {
+          level = parseInt(match[1], 10);
+        }
+      }
+
+      return {
+        headingRef: node.ref,
+        headingText: node.text ?? '',
+        level,
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Get all refs between two refs (inclusive).
+ *
+ * @param startRef - Starting ref
+ * @param endRef - Ending ref
+ * @returns Array of refs in order
+ */
+export function getRefRange(startRef: Ref, endRef: Ref): Ref[] {
+  const start = parseRef(startRef);
+  const end = parseRef(endRef);
+
+  if (start.type !== 'p' || end.type !== 'p') {
+    return [];
+  }
+
+  const refs: Ref[] = [];
+  const [minIndex, maxIndex] = [
+    Math.min(start.index, end.index),
+    Math.max(start.index, end.index),
+  ];
+
+  for (let i = minIndex; i <= maxIndex; i++) {
+    refs.push(`p:${i}`);
+  }
+
+  return refs;
+}
+
+/**
+ * Check if a ref is within a range.
+ *
+ * @param ref - Ref to check
+ * @param startRef - Start of range
+ * @param endRef - End of range
+ * @returns True if ref is within the range (inclusive)
+ */
+export function isRefInRange(ref: Ref, startRef: Ref, endRef: Ref): boolean {
+  const parsed = parseRef(ref);
+  const start = parseRef(startRef);
+  const end = parseRef(endRef);
+
+  if (parsed.type !== 'p' || start.type !== 'p' || end.type !== 'p') {
+    return false;
+  }
+
+  const minIndex = Math.min(start.index, end.index);
+  const maxIndex = Math.max(start.index, end.index);
+
+  return parsed.index >= minIndex && parsed.index <= maxIndex;
+}
+
+// =============================================================================
+// Document Summary
+// =============================================================================
+
+/**
+ * Document summary statistics.
+ */
+export interface DocumentSummary {
+  /** Total number of paragraphs */
+  paragraphCount: number;
+  /** Total number of tables */
+  tableCount: number;
+  /** Approximate word count */
+  wordCount: number;
+  /** Approximate character count (with spaces) */
+  characterCount: number;
+  /** Approximate character count (without spaces) */
+  characterCountNoSpaces: number;
+  /** Number of headings */
+  headingCount: number;
+  /** Number of list items */
+  listItemCount: number;
+  /** Whether the document has tracked changes */
+  hasTrackedChanges: boolean;
+  /** Number of comments */
+  commentCount: number;
+  /** Breakdown by heading level */
+  headingsByLevel: Record<number, number>;
+  /** Section names (from headings) */
+  sections: string[];
+}
+
+/**
+ * Get a summary of document statistics.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param tree - Optional accessibility tree (if available, provides more info)
+ * @returns DocumentSummary with document statistics
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const summary = await getDocumentSummary(context);
+ *   console.log(`Document has ${summary.wordCount} words in ${summary.paragraphCount} paragraphs`);
+ * });
+ * ```
+ */
+export async function getDocumentSummary(
+  context: WordRequestContext,
+  tree?: AccessibilityTree
+): Promise<DocumentSummary> {
+  // Load paragraphs and tables
+  const paragraphs = context.document.body.paragraphs.load('items,text,style');
+  const tables = context.document.body.tables.load('items');
+  await context.sync();
+
+  // Calculate basic counts
+  let wordCount = 0;
+  let characterCount = 0;
+  let characterCountNoSpaces = 0;
+  let headingCount = 0;
+  let listItemCount = 0;
+  const headingsByLevel: Record<number, number> = {};
+  const sections: string[] = [];
+
+  for (const para of paragraphs.items) {
+    const text = para.text ?? '';
+
+    // Word count (split by whitespace)
+    const words = text.split(/\s+/).filter((w) => w.length > 0);
+    wordCount += words.length;
+
+    // Character counts
+    characterCount += text.length;
+    characterCountNoSpaces += text.replace(/\s/g, '').length;
+
+    // Check for headings
+    const style = para.style ?? '';
+    if (/^Heading\s*\d*$/i.test(style)) {
+      headingCount++;
+      const match = style.match(/Heading\s*(\d+)/i);
+      const level = match?.[1] ? parseInt(match[1], 10) : 1;
+      headingsByLevel[level] = (headingsByLevel[level] ?? 0) + 1;
+
+      if (text.trim()) {
+        sections.push(text.trim());
+      }
+    }
+
+    // Check for list items
+    if (/^List/i.test(style)) {
+      listItemCount++;
+    }
+  }
+
+  // Check for tracked changes if tree is available
+  let hasTrackedChanges = false;
+  if (tree) {
+    hasTrackedChanges = tree.content.some((node) => node.hasChanges);
+  }
+
+  // Get comment count
+  let commentCount = 0;
+  try {
+    const body = context.document.body as unknown as WordBodyWithComments;
+    const comments = body.getComments();
+    comments.load('items');
+    await context.sync();
+    commentCount = comments.items.length;
+  } catch {
+    // Comments API may not be available
+  }
+
+  return {
+    paragraphCount: paragraphs.items.length,
+    tableCount: tables.items.length,
+    wordCount,
+    characterCount,
+    characterCountNoSpaces,
+    headingCount,
+    listItemCount,
+    hasTrackedChanges,
+    commentCount,
+    headingsByLevel,
+    sections,
+  };
+}
+
+/**
+ * Get word count for a specific ref or range of refs.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param refs - Single ref or array of refs
+ * @returns Word count for the specified content
+ */
+export async function getWordCount(
+  context: WordRequestContext,
+  refs: Ref | Ref[]
+): Promise<number> {
+  const refArray = Array.isArray(refs) ? refs : [refs];
+  let totalWords = 0;
+
+  for (const ref of refArray) {
+    const text = await getTextByRef(context, ref);
+    if (text) {
+      const words = text.split(/\s+/).filter((w) => w.length > 0);
+      totalWords += words.length;
+    }
+  }
+
+  return totalWords;
+}
