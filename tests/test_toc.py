@@ -1504,3 +1504,516 @@ class TestGetTocRoundtrip:
         finally:
             doc_path.unlink(missing_ok=True)
             output_path.unlink(missing_ok=True)
+
+
+# =============================================================================
+# Phase 4: TOC Update Tests
+# =============================================================================
+
+
+class TestUpdateTocLevels:
+    """Tests for updating TOC heading levels."""
+
+    def test_update_toc_levels_only(self):
+        """Test updating only the heading levels."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(levels=(1, 3))
+
+            # Update levels to 1-5
+            result = doc.update_toc(levels=(1, 5))
+            assert result is True
+
+            # Verify updated instruction
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.levels == (1, 5)
+            assert '\\o "1-5"' in toc.switches
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+    def test_update_toc_narrow_levels(self):
+        """Test narrowing the heading levels."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(levels=(1, 5))
+
+            # Narrow to just level 1
+            result = doc.update_toc(levels=(1, 1))
+            assert result is True
+
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.levels == (1, 1)
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+
+class TestUpdateTocHyperlinks:
+    """Tests for toggling hyperlinks on/off."""
+
+    def test_update_toc_enable_hyperlinks(self):
+        """Test enabling hyperlinks on a TOC without them."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(hyperlinks=False)
+
+            # Verify no hyperlinks initially
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("h") is None
+
+            # Enable hyperlinks
+            result = doc.update_toc(hyperlinks=True)
+            assert result is True
+
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("h") == ""  # Present but no value
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+    def test_update_toc_disable_hyperlinks(self):
+        """Test disabling hyperlinks on a TOC with them."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(hyperlinks=True)
+
+            # Verify hyperlinks present initially
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("h") == ""
+
+            # Disable hyperlinks
+            result = doc.update_toc(hyperlinks=False)
+            assert result is True
+
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("h") is None
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+
+class TestUpdateTocPageNumbers:
+    """Tests for toggling page numbers on/off."""
+
+    def test_update_toc_hide_page_numbers(self):
+        """Test hiding page numbers."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(show_page_numbers=True)
+
+            # Verify page numbers shown initially (no \n switch)
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("n") is None
+
+            # Hide page numbers
+            result = doc.update_toc(show_page_numbers=False)
+            assert result is True
+
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("n") == ""  # \n switch present
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+    def test_update_toc_show_page_numbers(self):
+        """Test showing page numbers."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(show_page_numbers=False)
+
+            # Verify page numbers hidden initially (\n switch present)
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("n") == ""
+
+            # Show page numbers
+            result = doc.update_toc(show_page_numbers=True)
+            assert result is True
+
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("n") is None  # \n switch removed
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+
+class TestUpdateTocTitle:
+    """Tests for changing the TOC title."""
+
+    def test_update_toc_change_title(self):
+        """Test changing the title text."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(title="Original Title")
+
+            # Verify original title
+            body = doc.xml_root.find(f".//{{{WORD_NS}}}body")
+            title_para = body[0]
+            text_elem = title_para.find(f".//{{{WORD_NS}}}t")
+            assert text_elem is not None
+            assert text_elem.text == "Original Title"
+
+            # Change title
+            result = doc.update_toc(title="New Title")
+            assert result is True
+
+            # Verify new title
+            text_elem = title_para.find(f".//{{{WORD_NS}}}t")
+            assert text_elem is not None
+            assert text_elem.text == "New Title"
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+    def test_update_toc_remove_title(self):
+        """Test removing the title by passing title=None."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(title="Table of Contents")
+
+            # Verify title exists
+            body = doc.xml_root.find(f".//{{{WORD_NS}}}body")
+            first_child = body[0]
+            pstyle = first_child.find(f".//{{{WORD_NS}}}pStyle")
+            assert pstyle is not None
+            assert pstyle.get(f"{{{WORD_NS}}}val") == "TOCHeading"
+
+            # Remove title
+            result = doc.update_toc(title=None)
+            assert result is True
+
+            # Verify title removed - first child should now be SDT
+            first_child = body[0]
+            assert first_child.tag == f"{{{WORD_NS}}}sdt"
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+    def test_update_toc_title_unchanged_when_not_provided(self):
+        """Test that title is unchanged when not provided."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(title="Original Title")
+
+            # Update only levels (title not provided)
+            result = doc.update_toc(levels=(1, 5))
+            assert result is True
+
+            # Verify title unchanged
+            body = doc.xml_root.find(f".//{{{WORD_NS}}}body")
+            title_para = body[0]
+            text_elem = title_para.find(f".//{{{WORD_NS}}}t")
+            assert text_elem is not None
+            assert text_elem.text == "Original Title"
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+    def test_update_toc_add_title_to_untitled_toc(self):
+        """Test adding a title to a TOC that doesn't have one."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(title=None)
+
+            # Verify no title
+            body = doc.xml_root.find(f".//{{{WORD_NS}}}body")
+            first_child = body[0]
+            assert first_child.tag == f"{{{WORD_NS}}}sdt"
+
+            # Add title
+            result = doc.update_toc(title="New Title")
+            assert result is True
+
+            # Verify title added
+            first_child = body[0]
+            assert first_child.tag == f"{{{WORD_NS}}}p"
+            pstyle = first_child.find(f".//{{{WORD_NS}}}pStyle")
+            assert pstyle is not None
+            assert pstyle.get(f"{{{WORD_NS}}}val") == "TOCHeading"
+            text_elem = first_child.find(f".//{{{WORD_NS}}}t")
+            assert text_elem is not None
+            assert text_elem.text == "New Title"
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+
+class TestUpdateTocMultipleOptions:
+    """Tests for updating multiple options at once."""
+
+    def test_update_toc_multiple_options(self):
+        """Test updating multiple options simultaneously."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(
+                levels=(1, 3),
+                hyperlinks=True,
+                show_page_numbers=True,
+                use_outline_levels=True,
+                title="Original",
+            )
+
+            # Update multiple options at once
+            result = doc.update_toc(
+                levels=(1, 6),
+                hyperlinks=False,
+                show_page_numbers=False,
+                title="Updated",
+            )
+            assert result is True
+
+            # Verify all changes
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.levels == (1, 6)
+            assert toc.get_switch("h") is None  # Hyperlinks disabled
+            assert toc.get_switch("n") == ""  # Page numbers hidden
+            assert toc.get_switch("u") == ""  # Outline levels preserved
+
+            # Verify title
+            body = doc.xml_root.find(f".//{{{WORD_NS}}}body")
+            title_para = body[0]
+            text_elem = title_para.find(f".//{{{WORD_NS}}}t")
+            assert text_elem is not None
+            assert text_elem.text == "Updated"
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+
+class TestUpdateTocNoTocExists:
+    """Tests for update_toc when no TOC exists."""
+
+    def test_update_toc_returns_false_when_no_toc(self):
+        """Test that update_toc returns False when no TOC exists."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+
+            # Try to update non-existent TOC
+            result = doc.update_toc(levels=(1, 5))
+            assert result is False
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+
+class TestUpdateTocSaveReload:
+    """Tests for update_toc survives save/reload."""
+
+    def test_update_toc_survives_save_reload(self):
+        """Test that TOC updates persist after save/reload."""
+        doc_path = create_simple_document()
+        output_path = Path(tempfile.mktemp(suffix=".docx"))
+        try:
+            # Insert TOC
+            doc = Document(doc_path)
+            doc.insert_toc(levels=(1, 3), title="Original")
+            doc.save(output_path)
+
+            # Reload and update
+            doc2 = Document(output_path)
+            result = doc2.update_toc(levels=(1, 5), title="Updated")
+            assert result is True
+
+            # Save again
+            output_path2 = Path(tempfile.mktemp(suffix=".docx"))
+            doc2.save(output_path2)
+
+            # Reload and verify
+            doc3 = Document(output_path2)
+            toc = doc3.get_toc()
+            assert toc is not None
+            assert toc.levels == (1, 5)
+
+            # Verify title
+            body = doc3.xml_root.find(f".//{{{WORD_NS}}}body")
+            title_para = body[0]
+            text_elem = title_para.find(f".//{{{WORD_NS}}}t")
+            assert text_elem is not None
+            assert text_elem.text == "Updated"
+
+            output_path2.unlink(missing_ok=True)
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+
+class TestUpdateTocMarksDirty:
+    """Tests for update_toc marking TOC dirty."""
+
+    def test_update_toc_marks_dirty(self):
+        """Test that update_toc marks the TOC as dirty."""
+        doc_path = create_document_with_populated_toc()
+        try:
+            doc = Document(doc_path)
+
+            # Verify TOC is not dirty initially
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.is_dirty is False
+
+            # Update TOC
+            result = doc.update_toc(levels=(1, 4))
+            assert result is True
+
+            # Verify TOC is now dirty
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.is_dirty is True
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+    def test_update_toc_with_title_only_marks_dirty(self):
+        """Test that updating only the title also marks TOC dirty."""
+        doc_path = create_document_with_populated_toc()
+        try:
+            doc = Document(doc_path)
+
+            # Verify TOC is not dirty initially
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.is_dirty is False
+
+            # Update only title
+            result = doc.update_toc(title="New Title")
+            assert result is True
+
+            # Verify TOC is now dirty
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.is_dirty is True
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+
+class TestUpdateTocPreservesSettings:
+    """Tests for preserving settings that aren't explicitly changed."""
+
+    def test_update_toc_preserves_hyperlinks(self):
+        """Test that hyperlinks are preserved when not explicitly changed."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(hyperlinks=True)
+
+            # Update only levels
+            doc.update_toc(levels=(1, 5))
+
+            # Verify hyperlinks preserved
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("h") == ""
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+    def test_update_toc_preserves_outline_levels(self):
+        """Test that outline levels are preserved when not explicitly changed."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(use_outline_levels=True)
+
+            # Update only levels
+            doc.update_toc(levels=(1, 5))
+
+            # Verify outline levels preserved
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("u") == ""
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+    def test_update_toc_preserves_page_numbers_hidden(self):
+        """Test that hidden page numbers are preserved when not explicitly changed."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(show_page_numbers=False)
+
+            # Update only levels
+            doc.update_toc(levels=(1, 5))
+
+            # Verify page numbers still hidden
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("n") == ""
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+
+class TestUpdateTocOutlineLevels:
+    """Tests for toggling outline levels on/off."""
+
+    def test_update_toc_enable_outline_levels(self):
+        """Test enabling outline levels."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(use_outline_levels=False)
+
+            # Verify no outline levels initially
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("u") is None
+
+            # Enable outline levels
+            result = doc.update_toc(use_outline_levels=True)
+            assert result is True
+
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("u") == ""
+
+        finally:
+            doc_path.unlink(missing_ok=True)
+
+    def test_update_toc_disable_outline_levels(self):
+        """Test disabling outline levels."""
+        doc_path = create_simple_document()
+        try:
+            doc = Document(doc_path)
+            doc.insert_toc(use_outline_levels=True)
+
+            # Verify outline levels present initially
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("u") == ""
+
+            # Disable outline levels
+            result = doc.update_toc(use_outline_levels=False)
+            assert result is True
+
+            toc = doc.get_toc()
+            assert toc is not None
+            assert toc.get_switch("u") is None
+
+        finally:
+            doc_path.unlink(missing_ok=True)

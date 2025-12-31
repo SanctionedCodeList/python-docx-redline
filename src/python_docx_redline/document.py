@@ -5031,6 +5031,61 @@ class Document:
         """
         return self._toc_ops.get_toc()
 
+    def update_toc(
+        self,
+        levels: tuple[int, int] | None = None,
+        hyperlinks: bool | None = None,
+        show_page_numbers: bool | None = None,
+        use_outline_levels: bool | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        """Update an existing TOC's field instruction and/or title.
+
+        This method modifies an existing TOC in place without removing it.
+        Only the parameters that are explicitly provided (not None) will be
+        updated; other settings are preserved from the existing TOC.
+
+        For the title parameter, use the following convention:
+        - title=None: Remove the title
+        - title="New Title": Change the title to this value
+        - title not provided: Don't change the title
+
+        Args:
+            levels: New heading levels tuple (min_level, max_level). If provided,
+                   updates the \\o switch. Example: (1, 5) for headings 1-5.
+            hyperlinks: If True, add \\h switch (entries link to headings).
+                       If False, remove \\h switch. If None, preserve current.
+            show_page_numbers: If True, remove \\n switch (show page numbers).
+                              If False, add \\n switch (hide page numbers).
+                              If None, preserve current.
+            use_outline_levels: If True, add \\u switch (include outline levels).
+                               If False, remove \\u switch. If None, preserve current.
+            title: New title text. If explicitly set to None, removes the title
+                  paragraph. If not provided, the title is unchanged.
+
+        Returns:
+            True if a TOC was found and updated, False if no TOC exists.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> # Update levels to include more headings
+            >>> doc.update_toc(levels=(1, 5))
+            >>> # Turn off hyperlinks
+            >>> doc.update_toc(hyperlinks=False)
+            >>> # Change the title
+            >>> doc.update_toc(title="Table of Contents")
+            >>> # Remove the title
+            >>> doc.update_toc(title=None)
+            >>> doc.save("report_updated.docx")
+        """
+        return self._toc_ops.update_toc(
+            levels=levels,
+            hyperlinks=hyperlinks,
+            show_page_numbers=show_page_numbers,
+            use_outline_levels=use_outline_levels,
+            **kwargs,
+        )
+
     # ========================================================================
     # Ref-based editing operations (DocTree accessibility layer)
     # ========================================================================

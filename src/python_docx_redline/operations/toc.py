@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from lxml import etree
 
@@ -27,6 +27,9 @@ from ..models.style import ParagraphFormatting, RunFormatting, Style, StyleType
 
 if TYPE_CHECKING:
     from ..document import Document
+
+# Sentinel value for "don't change" in update_toc()
+_UNSET: Any = object()
 
 logger = logging.getLogger(__name__)
 
@@ -639,6 +642,216 @@ class TOCOperations:
 
         logger.info("Marked TOC as dirty for update")
         return True
+
+    def update_toc(
+        self,
+        levels: tuple[int, int] | None = None,
+        hyperlinks: bool | None = None,
+        show_page_numbers: bool | None = None,
+        use_outline_levels: bool | None = None,
+        title: str | None = _UNSET,
+    ) -> bool:
+        """Update an existing TOC's field instruction and/or title.
+
+        This method modifies an existing TOC in place without removing it.
+        Only the parameters that are explicitly provided (not None) will be
+        updated; other settings are preserved from the existing TOC.
+
+        For the title parameter, use a sentinel to distinguish between:
+        - title=None: Remove the title
+        - title="New Title": Change the title to this value
+        - title not provided (default): Don't change the title
+
+        Args:
+            levels: New heading levels tuple (min_level, max_level). If provided,
+                   updates the \\o switch. Example: (1, 5) for headings 1-5.
+            hyperlinks: If True, add \\h switch (entries link to headings).
+                       If False, remove \\h switch. If None, preserve current.
+            show_page_numbers: If True, remove \\n switch (show page numbers).
+                              If False, add \\n switch (hide page numbers).
+                              If None, preserve current.
+            use_outline_levels: If True, add \\u switch (include outline levels).
+                               If False, remove \\u switch. If None, preserve current.
+            title: New title text. If explicitly set to None, removes the title
+                  paragraph. If not provided, the title is unchanged.
+
+        Returns:
+            True if a TOC was found and updated, False if no TOC exists.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> # Update levels to include more headings
+            >>> doc.update_toc(levels=(1, 5))
+            >>> # Turn off hyperlinks
+            >>> doc.update_toc(hyperlinks=False)
+            >>> # Change the title
+            >>> doc.update_toc(title="Table of Contents")
+            >>> # Remove the title
+            >>> doc.update_toc(title=None)
+            >>> doc.save("report_updated.docx")
+        """
+        body = self._document.xml_root.find(f".//{{{WORD_NAMESPACE}}}body")
+        if body is None:
+            return False
+
+        # Find the TOC SDT element
+        toc_sdt = self._find_toc_sdt(body)
+        if toc_sdt is None:
+            logger.debug("No TOC found in document")
+            return False
+
+        # Get current field instruction and parse switches
+        current_instruction = self._extract_field_instruction(toc_sdt)
+
+        # Update the field instruction with new values
+        new_instruction = self._update_field_instruction(
+            current_instruction,
+            levels=levels,
+            hyperlinks=hyperlinks,
+            show_page_numbers=show_page_numbers,
+            use_outline_levels=use_outline_levels,
+        )
+
+        # Replace the instrText element content
+        instr_text = toc_sdt.find(f".//{{{WORD_NAMESPACE}}}instrText")
+        if instr_text is not None:
+            instr_text.text = new_instruction
+
+        # Handle title update
+        if title is not _UNSET:
+            self._update_toc_title(body, toc_sdt, title)
+
+        # Mark the TOC as dirty so Word recalculates it
+        begin_fld = toc_sdt.find(
+            f".//{{{WORD_NAMESPACE}}}fldChar[@{{{WORD_NAMESPACE}}}fldCharType='begin']"
+        )
+        if begin_fld is not None:
+            begin_fld.set(w("dirty"), "true")
+
+        # Save changes to document.xml
+        self._save_document_xml()
+
+        logger.info("Updated TOC settings")
+        return True
+
+    def _update_field_instruction(
+        self,
+        instruction: str,
+        levels: tuple[int, int] | None = None,
+        hyperlinks: bool | None = None,
+        show_page_numbers: bool | None = None,
+        use_outline_levels: bool | None = None,
+    ) -> str:
+        """Update field instruction switches based on provided parameters.
+
+        Args:
+            instruction: Current field instruction string
+            levels: New levels tuple or None to preserve current
+            hyperlinks: New hyperlinks setting or None to preserve
+            show_page_numbers: New page numbers setting or None to preserve
+            use_outline_levels: New outline levels setting or None to preserve
+
+        Returns:
+            Updated field instruction string
+        """
+        # Start with TOC keyword
+        parts = [" TOC"]
+
+        # Handle \o switch (levels)
+        if levels is not None:
+            min_level, max_level = levels
+            parts.append(f'\\o "{min_level}-{max_level}"')
+        else:
+            # Preserve existing \o switch
+            match = re.search(r'\\o\s+"([^"]*)"', instruction)
+            if match:
+                parts.append(f'\\o "{match.group(1)}"')
+            else:
+                # Default to 1-3 if not present
+                parts.append('\\o "1-3"')
+
+        # Handle \h switch (hyperlinks)
+        if hyperlinks is not None:
+            if hyperlinks:
+                parts.append("\\h")
+            # If False, don't add \h (omit it)
+        else:
+            # Preserve existing
+            if re.search(r"\\h(?:\s|$)", instruction):
+                parts.append("\\h")
+
+        # Always include \z (hide in web view) - this is standard
+        parts.append("\\z")
+
+        # Handle \u switch (outline levels)
+        if use_outline_levels is not None:
+            if use_outline_levels:
+                parts.append("\\u")
+            # If False, don't add \u (omit it)
+        else:
+            # Preserve existing
+            if re.search(r"\\u(?:\s|$)", instruction):
+                parts.append("\\u")
+
+        # Handle \n switch (suppress page numbers)
+        if show_page_numbers is not None:
+            if not show_page_numbers:
+                parts.append("\\n")
+            # If True (show page numbers), don't add \n
+        else:
+            # Preserve existing
+            if re.search(r"\\n(?:\s|$)", instruction):
+                parts.append("\\n")
+
+        # Add trailing space and return
+        return " ".join(parts) + " "
+
+    def _update_toc_title(
+        self,
+        body: etree._Element,
+        toc_sdt: etree._Element,
+        new_title: str | None,
+    ) -> None:
+        """Update or remove the TOC title paragraph.
+
+        Args:
+            body: The w:body element
+            toc_sdt: The TOC SDT element
+            new_title: New title text, or None to remove the title
+        """
+        children = list(body)
+        toc_index = children.index(toc_sdt)
+
+        # Find existing title paragraph (immediately before SDT with TOCHeading style)
+        title_para = None
+        if toc_index > 0:
+            preceding = children[toc_index - 1]
+            if preceding.tag == w("p"):
+                pstyle = preceding.find(f".//{{{WORD_NAMESPACE}}}pStyle")
+                if pstyle is not None and pstyle.get(w("val")) == "TOCHeading":
+                    title_para = preceding
+
+        if new_title is None:
+            # Remove the title if it exists
+            if title_para is not None:
+                body.remove(title_para)
+        elif title_para is not None:
+            # Update existing title text
+            text_elem = title_para.find(f".//{{{WORD_NAMESPACE}}}t")
+            if text_elem is not None:
+                text_elem.text = new_title
+            else:
+                # No text element found, create one
+                run = title_para.find(f".//{{{WORD_NAMESPACE}}}r")
+                if run is None:
+                    run = etree.SubElement(title_para, w("r"))
+                text_elem = etree.SubElement(run, w("t"))
+                text_elem.text = new_title
+        else:
+            # Need to create a new title paragraph
+            self._ensure_toc_heading_style()
+            title_para_new = self._create_title_paragraph(new_title)
+            body.insert(toc_index, title_para_new)
 
     def _find_toc_sdt(self, body: etree._Element) -> etree._Element | None:
         """Find the TOC SDT element in the document body.
