@@ -1264,3 +1264,265 @@ export async function searchReplaceByScope(
 function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+// =============================================================================
+// Batch Operations
+// =============================================================================
+
+/**
+ * A single edit operation for batch processing.
+ */
+export interface BatchEditOperation {
+  /** Reference to the element to edit */
+  ref: Ref;
+  /** New text content (for replace operations) */
+  newText?: string;
+  /** Operation type */
+  operation: 'replace' | 'delete' | 'insertAfter' | 'insertBefore';
+  /** Text to insert (for insert operations) */
+  insertText?: string;
+}
+
+/**
+ * Result of a batch edit operation.
+ */
+export interface BatchEditResult {
+  /** Overall success (true if all operations succeeded) */
+  success: boolean;
+  /** Number of successful operations */
+  successCount: number;
+  /** Number of failed operations */
+  failedCount: number;
+  /** Individual results for each operation */
+  results: EditResult[];
+}
+
+/**
+ * Execute multiple edit operations in a single batched transaction.
+ *
+ * PERFORMANCE: Uses batched paragraph loading and operations.
+ * All operations are queued and executed with minimal context.sync() calls,
+ * regardless of how many edits are requested.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param operations - Array of edit operations to perform
+ * @param options - Editing options (track changes, author, etc.)
+ * @returns BatchEditResult with overall success and individual results
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const result = await batchEdit(context, [
+ *     { ref: "p:3", operation: "replace", newText: "Updated intro" },
+ *     { ref: "p:7", operation: "replace", newText: "New conclusion" },
+ *     { ref: "p:12", operation: "delete" },
+ *     { ref: "p:5", operation: "insertAfter", insertText: " (amended)" },
+ *   ], { track: true });
+ *
+ *   console.log(`${result.successCount}/${result.results.length} operations succeeded`);
+ * });
+ * ```
+ */
+export async function batchEdit(
+  context: WordRequestContext,
+  operations: BatchEditOperation[],
+  options?: EditOptions
+): Promise<BatchEditResult> {
+  const results: EditResult[] = [];
+
+  if (operations.length === 0) {
+    return { success: true, successCount: 0, failedCount: 0, results };
+  }
+
+  // BATCHED: Load all paragraphs once
+  const paragraphs = context.document.body.paragraphs.load('items');
+  await context.sync();
+
+  // Enable tracked changes if requested
+  if (options?.track && context.trackedChanges) {
+    context.trackedChanges.enabled = true;
+  }
+
+  // Sort operations: deletions should be processed last (in reverse order)
+  // to avoid index shifting issues
+  const sortedOps = [...operations].sort((a, b) => {
+    // Deletions go last
+    if (a.operation === 'delete' && b.operation !== 'delete') return 1;
+    if (a.operation !== 'delete' && b.operation === 'delete') return -1;
+
+    // Among deletions, process in reverse index order
+    if (a.operation === 'delete' && b.operation === 'delete') {
+      const aMatch = a.ref.match(/:(\d+)/);
+      const bMatch = b.ref.match(/:(\d+)/);
+      const aIndex = aMatch?.[1] ? parseInt(aMatch[1], 10) : 0;
+      const bIndex = bMatch?.[1] ? parseInt(bMatch[1], 10) : 0;
+      return bIndex - aIndex;
+    }
+
+    return 0;
+  });
+
+  // BATCHED: Queue all range loads for replace/insert operations
+  const rangeOps: Array<{
+    op: BatchEditOperation;
+    range: WordRange;
+    para: WordParagraph;
+  }> = [];
+
+  for (const op of sortedOps) {
+    try {
+      const parsed = parseRef(op.ref);
+      if (parsed.type !== 'p' || parsed.index >= paragraphs.items.length) {
+        results.push({ success: false, error: `Invalid ref: ${op.ref}` });
+        continue;
+      }
+
+      const para = paragraphs.items[parsed.index];
+      if (!para) {
+        results.push({ success: false, error: `Paragraph not found: ${op.ref}` });
+        continue;
+      }
+
+      if (op.operation === 'replace') {
+        const range = para.getRange('Content');
+        rangeOps.push({ op, range, para });
+      } else if (op.operation === 'insertAfter') {
+        const range = para.getRange('End');
+        rangeOps.push({ op, range, para });
+      } else if (op.operation === 'insertBefore') {
+        const range = para.getRange('Start');
+        rangeOps.push({ op, range, para });
+      } else if (op.operation === 'delete') {
+        // Deletions don't need range loading, handled separately
+        rangeOps.push({ op, range: null as unknown as WordRange, para });
+      }
+    } catch (err) {
+      results.push({
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Single sync to load all ranges
+  if (rangeOps.length > 0) {
+    await context.sync();
+  }
+
+  // BATCHED: Execute all operations
+  for (const { op, range, para } of rangeOps) {
+    try {
+      switch (op.operation) {
+        case 'replace':
+          if (op.newText !== undefined) {
+            range.insertText(op.newText, 'Replace');
+            results.push({ success: true, newRef: op.ref });
+          } else {
+            results.push({ success: false, error: 'newText required for replace' });
+          }
+          break;
+
+        case 'insertAfter':
+          if (op.insertText !== undefined) {
+            range.insertText(op.insertText, 'After');
+            results.push({ success: true, newRef: op.ref });
+          } else {
+            results.push({ success: false, error: 'insertText required for insertAfter' });
+          }
+          break;
+
+        case 'insertBefore':
+          if (op.insertText !== undefined) {
+            range.insertText(op.insertText, 'Before');
+            results.push({ success: true, newRef: op.ref });
+          } else {
+            results.push({ success: false, error: 'insertText required for insertBefore' });
+          }
+          break;
+
+        case 'delete':
+          para.delete();
+          results.push({ success: true });
+          break;
+      }
+    } catch (err) {
+      results.push({
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Single sync for all operations
+  await context.sync();
+
+  const successCount = results.filter((r) => r.success).length;
+  const failedCount = results.filter((r) => !r.success).length;
+
+  return {
+    success: failedCount === 0,
+    successCount,
+    failedCount,
+    results,
+  };
+}
+
+/**
+ * Convenience function to batch replace multiple refs with different texts.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param replacements - Map or array of ref -> newText pairs
+ * @param options - Editing options (track changes, author, etc.)
+ * @returns BatchEditResult
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const result = await batchReplace(context, [
+ *     { ref: "p:3", text: "Updated intro" },
+ *     { ref: "p:7", text: "New conclusion" },
+ *   ], { track: true });
+ * });
+ * ```
+ */
+export async function batchReplace(
+  context: WordRequestContext,
+  replacements: Array<{ ref: Ref; text: string }>,
+  options?: EditOptions
+): Promise<BatchEditResult> {
+  const operations: BatchEditOperation[] = replacements.map((r) => ({
+    ref: r.ref,
+    operation: 'replace' as const,
+    newText: r.text,
+  }));
+
+  return batchEdit(context, operations, options);
+}
+
+/**
+ * Convenience function to batch delete multiple refs.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param refs - Array of refs to delete
+ * @param options - Editing options (track changes, author, etc.)
+ * @returns BatchEditResult
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const result = await batchDelete(context, ["p:3", "p:7", "p:12"], { track: true });
+ * });
+ * ```
+ */
+export async function batchDelete(
+  context: WordRequestContext,
+  refs: Ref[],
+  options?: EditOptions
+): Promise<BatchEditResult> {
+  const operations: BatchEditOperation[] = refs.map((ref) => ({
+    ref,
+    operation: 'delete' as const,
+  }));
+
+  return batchEdit(context, operations, options);
+}

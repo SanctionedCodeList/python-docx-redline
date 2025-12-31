@@ -32,6 +32,10 @@ import * as DocTreeScope from "@accessibility/scope";
   deleteByScope: DocTreeEditing.deleteByScope,
   formatByScope: DocTreeEditing.formatByScope,
   searchReplaceByScope: DocTreeEditing.searchReplaceByScope,
+  // Batch operations
+  batchEdit: DocTreeEditing.batchEdit,
+  batchReplace: DocTreeEditing.batchReplace,
+  batchDelete: DocTreeEditing.batchDelete,
   // Scope functions
   parseScope: DocTreeScope.parseScope,
   parseNoteScope: DocTreeScope.parseNoteScope,
