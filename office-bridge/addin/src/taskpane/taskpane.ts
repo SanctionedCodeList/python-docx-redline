@@ -4,6 +4,29 @@
 
 /* global document, Office, Word, console */
 
+// Import accessibility modules and expose as DocTree global
+import * as DocTreeBuilder from "@accessibility/builder";
+import * as DocTreeSerializer from "@accessibility/serializer";
+import * as DocTreeEditing from "@accessibility/editing";
+import * as DocTreeChanges from "@accessibility/changes";
+
+// Expose DocTree globally for remote execution
+(window as unknown as Record<string, unknown>).DocTree = {
+  buildTree: DocTreeBuilder.buildTree,
+  treeToYaml: DocTreeSerializer.treeToYaml,
+  toMinimalYaml: DocTreeSerializer.toMinimalYaml,
+  toStandardYaml: DocTreeSerializer.toStandardYaml,
+  toFullYaml: DocTreeSerializer.toFullYaml,
+  replaceByRef: DocTreeEditing.replaceByRef,
+  insertAfterRef: DocTreeEditing.insertAfterRef,
+  insertBeforeRef: DocTreeEditing.insertBeforeRef,
+  deleteByRef: DocTreeEditing.deleteByRef,
+  formatByRef: DocTreeEditing.formatByRef,
+  getTextByRef: DocTreeEditing.getTextByRef,
+  collectTrackedChanges: DocTreeChanges.collectTrackedChanges,
+  collectComments: DocTreeChanges.collectComments,
+};
+
 // Connection state
 type ConnectionState = "disconnected" | "connecting" | "connected";
 
