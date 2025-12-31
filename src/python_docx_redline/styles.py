@@ -20,6 +20,7 @@ from .models.style import (
     RunFormatting,
     Style,
     StyleType,
+    TabStop,
 )
 
 if TYPE_CHECKING:
@@ -386,6 +387,9 @@ class StyleManager:
             except ValueError:
                 pass
 
+        # Tab stops from w:tabs
+        tab_stops = self._parse_tab_stops(ppr_elem)
+
         return ParagraphFormatting(
             alignment=alignment,
             spacing_before=spacing_before,
@@ -398,6 +402,7 @@ class StyleManager:
             keep_next=keep_next if keep_next else None,
             keep_lines=keep_lines if keep_lines else None,
             outline_level=outline_level,
+            tab_stops=tab_stops,
         )
 
     def _parse_bool_property(self, parent: etree._Element, tag_name: str) -> bool | None:
@@ -427,6 +432,46 @@ class StyleManager:
 
         # Check for explicit false values
         return val.lower() not in ("0", "false", "off")
+
+    def _parse_tab_stops(self, ppr_elem: etree._Element) -> list[TabStop] | None:
+        """Parse tab stops from a w:tabs element within w:pPr.
+
+        Args:
+            ppr_elem: The w:pPr XML element to parse
+
+        Returns:
+            List of TabStop objects, or None if no tabs are defined
+        """
+        tabs_elem = ppr_elem.find(w("tabs"), namespaces=None)
+        if tabs_elem is None:
+            return None
+
+        tab_stops = []
+        for tab_elem in tabs_elem.findall(w("tab"), namespaces=None):
+            # Position in twips, convert to inches (1 inch = 1440 twips)
+            pos_val = tab_elem.get(w("pos"))
+            if pos_val is None:
+                continue
+            try:
+                position = int(pos_val) / 1440.0
+            except ValueError:
+                continue
+
+            # Alignment (w:val)
+            alignment = tab_elem.get(w("val"), "left")
+
+            # Leader
+            leader = tab_elem.get(w("leader"), "none")
+
+            tab_stops.append(
+                TabStop(
+                    position=position,
+                    alignment=alignment,
+                    leader=leader,
+                )
+            )
+
+        return tab_stops if tab_stops else None
 
     def _create_minimal_styles(self) -> etree._Element:
         """Create a minimal styles.xml root element.
@@ -899,6 +944,21 @@ class StyleManager:
         if fmt.outline_level is not None:
             outline_elem = etree.SubElement(ppr, w("outlineLvl"))
             outline_elem.set(w("val"), str(fmt.outline_level))
+            has_content = True
+
+        # Tab stops
+        if fmt.tab_stops:
+            tabs_elem = etree.SubElement(ppr, w("tabs"))
+            for tab_stop in fmt.tab_stops:
+                tab_elem = etree.SubElement(tabs_elem, w("tab"))
+                # Position in twips (1 inch = 1440 twips)
+                pos_twips = int(tab_stop.position * 1440)
+                tab_elem.set(w("pos"), str(pos_twips))
+                # Alignment
+                tab_elem.set(w("val"), tab_stop.alignment)
+                # Leader (only if not "none")
+                if tab_stop.leader != "none":
+                    tab_elem.set(w("leader"), tab_stop.leader)
             has_content = True
 
         return ppr if has_content else None

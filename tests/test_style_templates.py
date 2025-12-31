@@ -13,6 +13,7 @@ from python_docx_redline.models.style import StyleType
 from python_docx_redline.style_templates import (
     STANDARD_STYLES,
     ensure_standard_styles,
+    ensure_toc_styles,
     get_endnote_reference_style,
     get_endnote_text_char_style,
     get_endnote_text_style,
@@ -20,6 +21,8 @@ from python_docx_redline.style_templates import (
     get_footnote_text_char_style,
     get_footnote_text_style,
     get_hyperlink_style,
+    get_toc_heading_style,
+    get_toc_level_style,
 )
 
 
@@ -339,8 +342,8 @@ class TestHyperlinkStyle:
 class TestStandardStylesDict:
     """Tests for the STANDARD_STYLES dictionary."""
 
-    def test_contains_all_seven_styles(self) -> None:
-        """Test that dictionary contains all 7 standard styles."""
+    def test_contains_all_standard_styles(self) -> None:
+        """Test that dictionary contains all 17 standard styles."""
         expected_styles = {
             "FootnoteReference",
             "FootnoteText",
@@ -349,6 +352,17 @@ class TestStandardStylesDict:
             "EndnoteText",
             "EndnoteTextChar",
             "Hyperlink",
+            # TOC styles
+            "TOCHeading",
+            "TOC1",
+            "TOC2",
+            "TOC3",
+            "TOC4",
+            "TOC5",
+            "TOC6",
+            "TOC7",
+            "TOC8",
+            "TOC9",
         }
         assert set(STANDARD_STYLES.keys()) == expected_styles
 
@@ -587,3 +601,314 @@ class TestStyleConsistency:
         assert fn_char.style_type == StyleType.CHARACTER
         assert en_char.style_type == StyleType.CHARACTER
         assert hyperlink.style_type == StyleType.CHARACTER
+
+
+class TestTocHeadingStyle:
+    """Tests for get_toc_heading_style factory function."""
+
+    def test_returns_style_object(self) -> None:
+        """Test that factory returns a Style object."""
+        style = get_toc_heading_style()
+        assert style is not None
+
+    def test_style_id(self) -> None:
+        """Test that style_id is TOCHeading."""
+        style = get_toc_heading_style()
+        assert style.style_id == "TOCHeading"
+
+    def test_name(self) -> None:
+        """Test that name is 'TOC Heading'."""
+        style = get_toc_heading_style()
+        assert style.name == "TOC Heading"
+
+    def test_style_type_is_paragraph(self) -> None:
+        """Test that style type is PARAGRAPH."""
+        style = get_toc_heading_style()
+        assert style.style_type == StyleType.PARAGRAPH
+
+    def test_based_on_heading1(self) -> None:
+        """Test that style is based on Heading1."""
+        style = get_toc_heading_style()
+        assert style.based_on == "Heading1"
+
+    def test_next_style_is_normal(self) -> None:
+        """Test that next style is Normal."""
+        style = get_toc_heading_style()
+        assert style.next_style == "Normal"
+
+    def test_outline_level_excludes_from_toc(self) -> None:
+        """Test that outline_level is 9 to exclude from TOC."""
+        style = get_toc_heading_style()
+        assert style.paragraph_formatting.outline_level == 9
+
+    def test_spacing(self) -> None:
+        """Test that spacing before and after are set."""
+        style = get_toc_heading_style()
+        assert style.paragraph_formatting.spacing_before == 24.0
+        assert style.paragraph_formatting.spacing_after == 12.0
+
+    def test_bold_formatting(self) -> None:
+        """Test that run formatting includes bold."""
+        style = get_toc_heading_style()
+        assert style.run_formatting.bold is True
+
+    def test_font_size(self) -> None:
+        """Test that font size is 14 points."""
+        style = get_toc_heading_style()
+        assert style.run_formatting.font_size == 14.0
+
+    def test_ui_priority(self) -> None:
+        """Test that ui_priority is 39."""
+        style = get_toc_heading_style()
+        assert style.ui_priority == 39
+
+    def test_semi_hidden(self) -> None:
+        """Test that style is semi-hidden."""
+        style = get_toc_heading_style()
+        assert style.semi_hidden is True
+
+    def test_unhide_when_used(self) -> None:
+        """Test that unhide_when_used is True."""
+        style = get_toc_heading_style()
+        assert style.unhide_when_used is True
+
+
+class TestTocLevelStyle:
+    """Tests for get_toc_level_style factory function."""
+
+    def test_returns_style_object(self) -> None:
+        """Test that factory returns a Style object."""
+        style = get_toc_level_style(1)
+        assert style is not None
+
+    def test_style_id_toc1(self) -> None:
+        """Test that style_id is TOC1 for level 1."""
+        style = get_toc_level_style(1)
+        assert style.style_id == "TOC1"
+
+    def test_style_id_toc2(self) -> None:
+        """Test that style_id is TOC2 for level 2."""
+        style = get_toc_level_style(2)
+        assert style.style_id == "TOC2"
+
+    def test_style_id_toc3(self) -> None:
+        """Test that style_id is TOC3 for level 3."""
+        style = get_toc_level_style(3)
+        assert style.style_id == "TOC3"
+
+    def test_name_toc1(self) -> None:
+        """Test that name is 'toc 1' for level 1."""
+        style = get_toc_level_style(1)
+        assert style.name == "toc 1"
+
+    def test_style_type_is_paragraph(self) -> None:
+        """Test that style type is PARAGRAPH."""
+        style = get_toc_level_style(1)
+        assert style.style_type == StyleType.PARAGRAPH
+
+    def test_based_on_normal(self) -> None:
+        """Test that style is based on Normal."""
+        style = get_toc_level_style(1)
+        assert style.based_on == "Normal"
+
+    def test_next_style_is_normal(self) -> None:
+        """Test that next style is Normal."""
+        style = get_toc_level_style(1)
+        assert style.next_style == "Normal"
+
+    def test_indent_level1_zero(self) -> None:
+        """Test that indent is 0 for level 1."""
+        style = get_toc_level_style(1)
+        assert style.paragraph_formatting.indent_left == 0.0
+
+    def test_indent_level2(self) -> None:
+        """Test that indent is 0.25 inches for level 2."""
+        style = get_toc_level_style(2)
+        assert style.paragraph_formatting.indent_left == 0.25
+
+    def test_indent_level3(self) -> None:
+        """Test that indent is 0.5 inches for level 3."""
+        style = get_toc_level_style(3)
+        assert style.paragraph_formatting.indent_left == 0.5
+
+    def test_indent_level9(self) -> None:
+        """Test that indent is 2.0 inches for level 9."""
+        style = get_toc_level_style(9)
+        assert style.paragraph_formatting.indent_left == 2.0
+
+    def test_spacing_after(self) -> None:
+        """Test that spacing_after is 5.0."""
+        style = get_toc_level_style(1)
+        assert style.paragraph_formatting.spacing_after == 5.0
+
+    def test_tab_stops_defined(self) -> None:
+        """Test that tab stops are defined."""
+        style = get_toc_level_style(1)
+        assert style.paragraph_formatting.tab_stops is not None
+        assert len(style.paragraph_formatting.tab_stops) == 1
+
+    def test_tab_stop_position(self) -> None:
+        """Test that tab stop is at 6.5 inches."""
+        style = get_toc_level_style(1)
+        tab_stop = style.paragraph_formatting.tab_stops[0]
+        assert tab_stop.position == 6.5
+
+    def test_tab_stop_alignment(self) -> None:
+        """Test that tab stop is right-aligned."""
+        style = get_toc_level_style(1)
+        tab_stop = style.paragraph_formatting.tab_stops[0]
+        assert tab_stop.alignment == "right"
+
+    def test_tab_stop_leader(self) -> None:
+        """Test that tab stop has dot leader."""
+        style = get_toc_level_style(1)
+        tab_stop = style.paragraph_formatting.tab_stops[0]
+        assert tab_stop.leader == "dot"
+
+    def test_level1_bold(self) -> None:
+        """Test that level 1 is bold."""
+        style = get_toc_level_style(1)
+        assert style.run_formatting.bold is True
+
+    def test_level2_not_bold(self) -> None:
+        """Test that level 2 is not bold."""
+        style = get_toc_level_style(2)
+        assert style.run_formatting.bold is False
+
+    def test_level3_not_bold(self) -> None:
+        """Test that level 3 is not bold."""
+        style = get_toc_level_style(3)
+        assert style.run_formatting.bold is False
+
+    def test_ui_priority(self) -> None:
+        """Test that ui_priority is 39."""
+        style = get_toc_level_style(1)
+        assert style.ui_priority == 39
+
+    def test_semi_hidden(self) -> None:
+        """Test that style is semi-hidden."""
+        style = get_toc_level_style(1)
+        assert style.semi_hidden is True
+
+    def test_invalid_level_below_1(self) -> None:
+        """Test that level below 1 raises ValueError."""
+        with pytest.raises(ValueError, match="must be between 1 and 9"):
+            get_toc_level_style(0)
+
+    def test_invalid_level_above_9(self) -> None:
+        """Test that level above 9 raises ValueError."""
+        with pytest.raises(ValueError, match="must be between 1 and 9"):
+            get_toc_level_style(10)
+
+
+class TestStandardStylesDictToc:
+    """Tests for TOC styles in STANDARD_STYLES dictionary."""
+
+    def test_contains_toc_heading(self) -> None:
+        """Test that TOCHeading is in STANDARD_STYLES."""
+        assert "TOCHeading" in STANDARD_STYLES
+
+    def test_contains_toc1_through_toc9(self) -> None:
+        """Test that TOC1 through TOC9 are in STANDARD_STYLES."""
+        for level in range(1, 10):
+            assert f"TOC{level}" in STANDARD_STYLES
+
+    def test_toc_heading_factory_returns_correct_style(self) -> None:
+        """Test that TOCHeading factory returns correct style."""
+        style = STANDARD_STYLES["TOCHeading"]()
+        assert style.style_id == "TOCHeading"
+
+    def test_toc1_factory_returns_correct_style(self) -> None:
+        """Test that TOC1 factory returns correct style."""
+        style = STANDARD_STYLES["TOC1"]()
+        assert style.style_id == "TOC1"
+
+    def test_toc2_factory_returns_correct_style(self) -> None:
+        """Test that TOC2 factory returns correct style."""
+        style = STANDARD_STYLES["TOC2"]()
+        assert style.style_id == "TOC2"
+
+    def test_toc3_factory_returns_correct_style(self) -> None:
+        """Test that TOC3 factory returns correct style."""
+        style = STANDARD_STYLES["TOC3"]()
+        assert style.style_id == "TOC3"
+
+
+class TestEnsureTocStyles:
+    """Tests for the ensure_toc_styles helper function."""
+
+    def test_default_creates_toc_heading_and_toc1_to_3(self) -> None:
+        """Test that default creates TOCHeading and TOC1-3."""
+        mock_manager = MagicMock()
+        mock_manager.__contains__ = MagicMock(return_value=False)
+
+        ensure_toc_styles(mock_manager)
+
+        # Should add TOCHeading, TOC1, TOC2, TOC3 = 4 styles
+        assert mock_manager.add.call_count == 4
+
+        # Verify the style IDs that were added
+        added_style_ids = [call[0][0].style_id for call in mock_manager.add.call_args_list]
+        assert "TOCHeading" in added_style_ids
+        assert "TOC1" in added_style_ids
+        assert "TOC2" in added_style_ids
+        assert "TOC3" in added_style_ids
+
+    def test_levels_1_creates_toc_heading_and_toc1(self) -> None:
+        """Test that levels=1 creates TOCHeading and TOC1 only."""
+        mock_manager = MagicMock()
+        mock_manager.__contains__ = MagicMock(return_value=False)
+
+        ensure_toc_styles(mock_manager, levels=1)
+
+        # Should add TOCHeading, TOC1 = 2 styles
+        assert mock_manager.add.call_count == 2
+
+    def test_levels_5_creates_toc_heading_and_toc1_to_5(self) -> None:
+        """Test that levels=5 creates TOCHeading and TOC1-5."""
+        mock_manager = MagicMock()
+        mock_manager.__contains__ = MagicMock(return_value=False)
+
+        ensure_toc_styles(mock_manager, levels=5)
+
+        # Should add TOCHeading, TOC1-5 = 6 styles
+        assert mock_manager.add.call_count == 6
+
+    def test_levels_9_creates_all_toc_styles(self) -> None:
+        """Test that levels=9 creates TOCHeading and TOC1-9."""
+        mock_manager = MagicMock()
+        mock_manager.__contains__ = MagicMock(return_value=False)
+
+        ensure_toc_styles(mock_manager, levels=9)
+
+        # Should add TOCHeading, TOC1-9 = 10 styles
+        assert mock_manager.add.call_count == 10
+
+    def test_skips_existing_styles(self) -> None:
+        """Test that existing styles are not added again."""
+        mock_manager = MagicMock()
+
+        # Pretend TOCHeading and TOC1 already exist
+        def contains_check(style_id: str) -> bool:
+            return style_id in ("TOCHeading", "TOC1")
+
+        mock_manager.__contains__ = MagicMock(side_effect=contains_check)
+
+        ensure_toc_styles(mock_manager, levels=3)
+
+        # Should only add TOC2, TOC3 = 2 styles
+        assert mock_manager.add.call_count == 2
+
+    def test_invalid_levels_below_1(self) -> None:
+        """Test that levels below 1 raises ValueError."""
+        mock_manager = MagicMock()
+
+        with pytest.raises(ValueError, match="must be between 1 and 9"):
+            ensure_toc_styles(mock_manager, levels=0)
+
+    def test_invalid_levels_above_9(self) -> None:
+        """Test that levels above 9 raises ValueError."""
+        mock_manager = MagicMock()
+
+        with pytest.raises(ValueError, match="must be between 1 and 9"):
+            ensure_toc_styles(mock_manager, levels=10)

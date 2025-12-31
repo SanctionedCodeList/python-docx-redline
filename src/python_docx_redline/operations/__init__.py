@@ -17,6 +17,7 @@ from .notes import NoteOperations
 from .patterns import PatternOperations
 from .section import SectionOperations
 from .tables import TableOperations
+from .toc import TOCOperations
 from .tracked_changes import TrackedChangeOperations
 
 __all__ = [
@@ -33,5 +34,6 @@ __all__ = [
     "PatternOperations",
     "SectionOperations",
     "TableOperations",
+    "TOCOperations",
     "TrackedChangeOperations",
 ]

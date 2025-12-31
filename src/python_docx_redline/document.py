@@ -43,6 +43,7 @@ from .operations.notes import NoteOperations
 from .operations.patterns import PatternOperations
 from .operations.section import SectionOperations
 from .operations.tables import TableOperations
+from .operations.toc import TOCOperations
 from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
 from .results import ComparisonStats, EditResult, FormatResult
@@ -384,6 +385,13 @@ class Document:
         if not hasattr(self, "_hyperlink_ops_instance"):
             self._hyperlink_ops_instance = HyperlinkOperations(self)
         return self._hyperlink_ops_instance
+
+    @property
+    def _toc_ops(self) -> TOCOperations:
+        """Get the TOCOperations instance (lazy initialization)."""
+        if not hasattr(self, "_toc_ops_instance"):
+            self._toc_ops_instance = TOCOperations(self)
+        return self._toc_ops_instance
 
     @property
     def styles(self) -> StyleManager:
@@ -4891,6 +4899,67 @@ class Document:
             keep_text=keep_text,
             track=track,
             author=author,
+        )
+
+    # ========================================================================
+    # TABLE OF CONTENTS METHODS
+    # ========================================================================
+
+    def insert_toc(
+        self,
+        position: int | str = 0,
+        levels: tuple[int, int] = (1, 3),
+        title: str | None = "Table of Contents",
+        hyperlinks: bool = True,
+        show_page_numbers: bool = True,
+        use_outline_levels: bool = True,
+        update_on_open: bool = True,
+    ) -> None:
+        """Insert a Table of Contents field that Word will populate on open.
+
+        This method inserts a TOC field into the document at the specified
+        position. The TOC is wrapped in a Structured Document Tag (SDT) that
+        Word recognizes as a TOC content control.
+
+        The TOC field is marked as dirty, meaning Word will update it when the
+        document is opened. Page numbers are calculated by Word's layout engine.
+
+        Args:
+            position: Where to insert the TOC. Can be:
+                     - int: Paragraph index (0 = beginning of document)
+                     - "start": Beginning of document body
+                     - "end": End of document body (before sectPr)
+            levels: Tuple of (min_level, max_level) for heading levels to include.
+                   Default (1, 3) includes Heading 1, 2, and 3.
+            title: Optional title text to display above the TOC.
+                  Set to None for no title. Default is "Table of Contents".
+            hyperlinks: If True (default), TOC entries link to their headings.
+            show_page_numbers: If True (default), show page numbers.
+            use_outline_levels: If True (default), include paragraphs with
+                               outline levels.
+            update_on_open: If True (default), sets w:updateFields in settings.xml
+                           so Word updates all fields when opening the document.
+
+        Example:
+            >>> doc = Document("report.docx")
+            >>> # Simple TOC with defaults
+            >>> doc.insert_toc()
+            >>> doc.save("report_with_toc.docx")
+            >>>
+            >>> # TOC without title, including more heading levels
+            >>> doc.insert_toc(title=None, levels=(1, 5))
+            >>>
+            >>> # TOC at end of document without page numbers
+            >>> doc.insert_toc(position="end", show_page_numbers=False)
+        """
+        return self._toc_ops.insert_toc(
+            position=position,
+            levels=levels,
+            title=title,
+            hyperlinks=hyperlinks,
+            show_page_numbers=show_page_numbers,
+            use_outline_levels=use_outline_levels,
+            update_on_open=update_on_open,
         )
 
     # ========================================================================

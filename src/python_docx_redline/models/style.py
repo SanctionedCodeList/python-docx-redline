@@ -15,6 +15,36 @@ from enum import Enum
 from typing import Any
 
 
+@dataclass
+class TabStop:
+    """A tab stop definition for paragraph formatting.
+
+    Tab stops define positions where text aligns when the Tab key is pressed.
+    They are commonly used in TOC entries to align page numbers.
+
+    Attributes:
+        position: Position in inches from the left margin
+        alignment: How text aligns at this tab stop. Valid values are:
+            - "left": Text starts at the tab stop (default)
+            - "right": Text ends at the tab stop
+            - "center": Text is centered at the tab stop
+            - "decimal": Numbers align at the decimal point
+        leader: Character used to fill space before the tab stop:
+            - "none": No leader (default)
+            - "dot": Dots (e.g., "Chapter 1 .......... 5")
+            - "hyphen": Hyphens
+            - "underscore": Underscores
+
+    Example:
+        >>> tab = TabStop(position=6.5, alignment="right", leader="dot")
+        >>> # Creates a right-aligned tab at 6.5 inches with dot leaders
+    """
+
+    position: float  # Position in inches from left margin
+    alignment: str = "left"  # "left", "right", "center", "decimal"
+    leader: str = "none"  # "dot", "hyphen", "underscore", "none"
+
+
 class StyleType(Enum):
     """Types of styles in Word documents.
 
@@ -99,12 +129,14 @@ class ParagraphFormatting:
         keep_next: Keep paragraph with next paragraph on same page
         keep_lines: Keep all lines of paragraph on same page
         outline_level: Heading outline level (0-8, where 0 = Heading 1)
+        tab_stops: List of tab stop definitions for this paragraph
 
     Example:
         >>> fmt = ParagraphFormatting(
         ...     alignment="justify",
         ...     spacing_after=12.0,
-        ...     line_spacing=1.5
+        ...     line_spacing=1.5,
+        ...     tab_stops=[TabStop(position=6.5, alignment="right", leader="dot")]
         ... )
     """
 
@@ -119,6 +151,7 @@ class ParagraphFormatting:
     keep_next: bool | None = None
     keep_lines: bool | None = None
     outline_level: int | None = None
+    tab_stops: list[TabStop] | None = None
 
 
 @dataclass
