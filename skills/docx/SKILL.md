@@ -1,261 +1,57 @@
 ---
 name: docx
-description: "Document creation, editing, and analysis with tracked changes. Use for .docx files: creating documents, editing with or without tracked changes, adding comments, text extraction, template population, or CriticMarkup round-trip workflows (export/import tracked changes as markdown). python-docx-redline is the recommended tool for ALL editing tasks - it handles run fragmentation that breaks python-docx find/replace, with optional tracked changes via track=True."
+description: "Word document creation, editing, and manipulation. Use for .docx files: creating documents, editing with or without tracked changes, comments, footnotes, text extraction, template population, CriticMarkup workflows, or live editing in Microsoft Word. Three sub-skills: design/ for professional document writing, python/ for python-docx/python-docx-redline operations, office-bridge/ for live Word editing via Office.js add-in."
 ---
 
 # DOCX Skill
 
-This skill creates professional, persuasive documents that drive decisions. It combines design intelligence from elite business contexts (consulting, banking, legal) with robust technical workflows for DOCX manipulation.
+Professional Word document creation and manipulation.
 
-## Design Thinking
-
-Before creating or editing any document, understand the context:
-
-- **Purpose**: What decision or action should this document drive?
-- **Audience**: Who are they? What do they need? How much time do they have?
-- **Key Message**: If the reader remembers only ONE thing, what must it be?
-- **Tone**: Match the context — analytical (consulting), precise (legal), data-driven (banking)
-
-### The Non-Negotiables
-
-**1. Lead with the Answer**
-State your conclusion or recommendation in the first paragraph of the document and the first sentence of each section. Don't make executives hunt for your point.
-
-**2. Action Headings**
-Every section heading states the **takeaway**, not the topic.
-
-| Topic Heading (Weak) | Action Heading (Strong) |
-|----------------------|-------------------------|
-| "Q3 Results" | "Q3 revenue beat targets by 12%, driven by enterprise" |
-| "Market Analysis" | "Market consolidating—three players now control 70%" |
-
-See [references/action-headings.md](references/action-headings.md) for details.
-
-**3. Pyramid Structure**
-Organize content in a pyramid: main point at top, supporting arguments below, evidence below that.
-
-See [references/document-structure.md](references/document-structure.md) for frameworks.
-
-**4. Professional Formatting**
-Typography, spacing, and layout signal credibility before anyone reads a word.
-
-See [references/design-principles.md](references/design-principles.md) for guidelines.
-
-### Document Anti-Patterns
-
-**NEVER** produce generic documents. Avoid:
-
-- **Topic headings**: "Background", "Analysis" — say nothing. Use action headings
-- **Burying the lead**: Recommendation on page 20 means failure. Lead with conclusions
-- **Wall of text**: No headings, no structure, no scanability
-- **Hedge-everything language**: "We might consider potentially..." — take a position
-- **Inconsistent formatting**: Mixed fonts, random spacing signals carelessness
-- **AI writing tells**: Words like "delve," "tapestry," "multifaceted"; patterns like "It's not X, it's Y"
-
-See [references/ai-antipatterns.md](references/ai-antipatterns.md) for comprehensive AI writing tells to avoid.
-
----
-
-## Technical Workflows
-
-### Installation
+## Installation
 
 ```bash
-pip install python-docx                # Creating new documents
-pip install python-docx-redline        # Editing with tracked changes (recommended)
-brew install pandoc                    # Text extraction (macOS)
+./install.sh
 ```
 
 ## Decision Tree
 
-| Task | Tool | Guide |
-|------|------|-------|
-| **Read/extract text** | pandoc or python-docx-redline | [reading.md](./reading.md) |
-| **Structured document view (YAML)** | AccessibilityTree | [accessibility.md](./accessibility.md) |
-| **Large document navigation** | OutlineTree | [accessibility.md](./accessibility.md) |
-| **Ref-based precise editing** | python-docx-redline refs | [accessibility.md](./accessibility.md) |
-| **Live Word editing (add-in)** | Office Bridge DocTree | [office-bridge/](./office-bridge/SKILL.md) |
-| **Create new document** | python-docx | [creation.md](./creation.md) |
-| **Generate from data/template** | DocxBuilder | [templating.md](./templating.md) |
-| **Edit existing document** | python-docx-redline | [editing.md](./editing.md) |
-| **Edit with tracked changes** | python-docx-redline (track=True) | [tracked-changes.md](./tracked-changes.md) |
-| **Delete entire section** | python-docx-redline delete_section() | [editing.md](./editing.md#section-operations) |
-| **Add comments** | python-docx-redline | [comments.md](./comments.md) |
-| **Footnotes/endnotes** | python-docx-redline | [footnotes.md](./footnotes.md) |
-| **Insert or edit hyperlinks** | python-docx-redline | [hyperlinks.md](./hyperlinks.md) |
-| **Create or manage styles** | python-docx-redline StyleManager | [styles.md](./styles.md) |
-| **CriticMarkup workflow** | python-docx-redline | [criticmarkup.md](./criticmarkup.md) |
-| **Use both libraries together** | from_python_docx / to_python_docx | [integration.md](./integration.md) |
-| **Complex XML manipulation** | Raw OOXML | [ooxml.md](./ooxml.md) |
+| What do you need? | Go to |
+|-------------------|-------|
+| **Write a professional document** (memo, report, proposal) | [design/](./design/SKILL.md) |
+| **Create or edit .docx files with Python** | [python/](./python/SKILL.md) |
+| **Edit live in Microsoft Word** (via add-in) | [office-bridge/](./office-bridge/SKILL.md) |
 
-**Note:** python-docx-redline is recommended for ALL editing (not just tracked changes) because it handles run fragmentation that breaks python-docx find/replace.
+## Quick Reference
 
-**For LLM/Agent workflows:** Use the AccessibilityTree for structured YAML output that fits in context windows, with stable refs for unambiguous element targeting. See [accessibility.md](./accessibility.md).
+### Design Principles (Always Apply)
 
-## Quick Examples
+- **Lead with the answer** — Conclusion first, evidence after
+- **Action headings** — "Revenue grew 12%" not "Q3 Results"
+- **Pyramid structure** — Main point → supporting arguments → evidence
 
-### Extract Text
-```bash
-pandoc --track-changes=all document.docx -o output.md
-```
+### Python Quick Start
 
-### Create New Document
-```python
-from docx import Document
-
-# Use a style template for custom styles (see creation.md)
-doc = Document("styles/corporate.docx")
-doc.add_heading("Title", 0)
-doc.add_paragraph("Content here.")
-doc.save("new.docx")
-```
-
-### Generate from Data (DocxBuilder)
-```python
-from python_docx_redline import DocxBuilder
-
-doc = DocxBuilder()
-doc.heading("Sales Report")
-doc.markdown("Revenue **exceeded** targets by 12%.")
-doc.table_from(items, ["product", "revenue", "growth"])
-doc.save("report.docx")
-```
-
-### Edit Existing Document (Silent)
-```python
-from python_docx_redline import Document
-
-doc = Document("existing.docx")
-doc.replace("OLD_VALUE", "new_value")         # Handles run boundaries
-doc.replace("{{NAME}}", "John Doe")           # Template population
-doc.insert(" Inc.", after="Acme Corp")        # Append text
-doc.delete("DRAFT - ")                        # Remove text
-doc.save("modified.docx")
-```
-
-### Edit with Tracked Changes
 ```python
 from python_docx_redline import Document
 
 doc = Document("contract.docx")
-doc.replace("30 days", "45 days", track=True)     # With track parameter
-doc.insert(" (amended)", after="Section 2.1", track=True)
-doc.delete("subject to approval", track=True)
-# Or use explicit *_tracked methods:
-doc.replace_tracked("Contractor", "Service Provider")
-doc.save("contract_redlined.docx")
+doc.replace("30 days", "45 days", track=True)  # Tracked change
+doc.save("redlined.docx")
 ```
 
-### Add Comments
-```python
-doc.add_comment("Please review", on="Section 2.1")
-doc.add_comment("Check all", on="TODO", occurrence="all")  # Multiple occurrences
+### Office Bridge Quick Start
+
+```typescript
+await Word.run(async (context) => {
+  const tree = await DocTree.buildTree(context);
+  await DocTree.replaceByRef(context, "p:5", "New text", { track: true });
+});
 ```
 
-### Find Text Before Editing
-```python
-matches = doc.find_all("payment")
-for m in matches:
-    print(f"{m.index}: {m.context}")
+## Sub-Skills
 
-# Then target specific occurrence
-doc.replace_tracked("payment", "Payment", occurrence=2)
-```
-
-### Scoped Edits
-```python
-doc.replace_tracked("Client", "Customer", scope="section:Payment Terms")
-```
-
-### Footnotes and Endnotes
-```python
-# Insert footnotes
-doc.insert_footnote("See Smith (2020) for details", at="original study")
-doc.insert_footnote(["First paragraph.", "Second with **bold**."], at="citation")
-
-# Get, edit, delete footnotes
-footnote = doc.get_footnote(1)
-footnote.edit("Updated citation")
-footnote.delete()
-
-# Tracked changes inside footnotes
-doc.insert_tracked_in_footnote(1, " [revised]", after="citation")
-doc.replace_tracked_in_footnote(1, "2020", "2024")
-
-# Search in footnotes
-matches = doc.find_all("reference", scope="footnotes")
-matches = doc.find_all("citation", include_footnotes=True)
-```
-
-## Common Patterns
-
-### Handle Ambiguous Text
-```python
-# If text appears multiple times, use occurrence parameter
-doc.replace_tracked("Section", "Article", occurrence=1)      # First match
-doc.replace_tracked("Section", "Article", occurrence="all")  # All matches
-```
-
-### Smart Quote Handling
-```python
-# Curly quotes in documents match straight quotes in code automatically
-doc.replace_tracked("Defendant's motion", "party's motion")  # Just works
-```
-
-### Batch Operations
-```python
-edits = [
-    {"type": "replace", "find": "{{NAME}}", "replace": "John"},  # Untracked
-    {"type": "replace", "find": "old", "replace": "new", "track": True},  # Tracked
-    {"type": "delete", "text": "DRAFT", "track": False},  # Explicit untracked
-]
-doc.apply_edits(edits, default_track=False)  # Set default for edits without track field
-```
-
-### CriticMarkup Round-Trip
-```python
-# Export tracked changes to markdown
-doc = Document("contract.docx")
-markdown = doc.to_criticmarkup()
-# Output: "Payment in {--30--}{++45++} days"
-
-# Apply CriticMarkup changes back to DOCX
-doc.apply_criticmarkup("{++new clause++}", author="Reviewer")
-doc.save("updated.docx")
-```
-
----
-
-## Design References
-
-Guidance on creating effective, professional documents:
-
-- **[references/action-headings.md](references/action-headings.md)** — Writing insight-driven headings
-- **[references/document-structure.md](references/document-structure.md)** — Pyramid Principle, SCQA, IRAC frameworks
-- **[references/executive-summaries.md](references/executive-summaries.md)** — Crafting standalone summaries
-- **[references/industry-styles.md](references/industry-styles.md)** — Consulting, banking, legal, VC conventions
-- **[references/design-principles.md](references/design-principles.md)** — Typography, layout, visual hierarchy
-- **[references/ai-antipatterns.md](references/ai-antipatterns.md)** — AI writing tells to avoid and edit out
-
-## Technical Guides
-
-Detailed workflows for document manipulation:
-
-- **[accessibility.md](./accessibility.md)** — DocTree accessibility layer: YAML output, refs, OutlineTree for large docs
-- **[office-bridge/](./office-bridge/SKILL.md)** — Live Word editing via Office.js add-in with DocTree API
-- **[templating.md](./templating.md)** — DocxBuilder: generate documents from data with markdown support
-- **[creation.md](./creation.md)** — Creating new documents with style templates
-- **[reading.md](./reading.md)** — Text extraction, find_all(), document structure, tables
-- **[editing.md](./editing.md)** — All editing with python-docx-redline (both tracked and untracked)
-- **[tracked-changes.md](./tracked-changes.md)** — Tracked changes details: insert/delete/replace, regex, scopes, batch ops
-- **[comments.md](./comments.md)** — Adding comments, occurrence parameter, replies, resolution
-- **[footnotes.md](./footnotes.md)** — Footnotes/endnotes: CRUD, tracked changes, rich content, search
-- **[hyperlinks.md](./hyperlinks.md)** — Hyperlink operations: insert, edit, remove in body, headers, footers, footnotes
-- **[styles.md](./styles.md)** — Style management: reading, creating, ensuring styles exist, formatting options
-- **[criticmarkup.md](./criticmarkup.md)** — Export/import with CriticMarkup, round-trip workflows
-- **[integration.md](./integration.md)** — python-docx integration: from_python_docx, to_python_docx, workflows
-- **[ooxml.md](./ooxml.md)** — Raw XML manipulation for complex scenarios
-
----
-
-Remember: Claude is capable of creating documents that rival top-tier consulting and legal firms. Lead with your answer, use action headings, and execute every detail with intention. The goal isn't a "good enough" document—it's one that drives decisions.
+| Folder | Purpose |
+|--------|---------|
+| [design/](./design/SKILL.md) | Document design: action headings, pyramid structure, industry styles, AI antipatterns |
+| [python/](./python/SKILL.md) | Python libraries: python-docx (creation), python-docx-redline (editing, tracked changes) |
+| [office-bridge/](./office-bridge/SKILL.md) | Word add-in: live editing via Office.js with DocTree accessibility layer |
