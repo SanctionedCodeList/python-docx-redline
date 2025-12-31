@@ -16,8 +16,16 @@ import type {
   VerbosityLevel,
   SemanticRole,
   Ref,
+  TrackedChange,
+  Comment,
 } from './types';
 import { SemanticRole as Role } from './types';
+import {
+  processChangesAndComments,
+  applyChangesToNode,
+  applyCommentsToNode,
+  type ParagraphChanges,
+} from './changes';
 
 // =============================================================================
 // Style to Role Mapping (Section 3.2 of spec)
@@ -149,9 +157,47 @@ interface WordRequestContext {
     body: {
       paragraphs: WordParagraphCollection;
       tables: WordTableCollection;
+      getReviewedText(changeTrackingVersion: string): { value: string };
+      getComments(): WordCommentCollection;
     };
   };
   sync(): Promise<void>;
+}
+
+interface WordCommentCollection {
+  load(properties: string): WordCommentCollection;
+  items: WordComment[];
+}
+
+interface WordComment {
+  id: string;
+  authorName: string;
+  authorEmail: string;
+  content: string;
+  createdDate: Date;
+  resolved: boolean;
+  replies: WordCommentReplyCollection;
+  getRange(): WordRange;
+  load(properties: string): WordComment;
+}
+
+interface WordCommentReplyCollection {
+  load(properties: string): WordCommentReplyCollection;
+  items: WordCommentReply[];
+}
+
+interface WordCommentReply {
+  id: string;
+  authorName: string;
+  authorEmail: string;
+  content: string;
+  createdDate: Date;
+}
+
+interface WordRange {
+  text: string;
+  load(properties: string): WordRange;
+  getReviewedText(changeTrackingVersion: string): { value: string };
 }
 
 interface WordParagraphCollection {
@@ -165,6 +211,7 @@ interface WordParagraph {
   isListItem: boolean;
   listItem?: WordListItem | null;
   font?: WordFont;
+  getReviewedText(changeTrackingVersion: string): { value: string };
 }
 
 interface WordListItem {
@@ -549,7 +596,8 @@ function mergeOptions(userOptions?: TreeOptions): TreeOptions {
  * 1. Loads document paragraphs and tables via Office.js
  * 2. Processes each element into AccessibilityNodes with refs
  * 3. Detects heading styles and assigns semantic roles
- * 4. Collects document statistics
+ * 4. Collects tracked changes and comments
+ * 5. Collects document statistics
  *
  * @param context - Word.RequestContext from Office.js
  * @param options - Tree building options (verbosity, view mode, etc.)
@@ -585,6 +633,7 @@ export async function buildTree(
 
   // Build content nodes
   const content: AccessibilityNode[] = [];
+  const paragraphRefs: Ref[] = [];
 
   // Process paragraphs
   for (let i = 0; i < paragraphs.items.length; i++) {
@@ -592,6 +641,7 @@ export async function buildTree(
     if (!para) continue;
     const pNode = processParagraph(para, i, opts, stats);
     content.push(pNode);
+    paragraphRefs.push(pNode.ref);
   }
 
   // Process tables
@@ -601,6 +651,52 @@ export async function buildTree(
     const tableNode = await processTable(tbl, i, context, opts, stats);
     content.push(tableNode);
   }
+
+  // Process tracked changes and comments
+  let trackedChanges: TrackedChange[] = [];
+  let comments: Comment[] = [];
+  let paragraphChanges: Map<Ref, ParagraphChanges> = new Map();
+
+  const shouldIncludeTrackedChanges = opts.viewMode?.includeTrackedChanges !== false;
+  const shouldIncludeComments = opts.viewMode?.includeComments === true;
+
+  if (shouldIncludeTrackedChanges || shouldIncludeComments) {
+    const changesResult = await processChangesAndComments(
+      context,
+      paragraphRefs,
+      {
+        changeViewMode: opts.changeViewMode ?? 'markup',
+        includeTrackedChanges: shouldIncludeTrackedChanges,
+        includeComments: shouldIncludeComments,
+      }
+    );
+
+    trackedChanges = changesResult.trackedChanges;
+    comments = changesResult.comments;
+    paragraphChanges = changesResult.paragraphChanges;
+
+    // Update stats
+    stats.trackedChanges = changesResult.stats.trackedChanges;
+    stats.comments = changesResult.stats.comments;
+  }
+
+  // Apply changes and comments to nodes
+  const changeViewMode = opts.changeViewMode ?? 'markup';
+  const processedContent = content.map((node) => {
+    let processed = node;
+
+    // Apply tracked changes
+    if (shouldIncludeTrackedChanges && paragraphChanges.size > 0) {
+      processed = applyChangesToNode(processed, paragraphChanges, changeViewMode);
+    }
+
+    // Apply comments
+    if (shouldIncludeComments && comments.length > 0) {
+      processed = applyCommentsToNode(processed, comments);
+    }
+
+    return processed;
+  });
 
   // Build document metadata
   const metadata: DocumentMetadata = {
@@ -613,13 +709,17 @@ export async function buildTree(
   if (opts.verbosity === 'minimal') {
     return {
       document: metadata,
-      outline: content,
+      outline: processedContent,
+      trackedChanges: trackedChanges.length > 0 ? trackedChanges : undefined,
+      comments: comments.length > 0 ? comments : undefined,
     };
   }
 
   return {
     document: metadata,
-    content,
+    content: processedContent,
+    trackedChanges: trackedChanges.length > 0 ? trackedChanges : undefined,
+    comments: comments.length > 0 ? comments : undefined,
   };
 }
 
