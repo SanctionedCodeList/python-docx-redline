@@ -835,6 +835,11 @@ export async function getTextByRef(
   try {
     const parsed = parseRef(ref);
 
+    // Handle footnote refs (fn:1, fn:2, etc.)
+    if (parsed.type === 'fn') {
+      return await getFootnoteText(context, parsed.index);
+    }
+
     if (parsed.type === 'p' || (parsed.type === 'tbl' && getLeafRef(parsed).type === 'p')) {
       const paragraph = await resolveParagraphRef(context, ref);
       paragraph.load('text');
@@ -843,6 +848,49 @@ export async function getTextByRef(
     }
 
     return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Get text content of a footnote by ID.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param footnoteId - Footnote ID (1-indexed)
+ * @returns The footnote text or undefined if not found
+ */
+async function getFootnoteText(
+  context: WordRequestContext,
+  footnoteId: number
+): Promise<string | undefined> {
+  try {
+    // Get OOXML which contains footnotes
+    const body = context.document.body as unknown as { getOoxml(): { value: string } };
+    const ooxml = body.getOoxml();
+    await context.sync();
+
+    const xml = ooxml.value;
+
+    // Find the footnotes section
+    const footnotesMatch = xml.match(/<w:footnotes[^>]*>([\s\S]*?)<\/w:footnotes>/);
+    if (!footnotesMatch) return undefined;
+
+    // Find the specific footnote
+    const fnPattern = new RegExp(
+      `<w:footnote[^>]*w:id="${footnoteId}"[^>]*>([\\s\\S]*?)<\\/w:footnote>`
+    );
+    const fnMatch = footnotesMatch[1].match(fnPattern);
+    if (!fnMatch) return undefined;
+
+    // Extract text from the footnote
+    const textParts = fnMatch[1].match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
+    const text = textParts
+      .map((t) => t.replace(/<[^>]+>/g, ''))
+      .join('')
+      .trim();
+
+    return text || undefined;
   } catch {
     return undefined;
   }

@@ -20,6 +20,7 @@ import type {
   ImageInfo,
   LinkInfo,
   BookmarkInfo,
+  FootnoteInfo,
 } from './types';
 import { SemanticRole } from './types';
 
@@ -62,6 +63,11 @@ function buildStates(node: AccessibilityNode): string[] {
   // Comments
   if (node.hasComments) {
     states.push('has-comments');
+  }
+
+  // Footnotes
+  if (node.footnoteRefs?.length) {
+    states.push(`fn=${node.footnoteRefs.join(',')}`);
   }
 
   // Formatting states (for full verbosity)
@@ -530,6 +536,25 @@ function serializeBookmarks(bookmarks: BookmarkInfo[], indent: string): string {
   return lines.join('\n');
 }
 
+/**
+ * Serialize footnotes summary.
+ */
+function serializeFootnotes(footnotes: FootnoteInfo[], indent: string): string {
+  const lines: string[] = [];
+  lines.push(`${indent}footnotes:`);
+
+  for (const fn of footnotes) {
+    lines.push(`${indent}  - ref: ${fn.ref}`);
+    lines.push(`${indent}    id: ${fn.id}`);
+    lines.push(`${indent}    text: ${escapeYamlText(fn.text)}`);
+    if (fn.referencedFrom) {
+      lines.push(`${indent}    referenced_from: ${fn.referencedFrom}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
 // =============================================================================
 // Main Serialization Function
 // =============================================================================
@@ -572,6 +597,9 @@ export function treeToYaml(
   lines.push(`    tables: ${tree.document.stats.tables}`);
   lines.push(`    tracked_changes: ${tree.document.stats.trackedChanges}`);
   lines.push(`    comments: ${tree.document.stats.comments}`);
+  if (tree.document.stats.footnotes !== undefined) {
+    lines.push(`    footnotes: ${tree.document.stats.footnotes}`);
+  }
   if (tree.document.stats.sections !== undefined) {
     lines.push(`    sections: ${tree.document.stats.sections}`);
   }
@@ -624,6 +652,12 @@ export function treeToYaml(
   if (verbosity !== 'minimal' && tree.comments?.length) {
     lines.push('');
     lines.push(serializeComments(tree.comments, ''));
+  }
+
+  // Footnotes (all verbosity levels - important for legal docs)
+  if (tree.footnotes?.length) {
+    lines.push('');
+    lines.push(serializeFootnotes(tree.footnotes, ''));
   }
 
   // Bookmarks (full only)

@@ -18,6 +18,7 @@ import type {
   Ref,
   TrackedChange,
   Comment,
+  FootnoteInfo,
 } from './types';
 import { SemanticRole as Role } from './types';
 import {
@@ -271,6 +272,7 @@ interface StatsCollector {
   tables: number;
   trackedChanges: number;
   comments: number;
+  footnotes: number;
 }
 
 function createStatsCollector(): StatsCollector {
@@ -279,6 +281,7 @@ function createStatsCollector(): StatsCollector {
     tables: 0,
     trackedChanges: 0,
     comments: 0,
+    footnotes: 0,
   };
 }
 
@@ -288,6 +291,7 @@ function toDocumentStats(collector: StatsCollector): DocumentStats {
     tables: collector.tables,
     trackedChanges: collector.trackedChanges,
     comments: collector.comments,
+    footnotes: collector.footnotes > 0 ? collector.footnotes : undefined,
   };
 }
 
@@ -589,6 +593,118 @@ function mergeOptions(userOptions?: TreeOptions): TreeOptions {
   };
 }
 
+// =============================================================================
+// Footnote Extraction
+// =============================================================================
+
+/**
+ * Result of footnote extraction from OOXML.
+ */
+interface FootnoteExtractionResult {
+  /** All footnotes found in the document */
+  footnotes: FootnoteInfo[];
+  /** Map of paragraph index to footnote refs it contains */
+  paragraphFootnotes: Map<number, Ref[]>;
+}
+
+/**
+ * Extract footnotes from document OOXML.
+ *
+ * Parses the <w:footnotes> section and <w:footnoteReference> elements
+ * to build a list of footnotes with their content and references.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @returns FootnoteExtractionResult with footnotes and paragraph mappings
+ */
+async function extractFootnotes(
+  context: WordRequestContext
+): Promise<FootnoteExtractionResult> {
+  const footnotes: FootnoteInfo[] = [];
+  const paragraphFootnotes = new Map<number, Ref[]>();
+
+  try {
+    // Get OOXML which contains footnotes
+    const body = context.document.body;
+    const ooxml = body.getOoxml();
+    await context.sync();
+
+    const xml = ooxml.value;
+
+    // Find the footnotes section
+    const footnotesMatch = xml.match(/<w:footnotes[^>]*>([\s\S]*?)<\/w:footnotes>/);
+
+    if (footnotesMatch) {
+      // Extract individual footnotes
+      const fnPattern = /<w:footnote[^>]*w:id="(\d+)"[^>]*>([\s\S]*?)<\/w:footnote>/g;
+      let match;
+
+      while ((match = fnPattern.exec(footnotesMatch[1])) !== null) {
+        const id = parseInt(match[1], 10);
+        const content = match[2];
+
+        // Skip separator footnotes (id 0 and -1)
+        if (id <= 0) continue;
+
+        // Extract text from the footnote
+        const textParts = content.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
+        const text = textParts
+          .map((t) => t.replace(/<[^>]+>/g, ''))
+          .join('')
+          .trim();
+
+        if (text) {
+          footnotes.push({
+            ref: `fn:${id}` as Ref,
+            id,
+            text,
+          });
+        }
+      }
+    }
+
+    // Find footnote references in paragraphs to map them
+    // The body XML contains <w:footnoteReference w:id="N"/> within paragraphs
+    const bodyMatch = xml.match(/<w:body[^>]*>([\s\S]*?)<\/w:body>/);
+    if (bodyMatch) {
+      // Find all paragraphs and their footnote references
+      const paraPattern = /<w:p[^>]*>([\s\S]*?)<\/w:p>/g;
+      let paraMatch;
+      let paraIndex = 0;
+
+      while ((paraMatch = paraPattern.exec(bodyMatch[1])) !== null) {
+        const paraContent = paraMatch[1];
+        const fnRefPattern = /<w:footnoteReference[^>]*w:id="(\d+)"[^>]*\/>/g;
+        let fnRefMatch;
+        const refs: Ref[] = [];
+
+        while ((fnRefMatch = fnRefPattern.exec(paraContent)) !== null) {
+          const fnId = parseInt(fnRefMatch[1], 10);
+          if (fnId > 0) {
+            refs.push(`fn:${fnId}` as Ref);
+
+            // Update the footnote's referencedFrom field
+            const footnote = footnotes.find((f) => f.id === fnId);
+            if (footnote) {
+              footnote.referencedFrom = `p:${paraIndex}` as Ref;
+            }
+          }
+        }
+
+        if (refs.length > 0) {
+          paragraphFootnotes.set(paraIndex, refs);
+        }
+
+        paraIndex++;
+      }
+    }
+  } catch (err) {
+    // Log error but don't fail - footnotes are optional
+    console.warn('Failed to extract footnotes:', err);
+  }
+
+  return { footnotes, paragraphFootnotes };
+}
+
 /**
  * Build an accessibility tree from a Word document.
  *
@@ -597,7 +713,8 @@ function mergeOptions(userOptions?: TreeOptions): TreeOptions {
  * 2. Processes each element into AccessibilityNodes with refs
  * 3. Detects heading styles and assigns semantic roles
  * 4. Collects tracked changes and comments
- * 5. Collects document statistics
+ * 5. Extracts footnotes from OOXML
+ * 6. Collects document statistics
  *
  * @param context - Word.RequestContext from Office.js
  * @param options - Tree building options (verbosity, view mode, etc.)
@@ -650,6 +767,18 @@ export async function buildTree(
     if (!tbl) continue;
     const tableNode = await processTable(tbl, i, context, opts, stats);
     content.push(tableNode);
+  }
+
+  // Extract footnotes from OOXML
+  const { footnotes, paragraphFootnotes } = await extractFootnotes(context);
+  stats.footnotes = footnotes.length;
+
+  // Apply footnote refs to paragraph nodes
+  for (const [paraIndex, fnRefs] of paragraphFootnotes) {
+    const node = content[paraIndex];
+    if (node && node.role !== Role.Table) {
+      node.footnoteRefs = fnRefs;
+    }
   }
 
   // Process tracked changes and comments
@@ -712,6 +841,7 @@ export async function buildTree(
       outline: processedContent,
       trackedChanges: trackedChanges.length > 0 ? trackedChanges : undefined,
       comments: comments.length > 0 ? comments : undefined,
+      footnotes: footnotes.length > 0 ? footnotes : undefined,
     };
   }
 
@@ -720,6 +850,7 @@ export async function buildTree(
     content: processedContent,
     trackedChanges: trackedChanges.length > 0 ? trackedChanges : undefined,
     comments: comments.length > 0 ? comments : undefined,
+    footnotes: footnotes.length > 0 ? footnotes : undefined,
   };
 }
 

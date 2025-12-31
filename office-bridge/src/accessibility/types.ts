@@ -375,6 +375,34 @@ export interface BookmarkInfo {
 }
 
 /**
+ * Footnote information.
+ */
+export interface FootnoteInfo {
+  /** Reference to the footnote (fn:1, fn:2, etc.) */
+  ref: Ref;
+  /** Footnote ID from Word */
+  id: number;
+  /** Footnote text content */
+  text: string;
+  /** Paragraph ref where this footnote is referenced */
+  referencedFrom?: Ref;
+}
+
+/**
+ * Endnote information.
+ */
+export interface EndnoteInfo {
+  /** Reference to the endnote (en:1, en:2, etc.) */
+  ref: Ref;
+  /** Endnote ID from Word */
+  id: number;
+  /** Endnote text content */
+  text: string;
+  /** Paragraph ref where this endnote is referenced */
+  referencedFrom?: Ref;
+}
+
+/**
  * Node representing an element in the accessibility tree.
  */
 export interface AccessibilityNode {
@@ -410,6 +438,10 @@ export interface AccessibilityNode {
   bookmark?: BookmarkInfo;
   /** Incoming references to this node */
   incomingReferences?: Ref[];
+  /** Footnote refs referenced in this node */
+  footnoteRefs?: Ref[];
+  /** Endnote refs referenced in this node */
+  endnoteRefs?: Ref[];
 
   // Role-specific properties
   /** Heading level (for heading role) */
@@ -456,6 +488,10 @@ export interface DocumentStats {
   trackedChanges: number;
   /** Total comment count */
   comments: number;
+  /** Total footnote count */
+  footnotes?: number;
+  /** Total endnote count */
+  endnotes?: number;
   /** Total section count (for outline mode) */
   sections?: number;
 }
@@ -514,6 +550,10 @@ export interface AccessibilityTree {
   comments?: Comment[];
   /** All bookmarks */
   bookmarks?: BookmarkInfo[];
+  /** All footnotes */
+  footnotes?: FootnoteInfo[];
+  /** All endnotes */
+  endnotes?: EndnoteInfo[];
   /** Link summary */
   links?: LinkSummary;
   /** Navigation hints (outline mode) */
