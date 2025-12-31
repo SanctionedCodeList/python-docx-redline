@@ -26,16 +26,32 @@ import { resolveScope } from './scope';
  */
 interface WordRequestContext {
   document: {
-    body: {
-      paragraphs: WordParagraphCollection;
-      tables: WordTableCollection;
-    };
+    body: WordBody;
     getSelection(): WordRange;
   };
   sync(): Promise<void>;
   trackedChanges?: {
     enabled: boolean;
   };
+}
+
+interface WordBody {
+  paragraphs: WordParagraphCollection;
+  tables: WordTableCollection;
+  search(searchText: string, options?: WordSearchOptions): WordRangeCollection;
+}
+
+interface WordSearchOptions {
+  matchCase?: boolean;
+  matchWholeWord?: boolean;
+  matchWildcards?: boolean;
+  matchPrefix?: boolean;
+  matchSuffix?: boolean;
+}
+
+interface WordRangeCollection {
+  load(properties: string): WordRangeCollection;
+  items: WordRange[];
 }
 
 interface WordParagraphCollection {
@@ -1525,4 +1541,277 @@ export async function batchDelete(
   }));
 
   return batchEdit(context, operations, options);
+}
+
+// =============================================================================
+// Text Search
+// =============================================================================
+
+/**
+ * A single match found by findText.
+ */
+export interface TextMatch {
+  /** Reference to the paragraph containing the match */
+  ref: Ref;
+  /** Full text of the paragraph */
+  text: string;
+  /** Starting position of the match within the paragraph */
+  start: number;
+  /** Ending position of the match within the paragraph */
+  end: number;
+  /** The actual matched text (may differ in case if caseInsensitive) */
+  matchedText: string;
+}
+
+/**
+ * Result of a findText operation.
+ */
+export interface FindTextResult {
+  /** Total number of matches found */
+  count: number;
+  /** All matches found */
+  matches: TextMatch[];
+  /** Number of paragraphs searched */
+  paragraphsSearched: number;
+}
+
+/**
+ * Options for findText operation.
+ */
+export interface FindTextOptions {
+  /** Case insensitive search (default: false) */
+  caseInsensitive?: boolean;
+  /** Use regex pattern (default: false, treats search as literal text) */
+  regex?: boolean;
+  /** Match whole words only (default: false) */
+  wholeWord?: boolean;
+  /** Maximum number of matches to return (default: unlimited) */
+  maxMatches?: number;
+  /** Only search within a specific scope */
+  scope?: ScopeSpec;
+}
+
+/**
+ * Search for text across the document, returning refs and match positions.
+ *
+ * PERFORMANCE: Uses batched paragraph loading. All paragraphs are loaded
+ * in a single sync call, then searched synchronously.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param searchText - Text or regex pattern to search for
+ * @param tree - Optional accessibility tree (required if using scope option)
+ * @param options - Search options (case sensitivity, regex, scope, etc.)
+ * @returns FindTextResult with all matches
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   // Simple search
+ *   const result = await findText(context, "agreement");
+ *   console.log(`Found ${result.count} matches`);
+ *
+ *   // Case-insensitive search
+ *   const result2 = await findText(context, "WHEREAS", null, { caseInsensitive: true });
+ *
+ *   // Regex search
+ *   const result3 = await findText(context, "\\$[\\d,]+\\.\\d{2}", null, { regex: true });
+ *
+ *   // Scoped search
+ *   const tree = await buildTree(context);
+ *   const result4 = await findText(context, "plaintiff", tree, { scope: "section:Parties" });
+ * });
+ * ```
+ */
+export async function findText(
+  context: WordRequestContext,
+  searchText: string,
+  tree?: AccessibilityTree | null,
+  options?: FindTextOptions
+): Promise<FindTextResult> {
+  const matches: TextMatch[] = [];
+  const maxMatches = options?.maxMatches ?? Infinity;
+
+  // If scope is specified, use the tree to filter paragraphs
+  let scopedRefs: Set<Ref> | null = null;
+  if (options?.scope && tree) {
+    const scopeResult = resolveScope(tree, options.scope);
+    scopedRefs = new Set(scopeResult.nodes.map((n) => n.ref));
+  }
+
+  // BATCHED: Load all paragraphs once
+  const paragraphs = context.document.body.paragraphs.load('items,text');
+  await context.sync();
+
+  const paragraphsSearched = paragraphs.items.length;
+
+  // Build the search pattern
+  let pattern: RegExp;
+  if (options?.regex) {
+    try {
+      const flags = options.caseInsensitive ? 'gi' : 'g';
+      pattern = new RegExp(searchText, flags);
+    } catch (e) {
+      // Invalid regex
+      return { count: 0, matches: [], paragraphsSearched };
+    }
+  } else {
+    // Escape special regex characters for literal search
+    let escapedSearch = escapeRegExp(searchText);
+
+    // Add word boundary for whole word matching
+    if (options?.wholeWord) {
+      escapedSearch = `\\b${escapedSearch}\\b`;
+    }
+
+    const flags = options?.caseInsensitive ? 'gi' : 'g';
+    pattern = new RegExp(escapedSearch, flags);
+  }
+
+  // Search through paragraphs
+  for (let i = 0; i < paragraphs.items.length && matches.length < maxMatches; i++) {
+    const para = paragraphs.items[i];
+    if (!para) continue;
+
+    const ref = `p:${i}` as Ref;
+
+    // Skip if not in scope
+    if (scopedRefs && !scopedRefs.has(ref)) {
+      continue;
+    }
+
+    const text = para.text;
+    if (!text) continue;
+
+    // Find all matches in this paragraph
+    let match: RegExpExecArray | null;
+    pattern.lastIndex = 0; // Reset for each paragraph
+
+    while ((match = pattern.exec(text)) !== null && matches.length < maxMatches) {
+      matches.push({
+        ref,
+        text,
+        start: match.index,
+        end: match.index + match[0].length,
+        matchedText: match[0],
+      });
+
+      // Prevent infinite loop on zero-length matches
+      if (match[0].length === 0) {
+        pattern.lastIndex++;
+      }
+    }
+  }
+
+  return {
+    count: matches.length,
+    matches,
+    paragraphsSearched,
+  };
+}
+
+/**
+ * Find and highlight text in the document.
+ *
+ * Searches for text and applies highlight formatting to all matches.
+ *
+ * @param context - Word.RequestContext from Office.js
+ * @param searchText - Text to search for
+ * @param highlightColor - Highlight color (e.g., "yellow", "green", "#FFFF00")
+ * @param options - Search options
+ * @returns Number of matches highlighted
+ *
+ * @example
+ * ```typescript
+ * await Word.run(async (context) => {
+ *   const count = await findAndHighlight(context, "important", "yellow");
+ *   console.log(`Highlighted ${count} occurrences`);
+ * });
+ * ```
+ */
+export async function findAndHighlight(
+  context: WordRequestContext,
+  searchText: string,
+  highlightColor: string,
+  options?: FindTextOptions
+): Promise<number> {
+  // BATCHED: Load all paragraphs once
+  const paragraphs = context.document.body.paragraphs.load('items,text');
+  await context.sync();
+
+  // Build the search pattern
+  let pattern: RegExp;
+  if (options?.regex) {
+    try {
+      const flags = options.caseInsensitive ? 'gi' : 'g';
+      pattern = new RegExp(searchText, flags);
+    } catch {
+      return 0;
+    }
+  } else {
+    let escapedSearch = escapeRegExp(searchText);
+    if (options?.wholeWord) {
+      escapedSearch = `\\b${escapedSearch}\\b`;
+    }
+    const flags = options?.caseInsensitive ? 'gi' : 'g';
+    pattern = new RegExp(escapedSearch, flags);
+  }
+
+  // Collect all ranges to highlight
+  interface RangeToHighlight {
+    range: WordRange;
+    para: WordParagraph;
+    start: number;
+    length: number;
+  }
+  const rangesToHighlight: RangeToHighlight[] = [];
+
+  // Find matches and queue range loads
+  for (let i = 0; i < paragraphs.items.length; i++) {
+    const para = paragraphs.items[i];
+    if (!para) continue;
+
+    const text = para.text;
+    if (!text) continue;
+
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = pattern.exec(text)) !== null) {
+      // Get range for this specific text portion
+      // Note: We'll need to use search to find the exact range
+      rangesToHighlight.push({
+        range: null as unknown as WordRange,
+        para,
+        start: match.index,
+        length: match[0].length,
+      });
+
+      if (match[0].length === 0) {
+        pattern.lastIndex++;
+      }
+    }
+  }
+
+  if (rangesToHighlight.length === 0) {
+    return 0;
+  }
+
+  // Use Word's search feature to find and highlight
+  // This is more reliable than trying to calculate character positions
+  const body = context.document.body;
+  const searchResults = body.search(searchText, {
+    matchCase: !options?.caseInsensitive,
+    matchWholeWord: options?.wholeWord ?? false,
+  });
+  searchResults.load('items');
+  await context.sync();
+
+  // Apply highlight to all found ranges
+  for (const item of searchResults.items) {
+    (item as WordRange).font.highlightColor = highlightColor;
+  }
+
+  await context.sync();
+
+  return searchResults.items.length;
 }

@@ -36,6 +36,9 @@ import * as DocTreeScope from "@accessibility/scope";
   batchEdit: DocTreeEditing.batchEdit,
   batchReplace: DocTreeEditing.batchReplace,
   batchDelete: DocTreeEditing.batchDelete,
+  // Text search
+  findText: DocTreeEditing.findText,
+  findAndHighlight: DocTreeEditing.findAndHighlight,
   // Scope functions
   parseScope: DocTreeScope.parseScope,
   parseNoteScope: DocTreeScope.parseNoteScope,
