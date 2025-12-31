@@ -1,3 +1,8 @@
+---
+name: office-bridge
+description: "Word Add-in API for live document editing via Office.js. Use when editing documents in Microsoft Word through the Office Bridge add-in, for real-time editing with the DocTree accessibility layer."
+---
+
 # Office Bridge: Word Add-in DocTree API
 
 The Office Bridge provides a TypeScript/Office.js API for interacting with Word documents via the DocTree accessibility layer. It runs as a Word add-in that connects to a local bridge server, enabling remote execution of document operations.

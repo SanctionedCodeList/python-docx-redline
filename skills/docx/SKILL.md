@@ -71,6 +71,7 @@ brew install pandoc                    # Text extraction (macOS)
 | **Structured document view (YAML)** | AccessibilityTree | [accessibility.md](./accessibility.md) |
 | **Large document navigation** | OutlineTree | [accessibility.md](./accessibility.md) |
 | **Ref-based precise editing** | python-docx-redline refs | [accessibility.md](./accessibility.md) |
+| **Live Word editing (add-in)** | Office Bridge DocTree | [office-bridge.md](./office-bridge.md) |
 | **Create new document** | python-docx | [creation.md](./creation.md) |
 | **Generate from data/template** | DocxBuilder | [templating.md](./templating.md) |
 | **Edit existing document** | python-docx-redline | [editing.md](./editing.md) |
@@ -237,6 +238,7 @@ Guidance on creating effective, professional documents:
 Detailed workflows for document manipulation:
 
 - **[accessibility.md](./accessibility.md)** — DocTree accessibility layer: YAML output, refs, OutlineTree for large docs
+- **[office-bridge.md](./office-bridge.md)** — Live Word editing via Office.js add-in with DocTree API
 - **[templating.md](./templating.md)** — DocxBuilder: generate documents from data with markdown support
 - **[creation.md](./creation.md)** — Creating new documents with style templates
 - **[reading.md](./reading.md)** — Text extraction, find_all(), document structure, tables
