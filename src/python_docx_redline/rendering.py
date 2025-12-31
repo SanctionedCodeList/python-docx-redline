@@ -350,8 +350,7 @@ def render_document_to_images(
 
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(
-            f"Rendering timed out after {timeout} seconds. "
-            f"Try increasing the timeout parameter."
+            f"Rendering timed out after {timeout} seconds. Try increasing the timeout parameter."
         ) from e
     except Exception:
         # Clean up temp directory on failure if we created it

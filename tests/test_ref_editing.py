@@ -1976,9 +1976,9 @@ class TestDoubleDeletePrevention:
                 r_pr = p_pr.find(f"{{{WORD_NAMESPACE}}}rPr")
                 if r_pr is not None:
                     del_marks = r_pr.findall(f"{{{WORD_NAMESPACE}}}del")
-                    assert (
-                        len(del_marks) == 1
-                    ), f"Expected 1 paragraph mark deletion, found {len(del_marks)}"
+                    assert len(del_marks) == 1, (
+                        f"Expected 1 paragraph mark deletion, found {len(del_marks)}"
+                    )
 
         finally:
             docx_path.unlink()

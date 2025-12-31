@@ -441,9 +441,9 @@ def test_apply_edits_mixed_phase_1_and_2():
             for i, r in enumerate(results):
                 print(f"Result {i}: success={r.success}, type={r.edit_type}, message={r.message}")
 
-        assert all(
-            r.success for r in results
-        ), f"Failed results: {[r.message for r in results if not r.success]}"
+        assert all(r.success for r in results), (
+            f"Failed results: {[r.message for r in results if not r.success]}"
+        )
         assert results[0].edit_type == "insert_tracked"
         assert results[1].edit_type == "insert_paragraph"
         assert results[2].edit_type == "replace_tracked"

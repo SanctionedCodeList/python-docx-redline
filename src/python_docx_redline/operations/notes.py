@@ -476,7 +476,7 @@ class NoteOperations:
             # Find the footnote element
             for fn_elem in root.findall(f"{{{WORD_NAMESPACE}}}footnote"):
                 if fn_elem.get(f"{{{WORD_NAMESPACE}}}id") == note_id_str:
-                    self._replace_note_content(fn_elem, new_text)
+                    self._replace_note_content(fn_elem, new_text, note_type="footnote")
                     break
 
             tree.write(
@@ -525,7 +525,7 @@ class NoteOperations:
             # Find the endnote element
             for en_elem in root.findall(f"{{{WORD_NAMESPACE}}}endnote"):
                 if en_elem.get(f"{{{WORD_NAMESPACE}}}id") == note_id_str:
-                    self._replace_note_content(en_elem, new_text)
+                    self._replace_note_content(en_elem, new_text, note_type="endnote")
                     break
 
             tree.write(
@@ -535,22 +535,145 @@ class NoteOperations:
                 pretty_print=True,
             )
 
-    def _replace_note_content(self, note_elem: etree._Element, new_text: str) -> None:
-        """Replace the content of a note element with new text.
+    def _replace_note_content(
+        self,
+        note_elem: etree._Element,
+        new_text: str | list[str],
+        note_type: str = "footnote",
+    ) -> None:
+        """Replace the content of a note element while preserving structure.
+
+        Preserves the footnote/endnote structure:
+        - Paragraph properties (pStyle)
+        - Reference run (footnoteRef/endnoteRef with rStyle)
+        - Space run after reference
+
+        Only removes/replaces the content runs that follow.
 
         Args:
             note_elem: The footnote or endnote XML element
-            new_text: The new text content
+            new_text: The new text content (string or list for multi-paragraph)
+            note_type: Either "footnote" or "endnote" (default: "footnote")
         """
+        # Normalize to list of paragraphs
+        paragraphs = [new_text] if isinstance(new_text, str) else new_text
+
+        # Determine style names based on note type
+        if note_type == "footnote":
+            para_style = "FootnoteText"
+            ref_style = "FootnoteReference"
+            ref_tag = "footnoteRef"
+        else:
+            para_style = "EndnoteText"
+            ref_style = "EndnoteReference"
+            ref_tag = "endnoteRef"
+
+        # Find the first paragraph (which should contain the reference)
+        first_para = note_elem.find(f"{{{WORD_NAMESPACE}}}p")
+
+        # Preserve elements from the first paragraph
+        preserved_ppr = None
+        preserved_ref_run = None
+        preserved_space_run = None
+
+        if first_para is not None:
+            # Preserve paragraph properties
+            ppr = first_para.find(f"{{{WORD_NAMESPACE}}}pPr")
+            if ppr is not None:
+                preserved_ppr = ppr
+
+            # Find and preserve the run containing the footnoteRef/endnoteRef
+            for run in first_para.findall(f"{{{WORD_NAMESPACE}}}r"):
+                ref_elem = run.find(f"{{{WORD_NAMESPACE}}}{ref_tag}")
+                if ref_elem is not None:
+                    preserved_ref_run = run
+                    break
+
+            # Find the space run (comes after ref_run, contains just a space)
+            if preserved_ref_run is not None:
+                ref_run_index = list(first_para).index(preserved_ref_run)
+                for elem in list(first_para)[ref_run_index + 1 :]:
+                    if elem.tag == f"{{{WORD_NAMESPACE}}}r":
+                        # Check if this run contains just a space text
+                        t_elem = elem.find(f"{{{WORD_NAMESPACE}}}t")
+                        if t_elem is not None and t_elem.text == " ":
+                            preserved_space_run = elem
+                            break
+                        # If it has other content, stop looking for space run
+                        break
+
         # Remove all existing paragraphs
-        for para in note_elem.findall(f"{{{WORD_NAMESPACE}}}p"):
+        for para in list(note_elem.findall(f"{{{WORD_NAMESPACE}}}p")):
             note_elem.remove(para)
 
-        # Add new paragraph with text
-        para = etree.SubElement(note_elem, f"{{{WORD_NAMESPACE}}}p")
-        run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
-        t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
-        t.text = new_text
+        # Create new paragraphs with content
+        for i, para_text in enumerate(paragraphs):
+            para = etree.SubElement(note_elem, f"{{{WORD_NAMESPACE}}}p")
+
+            # Add paragraph properties
+            if i == 0 and preserved_ppr is not None:
+                # Use preserved properties for first paragraph
+                para.append(preserved_ppr)
+            else:
+                # Create new paragraph properties with correct style
+                ppr = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}pPr")
+                pstyle = etree.SubElement(ppr, f"{{{WORD_NAMESPACE}}}pStyle")
+                pstyle.set(f"{{{WORD_NAMESPACE}}}val", para_style)
+
+            # First paragraph gets the footnoteRef/endnoteRef marker
+            if i == 0:
+                if preserved_ref_run is not None:
+                    # Use preserved reference run
+                    para.append(preserved_ref_run)
+                else:
+                    # Create new reference run if it was missing
+                    ref_run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+                    ref_rpr = etree.SubElement(ref_run, f"{{{WORD_NAMESPACE}}}rPr")
+                    ref_rstyle = etree.SubElement(ref_rpr, f"{{{WORD_NAMESPACE}}}rStyle")
+                    ref_rstyle.set(f"{{{WORD_NAMESPACE}}}val", ref_style)
+                    etree.SubElement(ref_run, f"{{{WORD_NAMESPACE}}}{ref_tag}")
+
+                if preserved_space_run is not None:
+                    # Use preserved space run
+                    para.append(preserved_space_run)
+                else:
+                    # Create space run after reference
+                    space_run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+                    space_t = etree.SubElement(space_run, f"{{{WORD_NAMESPACE}}}t")
+                    space_t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                    space_t.text = " "
+
+            # Parse markdown and create runs for content (if any text provided)
+            if para_text:
+                segments = parse_markdown(para_text)
+
+                for segment in segments:
+                    run = etree.SubElement(para, f"{{{WORD_NAMESPACE}}}r")
+
+                    # Add run properties if any formatting is applied
+                    if segment.has_formatting():
+                        rpr = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}rPr")
+                        if segment.bold:
+                            etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}b")
+                        if segment.italic:
+                            etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}i")
+                        if segment.underline:
+                            u_elem = etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}u")
+                            u_elem.set(f"{{{WORD_NAMESPACE}}}val", "single")
+                        if segment.strikethrough:
+                            etree.SubElement(rpr, f"{{{WORD_NAMESPACE}}}strike")
+
+                    # Handle linebreak segments
+                    if segment.is_linebreak:
+                        etree.SubElement(run, f"{{{WORD_NAMESPACE}}}br")
+                    else:
+                        t = etree.SubElement(run, f"{{{WORD_NAMESPACE}}}t")
+                        # Preserve whitespace if needed
+                        if segment.text and (
+                            segment.text[0].isspace() or segment.text[-1].isspace()
+                        ):
+                            t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+                        t.text = segment.text
 
     def _remove_footnote_reference(self, note_id: str) -> None:
         """Remove a footnote reference from the document body.

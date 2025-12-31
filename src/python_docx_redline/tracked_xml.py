@@ -138,7 +138,7 @@ class TrackedXMLGenerator:
         """
         # Handle linebreak segments - emit <w:br/> instead of <w:t>
         if segment.is_linebreak:
-            return f'  <w:r w:rsidR="{self.rsid}">\n' f"    <w:br/>\n" f"  </w:r>\n"
+            return f'  <w:r w:rsidR="{self.rsid}">\n    <w:br/>\n  </w:r>\n'
 
         text = segment.text
 
