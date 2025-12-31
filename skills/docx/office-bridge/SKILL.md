@@ -40,6 +40,7 @@ await Word.run(async (context) => {
 
 | Task | Guide |
 |------|-------|
+| **First-time setup** | [setup.md](./setup.md) |
 | Build tree, YAML serialization | [tree-building.md](./tree-building.md) |
 | Ref-based editing, batch ops | [editing.md](./editing.md) |
 | Text search, findAndHighlight | [search.md](./search.md) |
@@ -55,34 +56,50 @@ await Word.run(async (context) => {
 
 ## Installation
 
-### 1. Start the Bridge Server
+**First-time setup?** See [setup.md](./setup.md) for complete step-by-step instructions.
+
+### Quick Start (if already set up)
 
 ```bash
-cd word-addin-server
-npm install
-npm start  # Starts on localhost:3847
+# Terminal 1: Start bridge server
+cd office-bridge
+./server.sh
+
+# Terminal 2: Start add-in dev server
+cd office-bridge/addin
+npm run dev-server
 ```
 
-### 2. Load the Word Add-in
+Then open Word → Insert → Add-ins → My Add-ins → Office Bridge.
 
-- Open Word
-- Insert > Add-ins > My Add-ins
-- Load the Office Bridge add-in manifest
-- The add-in connects automatically to the bridge server
-
-### 3. Connect from Python/Claude
+### Connect from Python
 
 ```python
+import asyncio
 import websockets
 import json
 
-async with websockets.connect("ws://localhost:3847") as ws:
-    await ws.send(json.dumps({
-        "action": "buildTree",
-        "options": {"includeTrackedChanges": True}
-    }))
-    result = await ws.recv()
+async def connect():
+    async with websockets.connect("wss://localhost:3847") as ws:
+        await ws.send(json.dumps({
+            "type": "execute",
+            "code": "return await DocTree.buildTree(context);"
+        }))
+        result = await ws.recv()
+        print(result)
+
+asyncio.run(connect())
 ```
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "Disconnected" status | Ensure `./server.sh` is running |
+| Add-in won't load | Run `npm run dev-server` in `addin/` |
+| Certificate errors | Run `npx office-addin-dev-certs install` |
+
+See [setup.md](./setup.md) for detailed troubleshooting.
 
 ## Common Patterns
 
@@ -135,5 +152,5 @@ See [ideas/](./ideas/) for planned enhancements:
 
 ## See Also
 
-- [../office-bridge.md](../office-bridge.md) - Complete API reference
-- [../accessibility.md](../accessibility.md) - Python accessibility API
+- [setup.md](./setup.md) - Complete installation and troubleshooting guide
+- [../python/accessibility.md](../python/accessibility.md) - Python AccessibilityTree API
