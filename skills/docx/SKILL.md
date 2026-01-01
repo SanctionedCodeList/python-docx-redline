@@ -63,6 +63,12 @@ pip install python-docx-redline        # Editing with tracked changes (recommend
 brew install pandoc                    # Text extraction (macOS)
 ```
 
+### Library Source & Issues
+
+**python-docx-redline** source: [parkerhancock/python-docx-redline](https://github.com/parkerhancock/python-docx-redline)
+
+Report bugs, unexpected behavior, or feature requests as issues on the repository. Include the python-docx-redline version, minimal reproduction code, and the problematic .docx file if possible.
+
 ## Decision Tree
 
 | Task | Tool | Guide |
