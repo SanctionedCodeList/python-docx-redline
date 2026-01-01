@@ -80,6 +80,8 @@ brew install pandoc                    # Text extraction (macOS)
 | **Footnotes/endnotes** | python-docx-redline | [footnotes.md](./footnotes.md) |
 | **Insert or edit hyperlinks** | python-docx-redline | [hyperlinks.md](./hyperlinks.md) |
 | **Table of Contents** | python-docx-redline | [toc.md](./toc.md) |
+| **Cross-references** | python-docx-redline | [cross-references.md](./cross-references.md) |
+| **Bookmarks** | python-docx-redline | [cross-references.md](./cross-references.md) |
 | **Create or manage styles** | python-docx-redline StyleManager | [styles.md](./styles.md) |
 | **CriticMarkup workflow** | python-docx-redline | [criticmarkup.md](./criticmarkup.md) |
 | **Use both libraries together** | from_python_docx / to_python_docx | [integration.md](./integration.md) |
@@ -264,6 +266,7 @@ Detailed workflows for document manipulation:
 - **[footnotes.md](./footnotes.md)** — Footnotes/endnotes: CRUD, tracked changes, rich content, search
 - **[hyperlinks.md](./hyperlinks.md)** — Hyperlink operations: insert, edit, remove in body, headers, footers, footnotes
 - **[toc.md](./toc.md)** — Table of Contents: insert, inspect, update, remove TOC
+- **[cross-references.md](./cross-references.md)** — Cross-references and bookmarks: reference headings, figures, tables, notes
 - **[styles.md](./styles.md)** — Style management: reading, creating, ensuring styles exist, formatting options
 - **[criticmarkup.md](./criticmarkup.md)** — Export/import with CriticMarkup, round-trip workflows
 - **[integration.md](./integration.md)** — python-docx integration: from_python_docx, to_python_docx, workflows
