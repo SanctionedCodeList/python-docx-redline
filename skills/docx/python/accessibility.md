@@ -156,6 +156,9 @@ hdr:default/p:0         # First paragraph in default header
 | `ftr` | Footer | `ftr:first` |
 | `img` | Image | `img:5/0` |
 | `cmt` | Comment | `cmt:5` |
+| `bk` | Bookmark | `bk:Section1` |
+| `lnk` | Hyperlink | `lnk:0` |
+| `xref` | Cross-reference | `xref:0` |
 
 ### Ordinal vs Fingerprint Refs
 
@@ -262,12 +265,54 @@ for name, bookmark in tree.bookmarks.items():
 bookmark = tree.get_bookmark("Section2")
 print(f"Located at: {bookmark.ref}")
 
-# Validate all references (find broken links)
+# Get all hyperlinks
+for link in tree.hyperlinks:
+    print(f"{link.ref}: {link.text} -> {link.target}")
+
+# Get all cross-references (REF, PAGEREF, NOTEREF fields)
+for xref in tree.cross_references:
+    print(f"{xref.ref}: {xref.field_type.name} -> {xref.target_bookmark}")
+    print(f"  Display: {xref.display_value}")
+    print(f"  From: {xref.from_location}")
+
+# Find all cross-references pointing to a specific bookmark
+xrefs = tree.get_cross_references_to("Section2")
+print(f"Found {len(xrefs)} references to Section2")
+
+# Validate all references (find broken links and cross-references)
 result = tree.validate_references()
 if result.broken_links:
     print("Broken links found:", result.broken_links)
+if result.broken_cross_references:
+    print("Broken cross-refs:", result.broken_cross_references)
 if result.orphan_bookmarks:
     print("Unused bookmarks:", result.orphan_bookmarks)
+```
+
+**YAML output for cross-references:**
+```yaml
+cross_references:
+  text_references:  # REF fields
+    - ref: xref:0
+      target: Section1
+      from: p:5
+      display: "Introduction"
+      target_location: p:0
+      hyperlink: true
+  page_references:  # PAGEREF fields
+    - ref: xref:1
+      target: Section1
+      from: p:10
+      display: "5"
+  note_references:  # NOTEREF fields
+    - ref: xref:2
+      target: _Ref123456
+      from: p:15
+      display: "1"
+  broken:
+    - ref: xref:3
+      target: MissingBookmark
+      error: "Bookmark not found"
 ```
 
 ## Large Document Handling
@@ -443,6 +488,7 @@ print(f"Comments: {stats.comments}")
 print(f"Images: {stats.images}")
 print(f"Bookmarks: {stats.bookmarks}")
 print(f"Hyperlinks: {stats.hyperlinks}")
+print(f"Cross-references: {stats.cross_references}")
 ```
 
 ## Performance
