@@ -16,12 +16,13 @@ from typing import TYPE_CHECKING, Literal
 from lxml import etree
 
 from ..constants import WORD_NAMESPACE, w
-from .bookmarks import BookmarkRegistry
+from .bookmarks import BookmarkRegistry, CrossReferenceRegistry
 from .images import ImageExtractor
 from .registry import RefRegistry
 from .types import (
     AccessibilityNode,
     BookmarkInfo,
+    CrossReferenceInfo,
     ElementType,
     HyperlinkInfo,
     ImageInfo,
@@ -46,6 +47,7 @@ class DocumentStats:
         images: Number of images and embedded objects
         bookmarks: Number of bookmarks
         hyperlinks: Number of hyperlinks
+        cross_references: Number of cross-references (REF/PAGEREF/NOTEREF fields)
     """
 
     paragraphs: int = 0
@@ -55,6 +57,7 @@ class DocumentStats:
     images: int = 0
     bookmarks: int = 0
     hyperlinks: int = 0
+    cross_references: int = 0
 
 
 class AccessibilityTree:
@@ -85,6 +88,7 @@ class AccessibilityTree:
         stats: DocumentStats | None = None,
         document_path: str | Path | None = None,
         bookmark_registry: BookmarkRegistry | None = None,
+        cross_reference_registry: CrossReferenceRegistry | None = None,
     ) -> None:
         """Initialize an AccessibilityTree.
 
@@ -95,6 +99,7 @@ class AccessibilityTree:
             stats: Document statistics
             document_path: Path to source document
             bookmark_registry: BookmarkRegistry for bookmarks and hyperlinks
+            cross_reference_registry: CrossReferenceRegistry for cross-references
         """
         self.root = root
         self.registry = registry
@@ -102,6 +107,7 @@ class AccessibilityTree:
         self.stats = stats or DocumentStats()
         self.document_path = document_path
         self.bookmark_registry = bookmark_registry or BookmarkRegistry()
+        self.cross_reference_registry = cross_reference_registry or CrossReferenceRegistry()
 
     @property
     def bookmarks(self) -> dict[str, BookmarkInfo]:
@@ -121,6 +127,26 @@ class AccessibilityTree:
         """
         return self.bookmark_registry.hyperlinks
 
+    @property
+    def cross_references(self) -> list[CrossReferenceInfo]:
+        """Get all cross-references in the document.
+
+        Returns:
+            List of CrossReferenceInfo objects
+        """
+        return self.cross_reference_registry.cross_references
+
+    def get_cross_references_to(self, bookmark_name: str) -> list[CrossReferenceInfo]:
+        """Get all cross-references that target a specific bookmark.
+
+        Args:
+            bookmark_name: Name of the target bookmark
+
+        Returns:
+            List of CrossReferenceInfo objects
+        """
+        return self.cross_reference_registry.get_by_target(bookmark_name)
+
     def get_bookmark(self, name: str) -> BookmarkInfo | None:
         """Get a bookmark by name.
 
@@ -135,12 +161,26 @@ class AccessibilityTree:
     def validate_references(self) -> ReferenceValidationResult:
         """Validate all document references.
 
-        Checks for broken links and orphan bookmarks.
+        Checks for broken links, broken cross-references, and orphan bookmarks.
 
         Returns:
             ReferenceValidationResult with validation details
         """
-        return self.bookmark_registry.validate_references()
+        result = self.bookmark_registry.validate_references()
+
+        # Add broken cross-references
+        broken_xrefs = self.cross_reference_registry.get_broken()
+        if broken_xrefs:
+            result.broken_cross_references = broken_xrefs
+            result.is_valid = False
+            result.warnings.append(f"Found {len(broken_xrefs)} broken cross-reference(s)")
+
+            # Add to missing_bookmarks
+            for xref in broken_xrefs:
+                if xref.target_bookmark not in result.missing_bookmarks:
+                    result.missing_bookmarks.append(xref.target_bookmark)
+
+        return result
 
     def get_images(self) -> list[ImageInfo]:
         """Get all images in the document.
@@ -194,9 +234,13 @@ class AccessibilityTree:
         stats = builder.stats
 
         # Extract bookmarks and hyperlinks
-        bookmark_registry = BookmarkRegistry.from_xml(xml_root, registry)
+        bookmark_registry = BookmarkRegistry.from_xml(xml_root)
         stats.bookmarks = len(bookmark_registry.bookmarks)
         stats.hyperlinks = len(bookmark_registry.hyperlinks)
+
+        # Extract cross-references (pass bookmark_registry for reference resolution)
+        cross_reference_registry = CrossReferenceRegistry.from_xml(xml_root, bookmark_registry)
+        stats.cross_references = len(cross_reference_registry.cross_references)
 
         return cls(
             root=root,
@@ -205,6 +249,7 @@ class AccessibilityTree:
             stats=stats,
             document_path=getattr(document, "path", None),
             bookmark_registry=bookmark_registry,
+            cross_reference_registry=cross_reference_registry,
         )
 
     @classmethod
@@ -232,9 +277,13 @@ class AccessibilityTree:
         stats = builder.stats
 
         # Extract bookmarks and hyperlinks
-        bookmark_registry = BookmarkRegistry.from_xml(xml_root, registry)
+        bookmark_registry = BookmarkRegistry.from_xml(xml_root)
         stats.bookmarks = len(bookmark_registry.bookmarks)
         stats.hyperlinks = len(bookmark_registry.hyperlinks)
+
+        # Extract cross-references (pass bookmark_registry for reference resolution)
+        cross_reference_registry = CrossReferenceRegistry.from_xml(xml_root, bookmark_registry)
+        stats.cross_references = len(cross_reference_registry.cross_references)
 
         return cls(
             root=root,
@@ -243,6 +292,7 @@ class AccessibilityTree:
             stats=stats,
             document_path=document_path,
             bookmark_registry=bookmark_registry,
+            cross_reference_registry=cross_reference_registry,
         )
 
     def find_by_ref(self, ref: str | Ref) -> AccessibilityNode | None:
@@ -1160,6 +1210,10 @@ class _YamlWriter:
         if tree.stats.bookmarks > 0 or tree.stats.hyperlinks > 0:
             self._write_bookmarks_and_links(tree)
 
+        # Write cross-references summary
+        if tree.stats.cross_references > 0:
+            self._write_cross_references(tree)
+
         return self.buffer.getvalue()
 
     def _write_header(self, tree: AccessibilityTree) -> str:
@@ -1187,6 +1241,8 @@ class _YamlWriter:
             self._write_line(f"hyperlinks: {tree.stats.hyperlinks}")
         if tree.stats.images > 0:
             self._write_line(f"images: {tree.stats.images}")
+        if tree.stats.cross_references > 0:
+            self._write_line(f"cross_references: {tree.stats.cross_references}")
         self._indent -= 1
 
         self._indent -= 1
@@ -1543,6 +1599,89 @@ class _YamlWriter:
                 self._indent -= 1
 
             self._indent -= 1
+
+    def _write_cross_references(self, tree: AccessibilityTree) -> None:
+        """Write cross-references summary."""
+        xref_data = tree.cross_reference_registry.to_yaml_dict()
+
+        if not xref_data:
+            return
+
+        self._write_line("")
+        self._write_line("cross_references:")
+        self._indent += 1
+
+        # Group by type for organized output
+        by_type: dict[str, list[dict]] = {"ref": [], "pageref": [], "noteref": []}
+        for xref in xref_data.get("cross_references", []):
+            field_type = xref.get("type", "REF").upper()
+            if field_type.lower() in by_type:
+                by_type[field_type.lower()].append(xref)
+            else:
+                by_type["ref"].append(xref)
+
+        # Write REF fields (bookmark text references)
+        if by_type["ref"]:
+            self._write_line("text_references:")
+            self._indent += 1
+            for xref in by_type["ref"]:
+                self._write_cross_reference_entry(xref)
+            self._indent -= 1
+
+        # Write PAGEREF fields (page number references)
+        if by_type["pageref"]:
+            self._write_line("page_references:")
+            self._indent += 1
+            for xref in by_type["pageref"]:
+                self._write_cross_reference_entry(xref)
+            self._indent -= 1
+
+        # Write NOTEREF fields (footnote/endnote number references)
+        if by_type["noteref"]:
+            self._write_line("note_references:")
+            self._indent += 1
+            for xref in by_type["noteref"]:
+                self._write_cross_reference_entry(xref)
+            self._indent -= 1
+
+        # Write broken references separately
+        broken = [x for x in xref_data.get("cross_references", []) if x.get("is_broken")]
+        if broken:
+            self._write_line("broken:")
+            self._indent += 1
+            for xref in broken:
+                self._write_line(f"- ref: {xref['ref']}")
+                self._indent += 1
+                self._write_line(f"target: {xref['target']}")
+                if xref.get("error"):
+                    self._write_line(f'error: "{xref["error"]}"')
+                self._indent -= 1
+            self._indent -= 1
+
+        self._indent -= 1
+
+    def _write_cross_reference_entry(self, xref: dict) -> None:
+        """Write a single cross-reference entry."""
+        self._write_line(f"- ref: {xref['ref']}")
+        self._indent += 1
+
+        self._write_line(f"target: {xref['target']}")
+        self._write_line(f"from: {xref['from']}")
+
+        if xref.get("display"):
+            text = self._escape_yaml_string(xref["display"])
+            self._write_line(f'display: "{text}"')
+
+        if xref.get("target_location"):
+            self._write_line(f"target_location: {xref['target_location']}")
+
+        if xref.get("is_hyperlink"):
+            self._write_line("hyperlink: true")
+
+        if xref.get("is_dirty"):
+            self._write_line("needs_update: true")
+
+        self._indent -= 1
 
     def _write_line(self, text: str) -> None:
         """Write a line with current indentation."""

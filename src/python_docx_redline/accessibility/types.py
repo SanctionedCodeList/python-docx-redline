@@ -48,6 +48,7 @@ class ElementType(Enum):
     COMMENT = auto()
     BOOKMARK = auto()
     HYPERLINK = auto()
+    CROSS_REFERENCE = auto()  # REF, PAGEREF, NOTEREF fields
 
     # Drawing elements
     IMAGE = auto()
@@ -77,6 +78,7 @@ ELEMENT_TYPE_TO_PREFIX: dict[ElementType, str] = {
     ElementType.COMMENT: "cmt",
     ElementType.BOOKMARK: "bk",
     ElementType.HYPERLINK: "lnk",
+    ElementType.CROSS_REFERENCE: "xref",
     ElementType.IMAGE: "img",
     ElementType.CHART: "chart",
     ElementType.SHAPE: "shape",
@@ -206,22 +208,72 @@ class HyperlinkInfo:
     error: str | None = None
 
 
+class FieldType(Enum):
+    """Types of cross-reference fields in Word."""
+
+    REF = auto()  # Reference to bookmark text
+    PAGEREF = auto()  # Reference to page number
+    NOTEREF = auto()  # Reference to footnote/endnote number
+
+
+@dataclass
+class CrossReferenceInfo:
+    """Information about a cross-reference field in the document.
+
+    Cross-references are field codes (REF, PAGEREF, NOTEREF) that reference
+    bookmarks and display dynamic content like text, page numbers, or
+    footnote numbers.
+
+    Attributes:
+        ref: Reference ID for this cross-reference (e.g., "xref:5")
+        field_type: Type of field (REF, PAGEREF, NOTEREF)
+        target_bookmark: Name of the bookmark being referenced
+        from_location: Ref of the paragraph containing this cross-reference
+        display_value: Current displayed text (may be stale if is_dirty)
+        is_dirty: Whether the field is marked for update by Word
+        is_hyperlink: Whether the cross-reference is a clickable hyperlink (\\h switch)
+        show_position: Whether to show "above"/"below" position (\\p switch)
+        number_format: Number format: "full", "relative", "no_context", or None
+        switches: Raw field switches string
+        target_location: Resolved location of the target bookmark
+        is_broken: Whether this references a non-existent bookmark
+        error: Error message if the cross-reference is broken
+    """
+
+    ref: str
+    field_type: FieldType
+    target_bookmark: str
+    from_location: str
+    display_value: str = ""
+    is_dirty: bool = False
+    is_hyperlink: bool = False
+    show_position: bool = False
+    number_format: str | None = None
+    switches: str = ""
+    target_location: str | None = None
+    is_broken: bool = False
+    error: str | None = None
+
+
 @dataclass
 class ReferenceValidationResult:
     """Result of validating document references.
 
-    This captures broken links, orphan bookmarks, and other reference issues.
+    This captures broken links, orphan bookmarks, cross-references, and other
+    reference issues.
 
     Attributes:
         is_valid: Whether all references are valid
         broken_links: List of hyperlinks with invalid targets
-        orphan_bookmarks: Bookmarks not referenced by any link
+        broken_cross_references: List of cross-references with invalid targets
+        orphan_bookmarks: Bookmarks not referenced by any link or cross-reference
         missing_bookmarks: Bookmark names that are referenced but don't exist
         warnings: List of warning messages
     """
 
     is_valid: bool = True
     broken_links: list[HyperlinkInfo] = field(default_factory=list)
+    broken_cross_references: list[CrossReferenceInfo] = field(default_factory=list)
     orphan_bookmarks: list[BookmarkInfo] = field(default_factory=list)
     missing_bookmarks: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

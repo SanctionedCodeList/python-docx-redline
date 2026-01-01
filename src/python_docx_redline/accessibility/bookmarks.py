@@ -1,14 +1,14 @@
 """
-Bookmark and hyperlink management for Word documents.
+Bookmark, hyperlink, and cross-reference management for Word documents.
 
-This module provides extraction and management of bookmarks and hyperlinks,
-including bidirectional reference tracking and broken link detection.
-
-Note: This is a minimal stub implementation. Full implementation pending.
+This module provides extraction and management of bookmarks, hyperlinks,
+and cross-references, including bidirectional reference tracking and
+broken link/reference detection.
 """
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 
 from lxml import etree
@@ -16,7 +16,14 @@ from lxml import etree
 if TYPE_CHECKING:
     from ..types import Element
 
-from .types import BookmarkInfo, HyperlinkInfo, LinkType, ReferenceValidationResult
+from .types import (
+    BookmarkInfo,
+    CrossReferenceInfo,
+    FieldType,
+    HyperlinkInfo,
+    LinkType,
+    ReferenceValidationResult,
+)
 
 
 class BookmarkRegistry:
@@ -408,3 +415,313 @@ def rename_bookmark(
             updated += 1
 
     return updated
+
+
+class CrossReferenceRegistry:
+    """Registry for cross-references (field codes) in a document.
+
+    Provides:
+    - Cross-reference extraction (REF, PAGEREF, NOTEREF fields)
+    - Field code parsing with switch detection
+    - Broken cross-reference detection
+    - Bidirectional reference tracking with bookmarks
+    """
+
+    # Regex to parse field instructions like "REF _Ref123456 \\h \\r"
+    _FIELD_PATTERN = re.compile(r"^\s*(REF|PAGEREF|NOTEREF)\s+(\S+)\s*(.*?)\s*$", re.IGNORECASE)
+
+    def __init__(self) -> None:
+        self.cross_references: list[CrossReferenceInfo] = []
+        self._xref_counter = 0
+
+    @classmethod
+    def from_xml(
+        cls,
+        root: Element,
+        bookmark_registry: BookmarkRegistry | None = None,
+    ) -> CrossReferenceRegistry:
+        """Create a CrossReferenceRegistry from document XML.
+
+        Args:
+            root: The document root element
+            bookmark_registry: Optional BookmarkRegistry for reference resolution
+
+        Returns:
+            CrossReferenceRegistry with extracted cross-references
+        """
+        registry = cls()
+        registry._extract_cross_references(root, bookmark_registry)
+        return registry
+
+    def _extract_cross_references(
+        self,
+        root: Element,
+        bookmark_registry: BookmarkRegistry | None,
+    ) -> None:
+        """Extract cross-references from document XML.
+
+        Handles both simple fields (w:fldSimple) and complex fields
+        (w:fldChar with w:instrText).
+        """
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        w_ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+        # Track paragraph indices
+        paragraphs = root.findall(".//w:p", ns)
+        para_map = {id(p): idx for idx, p in enumerate(paragraphs)}
+
+        # Extract from simple fields (w:fldSimple)
+        for fld_simple in root.findall(".//w:fldSimple", ns):
+            instr = fld_simple.get(f"{w_ns}instr", "")
+            xref = self._parse_field_instruction(instr)
+            if xref:
+                # Get display value
+                text_parts = []
+                for t in fld_simple.findall(".//w:t", ns):
+                    if t.text:
+                        text_parts.append(t.text)
+                display_value = "".join(text_parts)
+
+                # Find containing paragraph
+                para = fld_simple
+                while para is not None and para.tag != f"{w_ns}p":
+                    para = para.getparent()
+
+                para_idx = para_map.get(id(para), 0) if para is not None else 0
+
+                # Check dirty flag
+                is_dirty = fld_simple.get(f"{w_ns}dirty", "").lower() == "true"
+
+                # Resolve target
+                target_location = None
+                is_broken = True
+                error = None
+                if bookmark_registry:
+                    bookmark = bookmark_registry.get_bookmark(xref["target"])
+                    if bookmark:
+                        target_location = bookmark.location
+                        is_broken = False
+                        bookmark.referenced_by.append(f"xref:{self._xref_counter}")
+                    else:
+                        error = f"Bookmark '{xref['target']}' not found"
+
+                self.cross_references.append(
+                    CrossReferenceInfo(
+                        ref=f"xref:{self._xref_counter}",
+                        field_type=xref["field_type"],
+                        target_bookmark=xref["target"],
+                        from_location=f"p:{para_idx}",
+                        display_value=display_value,
+                        is_dirty=is_dirty,
+                        is_hyperlink=xref["is_hyperlink"],
+                        show_position=xref["show_position"],
+                        number_format=xref["number_format"],
+                        switches=xref["switches"],
+                        target_location=target_location,
+                        is_broken=is_broken,
+                        error=error,
+                    )
+                )
+                self._xref_counter += 1
+
+        # Extract from complex fields (w:fldChar begin/separate/end with w:instrText)
+        self._extract_complex_fields(root, ns, w_ns, para_map, bookmark_registry)
+
+    def _extract_complex_fields(
+        self,
+        root: Element,
+        ns: dict,
+        w_ns: str,
+        para_map: dict,
+        bookmark_registry: BookmarkRegistry | None,
+    ) -> None:
+        """Extract cross-references from complex field constructs."""
+        # Complex fields are structured as:
+        # <w:fldChar w:fldCharType="begin"/>
+        # <w:instrText>REF _Ref123 \h</w:instrText>
+        # <w:fldChar w:fldCharType="separate"/>
+        # <w:t>display value</w:t>
+        # <w:fldChar w:fldCharType="end"/>
+
+        in_field = False
+        field_instr = []
+        field_display = []
+        field_start_para = None
+        is_dirty = False
+
+        for elem in root.iter():
+            if elem.tag == f"{w_ns}fldChar":
+                fld_type = elem.get(f"{w_ns}fldCharType", "")
+                if fld_type == "begin":
+                    in_field = True
+                    field_instr = []
+                    field_display = []
+                    is_dirty = elem.get(f"{w_ns}dirty", "").lower() == "true"
+                    # Find containing paragraph
+                    para = elem
+                    while para is not None and para.tag != f"{w_ns}p":
+                        para = para.getparent()
+                    field_start_para = para
+                elif fld_type == "separate":
+                    # Switch from collecting instruction to collecting display
+                    pass
+                elif fld_type == "end":
+                    if in_field and field_instr:
+                        instr_text = "".join(field_instr)
+                        xref = self._parse_field_instruction(instr_text)
+                        if xref:
+                            display_value = "".join(field_display)
+                            para_idx = (
+                                para_map.get(id(field_start_para), 0) if field_start_para else 0
+                            )
+
+                            # Resolve target
+                            target_location = None
+                            is_broken = True
+                            error = None
+                            if bookmark_registry:
+                                bookmark = bookmark_registry.get_bookmark(xref["target"])
+                                if bookmark:
+                                    target_location = bookmark.location
+                                    is_broken = False
+                                    bookmark.referenced_by.append(f"xref:{self._xref_counter}")
+                                else:
+                                    error = f"Bookmark '{xref['target']}' not found"
+
+                            self.cross_references.append(
+                                CrossReferenceInfo(
+                                    ref=f"xref:{self._xref_counter}",
+                                    field_type=xref["field_type"],
+                                    target_bookmark=xref["target"],
+                                    from_location=f"p:{para_idx}",
+                                    display_value=display_value,
+                                    is_dirty=is_dirty,
+                                    is_hyperlink=xref["is_hyperlink"],
+                                    show_position=xref["show_position"],
+                                    number_format=xref["number_format"],
+                                    switches=xref["switches"],
+                                    target_location=target_location,
+                                    is_broken=is_broken,
+                                    error=error,
+                                )
+                            )
+                            self._xref_counter += 1
+
+                    in_field = False
+                    field_instr = []
+                    field_display = []
+                    field_start_para = None
+
+            elif in_field:
+                if elem.tag == f"{w_ns}instrText" and elem.text:
+                    field_instr.append(elem.text)
+                elif elem.tag == f"{w_ns}t" and elem.text:
+                    # Only collect display text after separate
+                    field_display.append(elem.text)
+
+    def _parse_field_instruction(self, instr: str) -> dict | None:
+        """Parse a field instruction string.
+
+        Args:
+            instr: Field instruction like "REF _Ref123456 \\h \\r"
+
+        Returns:
+            Dict with field_type, target, switches, etc. or None if not a cross-reference
+        """
+        match = self._FIELD_PATTERN.match(instr)
+        if not match:
+            return None
+
+        field_type_str = match.group(1).upper()
+        target = match.group(2)
+        switches = match.group(3).strip()
+
+        # Map to FieldType enum
+        field_type_map = {
+            "REF": FieldType.REF,
+            "PAGEREF": FieldType.PAGEREF,
+            "NOTEREF": FieldType.NOTEREF,
+        }
+        field_type = field_type_map.get(field_type_str)
+        if not field_type:
+            return None
+
+        # Parse switches
+        is_hyperlink = "\\h" in switches.lower()
+        show_position = "\\p" in switches.lower()
+
+        # Determine number format
+        number_format = None
+        if "\\w" in switches.lower():
+            number_format = "full"
+        elif "\\r" in switches.lower():
+            number_format = "relative"
+        elif "\\n" in switches.lower():
+            number_format = "no_context"
+
+        return {
+            "field_type": field_type,
+            "target": target,
+            "switches": switches,
+            "is_hyperlink": is_hyperlink,
+            "show_position": show_position,
+            "number_format": number_format,
+        }
+
+    def get_all(self) -> list[CrossReferenceInfo]:
+        """Get all cross-references."""
+        return self.cross_references
+
+    def get_broken(self) -> list[CrossReferenceInfo]:
+        """Get all broken cross-references."""
+        return [xref for xref in self.cross_references if xref.is_broken]
+
+    def get_by_target(self, bookmark_name: str) -> list[CrossReferenceInfo]:
+        """Get all cross-references to a specific bookmark."""
+        return [xref for xref in self.cross_references if xref.target_bookmark == bookmark_name]
+
+    def get_dirty(self) -> list[CrossReferenceInfo]:
+        """Get all cross-references marked as dirty (need update)."""
+        return [xref for xref in self.cross_references if xref.is_dirty]
+
+    def to_yaml_dict(self) -> dict:
+        """Convert to YAML-serializable dictionary."""
+        if not self.cross_references:
+            return {}
+
+        result = {"cross_references": []}
+
+        for xref in self.cross_references:
+            xref_dict = {
+                "ref": xref.ref,
+                "type": xref.field_type.name,
+                "target": xref.target_bookmark,
+                "from": xref.from_location,
+            }
+
+            if xref.display_value:
+                xref_dict["display"] = xref.display_value
+
+            if xref.target_location:
+                xref_dict["target_location"] = xref.target_location
+
+            if xref.is_hyperlink:
+                xref_dict["is_hyperlink"] = True
+
+            if xref.show_position:
+                xref_dict["show_position"] = True
+
+            if xref.number_format:
+                xref_dict["number_format"] = xref.number_format
+
+            if xref.is_dirty:
+                xref_dict["is_dirty"] = True
+
+            if xref.is_broken:
+                xref_dict["is_broken"] = True
+                if xref.error:
+                    xref_dict["error"] = xref.error
+
+            result["cross_references"].append(xref_dict)
+
+        return result
