@@ -196,6 +196,23 @@ doc.delete_by_ref("p:10", track=True)
 
 See [accessibility.md](./accessibility.md) for full details.
 
+## Visual Layout Analysis
+
+To analyze physical document layout, formatting, and visual elements with AI vision:
+
+```python
+from scripts.docx_to_images import docx_to_images
+
+# Convert document pages to images
+images = docx_to_images("contract.docx")
+# Returns: [Path('contract_page_1.png'), Path('contract_page_2.png'), ...]
+
+# Higher resolution for detailed analysis
+images = docx_to_images("report.docx", output_dir="./pages", dpi=300)
+```
+
+Requires LibreOffice and poppler. Run `../install.sh` or see [scripts/README.md](./scripts/README.md).
+
 ## Reference Files
 
 | File | Purpose |

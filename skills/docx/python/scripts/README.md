@@ -1,8 +1,65 @@
 # DOCX Scripts
 
+Utility scripts for Word document operations.
+
+## docx_to_images.py - Visual Layout Analysis
+
+Convert Word documents to page images for AI vision analysis. This enables understanding physical layout, formatting, and visual elements that aren't captured in the XML structure.
+
+### Usage
+
+```bash
+# Basic conversion (150 DPI, same directory as input)
+python docx_to_images.py document.docx
+
+# Custom output directory and resolution
+python docx_to_images.py document.docx --output ./pages --dpi 300
+
+# Check dependencies
+python docx_to_images.py --check
+```
+
+```python
+# As a module
+from docx_to_images import docx_to_images
+
+images = docx_to_images("contract.docx")
+# Returns: [Path('contract_page_1.png'), Path('contract_page_2.png'), ...]
+
+# With options
+images = docx_to_images("report.docx", output_dir="./pages", dpi=300)
+```
+
+### Dependencies
+
+Requires LibreOffice and poppler. Run `../../install.sh` or install manually:
+
+**macOS:**
+```bash
+brew install --cask libreoffice
+brew install poppler
+pip install pdf2image
+```
+
+**Linux:**
+```bash
+sudo apt install libreoffice poppler-utils
+pip install pdf2image
+```
+
+**Windows:**
+1. Install LibreOffice from https://www.libreoffice.org/download/
+2. Install poppler from https://github.com/oschwartz10612/poppler-windows/releases
+3. Add poppler `bin/` to PATH
+4. `pip install pdf2image`
+
+---
+
+## OOXML Manipulation Scripts
+
 These scripts provide low-level OOXML manipulation capabilities from the [Anthropic Skills](https://github.com/anthropics/skills) repository. They are included for advanced scenarios not covered by python-docx-redline.
 
-## When to Use These Scripts
+### When to Use These Scripts
 
 **For most use cases, prefer python-docx-redline** - it provides a high-level API for tracked changes.
 
@@ -12,7 +69,7 @@ Use these scripts only for:
 - Inserting images with tracked changes
 - Complex nested revision scenarios
 
-## Dependencies
+### Dependencies
 
 ```bash
 pip install defusedxml lxml
