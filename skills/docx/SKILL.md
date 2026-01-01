@@ -65,7 +65,7 @@ brew install pandoc                    # Text extraction (macOS)
 
 ### Library Source & Issues
 
-**python-docx-redline** source: [parkerhancock/python-docx-redline](https://github.com/parkerhancock/python-docx-redline)
+**python-docx-redline** source: [SanctionedCodeList/python-docx-redline](https://github.com/SanctionedCodeList/python-docx-redline)
 
 Report bugs, unexpected behavior, or feature requests as issues on the repository. Include the python-docx-redline version, minimal reproduction code, and the problematic .docx file if possible.
 
