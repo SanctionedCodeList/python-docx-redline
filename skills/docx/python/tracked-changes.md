@@ -1,5 +1,45 @@
 # Tracked Changes
 
+Create redlined documents where changes are visible for review in Microsoft Word.
+
+## Real-World Example: Negotiating a Services Agreement
+
+**Scenario:** Client wants to revise payment terms and liability caps.
+
+```python
+from python_docx_redline import Document
+
+doc = Document("services_agreement_v1.docx")
+
+# Payment terms negotiation
+doc.replace_tracked("Net 30", "Net 45")
+doc.replace_tracked("2% monthly late fee", "1% monthly late fee")
+
+# Liability cap changes
+doc.replace_tracked("$50,000", "$100,000")
+doc.delete_tracked("in no event shall liability exceed fees paid in the prior 12 months")
+
+# Add new clause
+doc.insert_tracked(
+    "\n\n10.5 Data Protection. Provider shall comply with all applicable data protection laws.",
+    after="10.4 Confidentiality."
+)
+
+doc.save("services_agreement_v1_redlined.docx")
+```
+
+**What the client sees in Word:**
+
+| Original Text | After Redlining |
+|---------------|-----------------|
+| Net 30 | ~~Net 30~~ Net 45 |
+| 2% monthly late fee | ~~2% monthly late fee~~ 1% monthly late fee |
+| $50,000 | ~~$50,000~~ $100,000 |
+| (limitation clause) | ~~in no event shall liability exceed fees paid in the prior 12 months~~ |
+| (after 10.4) | <u>10.5 Data Protection. Provider shall comply...</u> |
+
+The client can Accept/Reject each change individually in Word's Review tab.
+
 ## Basic Operations
 
 ```python

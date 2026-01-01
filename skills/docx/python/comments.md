@@ -1,5 +1,51 @@
 # Comments
 
+Add review comments to specific text in Word documents.
+
+## Real-World Example: Legal Document Review
+
+**Scenario:** Mark up a contract draft with review notes for different stakeholders.
+
+```python
+from python_docx_redline import Document
+
+doc = Document("partnership_agreement_draft.docx")
+
+# Flag items needing legal review
+doc.add_comment(
+    "Verify this complies with Delaware LLC Act",
+    on="governing law shall be Delaware",
+    author="Legal Team"
+)
+
+# Mark financial terms for CFO review
+doc.add_comment(
+    "CFO to confirm profit distribution percentages",
+    on="profits shall be distributed 60/40",
+    author="Finance Review"
+)
+
+# Flag all TODO placeholders
+todos = doc.add_comment(
+    "PLACEHOLDER - needs actual value",
+    on="[TBD]",
+    occurrence="all",
+    author="Document Admin"
+)
+print(f"Flagged {len(todos)} placeholders for review")
+
+# Add comment to specific section
+doc.add_comment(
+    "Client requested removal of this entire section",
+    on="Non-Compete Obligations",
+    scope="section:Restrictive Covenants"
+)
+
+doc.save("partnership_agreement_review.docx")
+```
+
+**Result in Word:** Each comment appears in the margin, linked to the highlighted text. Reviewers can reply, resolve, or address each comment.
+
 ## Adding Comments
 
 ```python
