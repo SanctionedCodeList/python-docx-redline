@@ -9,6 +9,12 @@ from .batch import BatchOperations
 from .change_management import ChangeManagement
 from .comments import CommentOperations
 from .comparison import ComparisonOperations
+from .cross_references import (
+    BookmarkInfo,
+    CrossReference,
+    CrossReferenceOperations,
+    CrossReferenceTarget,
+)
 from .formatting import FormatOperations
 from .header_footer import HeaderFooterOperations
 from .hyperlinks import HyperlinkInfo, HyperlinkOperations
@@ -17,13 +23,18 @@ from .notes import NoteOperations
 from .patterns import PatternOperations
 from .section import SectionOperations
 from .tables import TableOperations
+from .toc import TOCOperations
 from .tracked_changes import TrackedChangeOperations
 
 __all__ = [
     "BatchOperations",
+    "BookmarkInfo",
     "ChangeManagement",
     "CommentOperations",
     "ComparisonOperations",
+    "CrossReference",
+    "CrossReferenceOperations",
+    "CrossReferenceTarget",
     "FormatOperations",
     "HeaderFooterOperations",
     "HyperlinkInfo",
@@ -33,5 +44,6 @@ __all__ = [
     "PatternOperations",
     "SectionOperations",
     "TableOperations",
+    "TOCOperations",
     "TrackedChangeOperations",
 ]

@@ -15,6 +15,7 @@ from python_docx_redline.models.style import (
     RunFormatting,
     Style,
     StyleType,
+    TabStop,
 )
 
 
@@ -674,3 +675,155 @@ class TestRealWorldStyleScenarios:
 
         assert style.style_id == "TableGrid"
         assert style.style_type == StyleType.TABLE
+
+
+class TestTabStop:
+    """Tests for TabStop dataclass."""
+
+    def test_default_values(self) -> None:
+        """Test that TabStop has correct default values."""
+        tab = TabStop(position=1.0)
+
+        assert tab.position == 1.0
+        assert tab.alignment == "left"
+        assert tab.leader == "none"
+
+    def test_create_with_all_values(self) -> None:
+        """Test creating TabStop with all values specified."""
+        tab = TabStop(position=6.5, alignment="right", leader="dot")
+
+        assert tab.position == 6.5
+        assert tab.alignment == "right"
+        assert tab.leader == "dot"
+
+    def test_right_aligned_tab(self) -> None:
+        """Test creating a right-aligned tab stop."""
+        tab = TabStop(position=6.0, alignment="right")
+
+        assert tab.alignment == "right"
+        assert tab.leader == "none"
+
+    def test_center_aligned_tab(self) -> None:
+        """Test creating a center-aligned tab stop."""
+        tab = TabStop(position=3.25, alignment="center")
+
+        assert tab.alignment == "center"
+
+    def test_decimal_aligned_tab(self) -> None:
+        """Test creating a decimal-aligned tab stop."""
+        tab = TabStop(position=4.0, alignment="decimal")
+
+        assert tab.alignment == "decimal"
+
+    def test_dot_leader(self) -> None:
+        """Test creating a tab stop with dot leader."""
+        tab = TabStop(position=6.5, alignment="right", leader="dot")
+
+        assert tab.leader == "dot"
+
+    def test_hyphen_leader(self) -> None:
+        """Test creating a tab stop with hyphen leader."""
+        tab = TabStop(position=5.0, alignment="right", leader="hyphen")
+
+        assert tab.leader == "hyphen"
+
+    def test_underscore_leader(self) -> None:
+        """Test creating a tab stop with underscore leader."""
+        tab = TabStop(position=5.0, alignment="right", leader="underscore")
+
+        assert tab.leader == "underscore"
+
+    def test_toc_typical_tab_stop(self) -> None:
+        """Test creating a typical TOC tab stop (right-aligned with dot leader)."""
+        tab = TabStop(position=6.5, alignment="right", leader="dot")
+
+        assert tab.position == 6.5
+        assert tab.alignment == "right"
+        assert tab.leader == "dot"
+
+
+class TestParagraphFormattingWithTabStops:
+    """Tests for ParagraphFormatting with tab_stops field."""
+
+    def test_default_tab_stops_none(self) -> None:
+        """Test that tab_stops defaults to None."""
+        fmt = ParagraphFormatting()
+
+        assert fmt.tab_stops is None
+
+    def test_create_with_single_tab_stop(self) -> None:
+        """Test creating ParagraphFormatting with a single tab stop."""
+        fmt = ParagraphFormatting(
+            tab_stops=[TabStop(position=6.5, alignment="right", leader="dot")]
+        )
+
+        assert fmt.tab_stops is not None
+        assert len(fmt.tab_stops) == 1
+        assert fmt.tab_stops[0].position == 6.5
+        assert fmt.tab_stops[0].alignment == "right"
+        assert fmt.tab_stops[0].leader == "dot"
+
+    def test_create_with_multiple_tab_stops(self) -> None:
+        """Test creating ParagraphFormatting with multiple tab stops."""
+        fmt = ParagraphFormatting(
+            tab_stops=[
+                TabStop(position=1.0, alignment="left"),
+                TabStop(position=3.0, alignment="center"),
+                TabStop(position=6.5, alignment="right", leader="dot"),
+            ]
+        )
+
+        assert fmt.tab_stops is not None
+        assert len(fmt.tab_stops) == 3
+        assert fmt.tab_stops[0].position == 1.0
+        assert fmt.tab_stops[1].position == 3.0
+        assert fmt.tab_stops[2].position == 6.5
+
+    def test_tab_stops_with_other_formatting(self) -> None:
+        """Test tab_stops combined with other paragraph formatting."""
+        fmt = ParagraphFormatting(
+            alignment="justify",
+            spacing_after=12.0,
+            indent_left=0.5,
+            tab_stops=[TabStop(position=6.5, alignment="right", leader="dot")],
+        )
+
+        assert fmt.alignment == "justify"
+        assert fmt.spacing_after == 12.0
+        assert fmt.indent_left == 0.5
+        assert fmt.tab_stops is not None
+        assert len(fmt.tab_stops) == 1
+
+    def test_all_properties_accessible_including_tab_stops(self) -> None:
+        """Test that all 12 properties including tab_stops are accessible."""
+        fmt = ParagraphFormatting()
+        properties = [
+            "alignment",
+            "spacing_before",
+            "spacing_after",
+            "line_spacing",
+            "indent_left",
+            "indent_right",
+            "indent_first_line",
+            "indent_hanging",
+            "keep_next",
+            "keep_lines",
+            "outline_level",
+            "tab_stops",
+        ]
+
+        for prop in properties:
+            assert hasattr(fmt, prop)
+
+    def test_toc_style_paragraph_formatting(self) -> None:
+        """Test creating TOC-style paragraph formatting."""
+        fmt = ParagraphFormatting(
+            indent_left=0.25,
+            spacing_after=5.0,
+            tab_stops=[TabStop(position=6.5, alignment="right", leader="dot")],
+        )
+
+        assert fmt.indent_left == 0.25
+        assert fmt.spacing_after == 5.0
+        assert fmt.tab_stops is not None
+        assert fmt.tab_stops[0].leader == "dot"

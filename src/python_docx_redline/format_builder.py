@@ -5,13 +5,18 @@ This module provides utilities for building, merging, and comparing
 run properties (<w:rPr>) and paragraph properties (<w:pPr>) elements.
 """
 
+from __future__ import annotations
+
 from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from lxml import etree
 
 from .constants import WORD_NAMESPACE
 from .constants import w as _w
+
+if TYPE_CHECKING:
+    from .models.style import TabStop
 
 # Unit conversion utilities
 
@@ -581,6 +586,85 @@ class ParagraphPropertyBuilder:
             if _w("firstLine") in ind.attrib:
                 del ind.attrib[_w("firstLine")]
             ind.set(_w("hanging"), str(twips))
+
+    # Tab stop leader value mapping (Python values to OOXML values)
+    TAB_LEADER_MAP: dict[str, str] = {
+        "none": "none",
+        "dot": "dot",
+        "hyphen": "hyphen",
+        "underscore": "underscore",
+        "middleDot": "middleDot",
+        "heavy": "heavy",
+    }
+
+    # Tab stop alignment value mapping
+    TAB_ALIGNMENT_MAP: dict[str, str] = {
+        "left": "left",
+        "right": "right",
+        "center": "center",
+        "decimal": "decimal",
+        "bar": "bar",
+    }
+
+    @classmethod
+    def tab_stops_to_element(cls, tab_stops: list[TabStop]) -> etree._Element:
+        """Convert a list of TabStop objects to a w:tabs XML element.
+
+        Creates a w:tabs element containing w:tab child elements for each
+        tab stop. Positions are converted from inches to twips (1 inch = 1440 twips).
+
+        Args:
+            tab_stops: List of TabStop objects to convert
+
+        Returns:
+            A w:tabs element containing w:tab children
+
+        Example:
+            >>> from python_docx_redline.models.style import TabStop
+            >>> tabs = [TabStop(position=6.5, alignment="right", leader="dot")]
+            >>> elem = ParagraphPropertyBuilder.tab_stops_to_element(tabs)
+            >>> # Generates: <w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9360"/></w:tabs>
+        """
+        tabs_elem = etree.Element(_w("tabs"))
+
+        for tab_stop in tab_stops:
+            tab_elem = etree.SubElement(tabs_elem, _w("tab"))
+
+            # Position in twips (1 inch = 1440 twips)
+            pos_twips = inches_to_twips(tab_stop.position)
+            tab_elem.set(_w("pos"), str(pos_twips))
+
+            # Alignment (w:val)
+            alignment = cls.TAB_ALIGNMENT_MAP.get(tab_stop.alignment, "left")
+            tab_elem.set(_w("val"), alignment)
+
+            # Leader (only if not "none")
+            leader = cls.TAB_LEADER_MAP.get(tab_stop.leader, "none")
+            if leader != "none":
+                tab_elem.set(_w("leader"), leader)
+
+        return tabs_elem
+
+    @classmethod
+    def set_tab_stops(cls, ppr: etree._Element, tab_stops: list[TabStop]) -> None:
+        """Set tab stops on a pPr element, replacing any existing tabs.
+
+        Args:
+            ppr: The w:pPr element to modify
+            tab_stops: List of TabStop objects to set
+        """
+        # Remove existing tabs element if present
+        existing_tabs = ppr.find(_w("tabs"))
+        if existing_tabs is not None:
+            ppr.remove(existing_tabs)
+
+        if not tab_stops:
+            return
+
+        # Create and insert new tabs element at correct position
+        tabs_elem = cls.tab_stops_to_element(tab_stops)
+        pos = cls._get_insert_position(ppr, "tabs")
+        ppr.insert(pos, tabs_elem)
 
     @classmethod
     def extract(cls, ppr: etree._Element | None) -> dict[str, Any]:
