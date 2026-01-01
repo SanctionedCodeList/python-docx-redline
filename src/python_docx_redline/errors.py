@@ -227,3 +227,92 @@ class NoteNotFoundError(DocxRedlineError):
         else:
             msg += f"\n\nNo {self.note_type}s exist in the document"
         return msg
+
+
+# =============================================================================
+# Cross-Reference Errors
+# =============================================================================
+
+
+class CrossReferenceError(DocxRedlineError):
+    """Base exception for cross-reference operations.
+
+    This is the parent class for all cross-reference related errors.
+    """
+
+    pass
+
+
+class CrossReferenceTargetNotFoundError(CrossReferenceError):
+    """Raised when the specified target for a cross-reference cannot be found.
+
+    This error occurs when attempting to create a cross-reference to a
+    bookmark, heading, figure, table, or note that does not exist in
+    the document.
+
+    Attributes:
+        target: The target specification that was not found
+        available_targets: List of available target names (if known)
+    """
+
+    def __init__(
+        self,
+        target: str,
+        available_targets: list[str] | None = None,
+    ) -> None:
+        self.target = target
+        self.available_targets = available_targets or []
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        """Format an error message with available targets."""
+        msg = f"Cross-reference target not found: {self.target}"
+        if self.available_targets:
+            targets_str = ", ".join(self.available_targets[:10])
+            if len(self.available_targets) > 10:
+                targets_str += f" ... and {len(self.available_targets) - 10} more"
+            msg += f"\n\nAvailable targets: {targets_str}"
+        return msg
+
+
+class InvalidBookmarkNameError(CrossReferenceError):
+    """Raised when a bookmark name is invalid.
+
+    Bookmark names must:
+    - Start with a letter
+    - Contain only alphanumeric characters and underscores
+    - Be at most 40 characters long
+    - Not contain spaces
+
+    Attributes:
+        name: The invalid bookmark name
+        reason: Explanation of why the name is invalid
+    """
+
+    def __init__(self, name: str, reason: str) -> None:
+        self.name = name
+        self.reason = reason
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        """Format an error message explaining the invalid name."""
+        return f"Invalid bookmark name '{self.name}': {self.reason}"
+
+
+class BookmarkAlreadyExistsError(CrossReferenceError):
+    """Raised when attempting to create a bookmark that already exists.
+
+    This error occurs when trying to create a bookmark with a name that
+    is already in use in the document.
+
+    Attributes:
+        name: The bookmark name that already exists
+    """
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        """Format an error message for the duplicate bookmark."""
+        return f"Bookmark '{self.name}' already exists"

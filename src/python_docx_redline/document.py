@@ -35,6 +35,12 @@ from .operations.batch import BatchOperations
 from .operations.change_management import ChangeManagement
 from .operations.comments import CommentOperations
 from .operations.comparison import ComparisonOperations
+from .operations.cross_references import (
+    BookmarkInfo,
+    CrossReference,
+    CrossReferenceOperations,
+    CrossReferenceTarget,
+)
 from .operations.formatting import FormatOperations
 from .operations.header_footer import HeaderFooterOperations
 from .operations.hyperlinks import HyperlinkInfo, HyperlinkOperations
@@ -392,6 +398,13 @@ class Document:
         if not hasattr(self, "_toc_ops_instance"):
             self._toc_ops_instance = TOCOperations(self)
         return self._toc_ops_instance
+
+    @property
+    def _cross_reference_ops(self) -> CrossReferenceOperations:
+        """Get the CrossReferenceOperations instance (lazy initialization)."""
+        if not hasattr(self, "_cross_reference_ops_instance"):
+            self._cross_reference_ops_instance = CrossReferenceOperations(self)
+        return self._cross_reference_ops_instance
 
     @property
     def styles(self) -> StyleManager:
@@ -5085,6 +5098,309 @@ class Document:
             use_outline_levels=use_outline_levels,
             **kwargs,
         )
+
+    # ========================================================================
+    # CROSS-REFERENCE METHODS
+    # ========================================================================
+
+    def insert_cross_reference(
+        self,
+        target: str,
+        display: str = "text",
+        after: str | None = None,
+        before: str | None = None,
+        scope: str | dict | Any | None = None,
+        hyperlink: bool = True,
+        track: bool = False,
+        author: str | None = None,
+    ) -> str:
+        """Insert a cross-reference to a bookmark, heading, figure, table, or note.
+
+        Creates a field code (REF, PAGEREF, or NOTEREF) that references the
+        target and displays its content. The field is marked dirty so Word
+        will calculate the display value when the document opens.
+
+        Args:
+            target: What to reference. Formats:
+                   - "bookmark_name" - Direct bookmark reference
+                   - "heading:Introduction" - Reference heading by text
+                   - "figure:1" or "figure:Architecture" - Figure by number or text
+                   - "table:2" or "table:Revenue" - Table by number or text
+                   - "footnote:1" - Footnote by number
+                   - "endnote:2" - Endnote by number
+            display: What to display. Options:
+                    - "text" - Target content (default)
+                    - "page" - Page number
+                    - "above_below" - Position relative to reference
+                    - "number" - Heading/caption number only
+                    - "full_number" - Full number including chapter
+                    - "relative_number" - Number relative to context
+                    - "label_number" - "Figure 1" or "Table 2"
+                    - "number_only" - Just the number
+            after: Insert after this text (mutually exclusive with before)
+            before: Insert before this text (mutually exclusive with after)
+            scope: Limit text search scope
+            hyperlink: If True (default), make the reference clickable
+            track: If True, wrap in tracked change markup
+            author: Author for tracked changes
+
+        Returns:
+            The bookmark name used for the cross-reference
+
+        Example:
+            >>> doc.insert_cross_reference("heading:Introduction", after="See ")
+            >>> doc.insert_cross_reference("figure:1", display="page", after="on page ")
+            >>> doc.insert_cross_reference("table:Revenue", display="label_number")
+        """
+        return self._cross_reference_ops.insert_cross_reference(
+            target=target,
+            display=display,
+            after=after,
+            before=before,
+            scope=scope,
+            hyperlink=hyperlink,
+            track=track,
+            author=author,
+        )
+
+    def insert_page_reference(
+        self,
+        target: str,
+        after: str | None = None,
+        before: str | None = None,
+        scope: str | dict | Any | None = None,
+        show_position: bool = False,
+        hyperlink: bool = True,
+        track: bool = False,
+        author: str | None = None,
+    ) -> str:
+        """Insert a page number cross-reference to a target.
+
+        Convenience method for inserting a PAGEREF field that displays
+        the page number where the target appears.
+
+        Args:
+            target: What to reference (bookmark, heading:..., figure:..., etc.)
+            after: Insert after this text
+            before: Insert before this text
+            scope: Limit text search scope
+            show_position: If True, show "above" or "below" for same-page refs
+            hyperlink: If True (default), make the reference clickable
+            track: If True, wrap in tracked change markup
+            author: Author for tracked changes
+
+        Returns:
+            The bookmark name used for the cross-reference
+
+        Example:
+            >>> doc.insert_page_reference("heading:Conclusion", after="see page ")
+        """
+        return self._cross_reference_ops.insert_page_reference(
+            target=target,
+            after=after,
+            before=before,
+            scope=scope,
+            show_position=show_position,
+            hyperlink=hyperlink,
+            track=track,
+            author=author,
+        )
+
+    def insert_note_reference(
+        self,
+        note_type: str,
+        note_id: int | str,
+        after: str | None = None,
+        before: str | None = None,
+        scope: str | dict | Any | None = None,
+        show_position: bool = False,
+        use_note_style: bool = True,
+        hyperlink: bool = True,
+        track: bool = False,
+        author: str | None = None,
+    ) -> str:
+        """Insert a cross-reference to a footnote or endnote.
+
+        Creates a NOTEREF field that displays the note number.
+
+        Args:
+            note_type: "footnote" or "endnote"
+            note_id: The note number to reference
+            after: Insert after this text
+            before: Insert before this text
+            scope: Limit text search scope
+            show_position: If True, show "above" or "below" for same-page refs
+            use_note_style: If True (default), format like the note reference mark
+            hyperlink: If True (default), make the reference clickable
+            track: If True, wrap in tracked change markup
+            author: Author for tracked changes
+
+        Returns:
+            The bookmark name used for the cross-reference
+
+        Example:
+            >>> doc.insert_note_reference("footnote", 1, after="see note ")
+        """
+        return self._cross_reference_ops.insert_note_reference(
+            note_type=note_type,
+            note_id=note_id,
+            after=after,
+            before=before,
+            scope=scope,
+            show_position=show_position,
+            use_note_style=use_note_style,
+            hyperlink=hyperlink,
+            track=track,
+            author=author,
+        )
+
+    def create_bookmark(
+        self,
+        name: str,
+        at: str,
+        scope: str | dict | Any | None = None,
+    ) -> str:
+        """Create a named bookmark at the specified text location.
+
+        Bookmarks are named locations in a document that can be referenced
+        by cross-references, hyperlinks, or other features.
+
+        Args:
+            name: The bookmark name. Must be alphanumeric with underscores,
+                 start with a letter, and be 40 characters or fewer.
+            at: The text to bookmark
+            scope: Limit text search scope
+
+        Returns:
+            The bookmark name (same as the name parameter)
+
+        Raises:
+            InvalidBookmarkNameError: If the name is invalid
+            BookmarkAlreadyExistsError: If a bookmark with this name exists
+            TextNotFoundError: If the text is not found
+            AmbiguousTextError: If the text appears multiple times
+
+        Example:
+            >>> doc.create_bookmark("introduction", at="1. Introduction")
+            >>> doc.insert_cross_reference("introduction", after="See ")
+        """
+        return self._cross_reference_ops.create_bookmark(
+            name=name,
+            at=at,
+            scope=scope,
+        )
+
+    def create_heading_bookmark(
+        self,
+        heading_text: str,
+        bookmark_name: str | None = None,
+    ) -> str:
+        """Create a bookmark at a heading for cross-referencing.
+
+        Finds a heading by text and creates a bookmark that wraps it.
+        If no bookmark name is provided, generates a hidden _Ref bookmark.
+
+        Args:
+            heading_text: Text to search for in headings (partial match)
+            bookmark_name: Optional custom bookmark name. If None, generates
+                          an auto-incremented _Ref bookmark name.
+
+        Returns:
+            The bookmark name (provided or generated)
+
+        Raises:
+            CrossReferenceTargetNotFoundError: If no matching heading found
+
+        Example:
+            >>> doc.create_heading_bookmark("Introduction")
+            '_Ref12345'
+            >>> doc.create_heading_bookmark("Conclusion", "my_conclusion")
+            'my_conclusion'
+        """
+        return self._cross_reference_ops.create_heading_bookmark(
+            heading_text=heading_text,
+            bookmark_name=bookmark_name,
+        )
+
+    def list_bookmarks(self, include_hidden: bool = False) -> list[BookmarkInfo]:
+        """List all bookmarks in the document.
+
+        Args:
+            include_hidden: If True, include hidden _Ref bookmarks
+
+        Returns:
+            List of BookmarkInfo objects with bookmark details
+
+        Example:
+            >>> for bm in doc.list_bookmarks():
+            ...     print(f"{bm.name}: {bm.text_preview}")
+        """
+        return self._cross_reference_ops.list_bookmarks(include_hidden=include_hidden)
+
+    def get_bookmark(self, name: str) -> BookmarkInfo | None:
+        """Get information about a specific bookmark.
+
+        Args:
+            name: The bookmark name
+
+        Returns:
+            BookmarkInfo object, or None if not found
+
+        Example:
+            >>> bm = doc.get_bookmark("introduction")
+            >>> if bm:
+            ...     print(f"Found at: {bm.location}")
+        """
+        return self._cross_reference_ops.get_bookmark(name)
+
+    def get_cross_references(self) -> list[CrossReference]:
+        """List all cross-references in the document.
+
+        Returns a list of CrossReference objects containing:
+        - Field type (REF, PAGEREF, NOTEREF)
+        - Target bookmark
+        - Display options/switches
+        - Current cached display value
+        - Dirty status
+
+        Returns:
+            List of CrossReference objects
+
+        Example:
+            >>> for xref in doc.get_cross_references():
+            ...     print(f"{xref.field_type} -> {xref.target_bookmark}")
+        """
+        return self._cross_reference_ops.get_cross_references()
+
+    def get_cross_reference_targets(self) -> list[CrossReferenceTarget]:
+        """List all available cross-reference targets in the document.
+
+        Returns all bookmarks, headings, figures, tables, footnotes, and
+        endnotes that can be referenced.
+
+        Returns:
+            List of CrossReferenceTarget objects
+
+        Example:
+            >>> for target in doc.get_cross_reference_targets():
+            ...     print(f"{target.type}: {target.display_name}")
+        """
+        return self._cross_reference_ops.get_cross_reference_targets()
+
+    def mark_cross_references_dirty(self) -> int:
+        """Mark all cross-reference fields for update when opened in Word.
+
+        Sets w:dirty="true" on all REF, PAGEREF, and NOTEREF fields,
+        telling Word to recalculate their display values.
+
+        Returns:
+            The number of fields marked dirty
+
+        Example:
+            >>> count = doc.mark_cross_references_dirty()
+            >>> print(f"Marked {count} cross-references for update")
+        """
+        return self._cross_reference_ops.mark_cross_references_dirty()
 
     # ========================================================================
     # Ref-based editing operations (DocTree accessibility layer)
