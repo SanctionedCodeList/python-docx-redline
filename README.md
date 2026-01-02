@@ -1,17 +1,45 @@
 # python-docx-redline
 
-A high-level Python API for editing Word documents, with optional tracked changes support.
+**High-level Word document editing with tracked changes support.**
+
+A Python library that makes programmatic Word editing reliable by handling XML run fragmentation and providing simple tracked changes APIs.
+
+---
+
+## 🚀 Installation
+
+### As Python Library
+
+```bash
+pip install python-docx-redline
+```
+
+Requires Python 3.10+
+
+### As Claude Code Plugin
+
+```bash
+claude plugins add SanctionedCodeList/python-docx-redline
+```
+
+Or via the SCL marketplace:
+
+```bash
+claude plugins add SanctionedCodeList/SCL_marketplace
+```
+
+---
 
 ## The Problem
 
-Editing Word documents programmatically is frustrating. Text is fragmented across XML runs, making even simple find-and-replace unreliable. Adding tracked changes requires 30+ lines of OOXML namespace handling.
+Editing Word documents programmatically is frustrating. Text is fragmented across XML runs, making even simple find-and-replace unreliable.
 
 **Before** (raw python-docx):
 ```python
 from docx import Document
 
 doc = Document("contract.docx")
-# This often fails - "Contract" might be split across runs as "Con" + "tract"
+# This often fails - "Contract" might be split as "Con" + "tract"
 for para in doc.paragraphs:
     if "Contract" in para.text:
         para.text = para.text.replace("Contract", "Agreement")  # Loses all formatting!
@@ -26,109 +54,84 @@ doc.replace("Contract", "Agreement")  # Handles run boundaries, preserves format
 doc.save("contract_edited.docx")
 ```
 
-## Installation
-
-```bash
-pip install python-docx-redline
-```
-
-Requires Python 3.10+
+---
 
 ## Quick Start
 
-### Untracked (Silent) Editing
-
-Make edits without revision marks - the document appears as if it was always that way:
+### Silent Editing (No Revision Marks)
 
 ```python
 from python_docx_redline import Document
 
 doc = Document("template.docx")
-doc.replace("{{NAME}}", "John Doe")       # Silent replacement
-doc.replace("{{DATE}}", "2024-12-28")     # No revision marks
-doc.insert(" Inc.", after="Acme Corp")    # Append text silently
-doc.delete("DRAFT - ")                    # Remove text silently
+doc.replace("{{NAME}}", "John Doe")
+doc.replace("{{DATE}}", "2024-12-28")
+doc.insert(" Inc.", after="Acme Corp")
+doc.delete("DRAFT - ")
 doc.save("output.docx")
 ```
 
-### Tracked Editing
-
-Show changes as tracked revisions for review:
+### Tracked Changes (With Revision Marks)
 
 ```python
 from python_docx_redline import Document
 
 doc = Document("contract.docx")
-
-# Use track=True for tracked changes
 doc.replace("30 days", "45 days", track=True)
 doc.insert(" (revised)", after="Exhibit A", track=True)
 doc.delete("unless otherwise agreed", track=True)
-
-# Or use the explicit *_tracked methods
-doc.replace_tracked("the Contractor", "the Service Provider")
-
 doc.save("contract_redlined.docx")
 ```
+
+---
 
 ## Features
 
 ### Text Operations
-- **Insert, delete, replace, move** text with or without tracked changes
-- **Smart text search** handles text fragmented across XML runs
-- **Regex support** with capture groups for pattern matching
-- **Fuzzy matching** for OCR'd or inconsistently formatted documents
-- **Quote normalization** matches curly quotes with straight quotes
+| Feature | Description |
+|---------|-------------|
+| **Smart search** | Handles text fragmented across XML runs |
+| **Replace** | Find and replace with formatting preservation |
+| **Insert/Delete** | Add or remove text at any position |
+| **Regex support** | Pattern matching with capture groups |
+| **Fuzzy matching** | For OCR'd or inconsistent documents |
+
+### Tracked Changes
+| Feature | Description |
+|---------|-------------|
+| **Insertions** | Show added text in revision marks |
+| **Deletions** | Show removed text with strikethrough |
+| **Replacements** | Combined delete + insert |
+| **Format changes** | Bold, italic changes as revisions |
 
 ### Structural Operations
-- **Insert paragraphs** with styles and formatting
-- **Delete sections** by heading with tracked changes
-- **Section/Paragraph wrappers** for document navigation
+| Feature | Description |
+|---------|-------------|
+| **Section navigation** | Find and edit by heading |
+| **Paragraph insertion** | Add new paragraphs with styles |
+| **Scoped edits** | Limit changes to specific sections |
 
 ### Footnotes & Endnotes
-- **Full CRUD operations** — insert, get, edit, delete notes
-- **Tracked changes inside notes** — insert, delete, replace with revision marks
-- **Rich content** — markdown formatting (`**bold**`, `*italic*`, `++underline++`)
-- **Search integration** — find text in footnotes with scope parameters
-- **Auto-renumbering** — remaining notes renumber when one is deleted
+| Feature | Description |
+|---------|-------------|
+| **CRUD operations** | Insert, read, edit, delete notes |
+| **Tracked changes** | Revisions inside footnotes |
+| **Auto-renumbering** | Notes renumber when deleted |
 
-### Document Viewing
-- **Read paragraphs** with text, style, and heading info
-- **Parse sections** via heading structure
-- **Find all occurrences** with context preview
-- **Extract full text** for analysis
+---
 
-### Formatting
-- **Markdown syntax** in insertions (`**bold**`, `*italic*`, `++underline++`)
-- **Format-only tracked changes** (bold, italic without text changes)
-- **Minimal editing mode** for clean legal redlines
-
-### Advanced
-- **Batch operations** from YAML/JSON configuration
-- **Scope filtering** to limit operations to specific sections
-- **MS365 identity integration** for enterprise environments
-- **Context-aware editing** with fragment detection
-- **Document rendering** to PNG images
-- **Image insertion** with tracked changes
-
-### Integration
-- **python-docx compatibility** via `from_python_docx()` and `to_python_docx()`
-- **In-memory workflows** with `save_to_bytes()`
-- **Full type hints** for IDE support
-
-## Examples
+## Usage Examples
 
 ### Batch Operations from YAML
 
 ```yaml
 # edits.yaml
-default_track: false  # or true for all tracked
+default_track: false
 
 edits:
   - type: replace
     find: "{{COMPANY}}"
     replace: "Acme Inc."
-    # Uses default_track (false = untracked)
 
   - type: replace
     find: "30 days"
@@ -151,10 +154,10 @@ doc.apply_edit_file("edits.yaml")
 doc.replace_tracked("net 30", "net 45", scope="section:Payment Terms")
 ```
 
-### Reading Before Editing
+### Reading Document Structure
 
 ```python
-# Understand document structure before making changes
+# Understand structure before editing
 for section in doc.sections:
     print(f"{section.heading_text}: {len(section.paragraphs)} paragraphs")
 
@@ -164,26 +167,32 @@ for m in matches:
     print(f"  ...{m.context_before}[{m.matched_text}]{m.context_after}...")
 ```
 
+---
+
+## With Claude Code
+
+After installing the plugin, describe what you need:
+
+```
+> Open contract.docx and replace "Contractor" with "Service Provider" using tracked changes
+
+> Find all instances of "confidential" in the document and show me the context
+
+> Create a redlined version replacing the payment terms from 30 to 45 days
+```
+
+---
+
 ## Documentation
 
-- **[Documentation Index](docs/index.md)** — All documentation
-- **[API Reference](docs/PROPOSED_API.md)** — Complete API documentation
-- **[Quick Reference](docs/QUICK_REFERENCE.md)** — Cheat sheet
-- **[OOXML Internals](docs/ERIC_WHITE_ALGORITHM.md)** — How text search works
+| Document | Description |
+|----------|-------------|
+| [Documentation Index](docs/index.md) | All documentation |
+| [API Reference](docs/PROPOSED_API.md) | Complete API documentation |
+| [Quick Reference](docs/QUICK_REFERENCE.md) | Cheat sheet |
+| [OOXML Internals](docs/ERIC_WHITE_ALGORITHM.md) | How text search works |
 
-## Claude Code Plugin
-
-For AI-assisted document editing, install as a Claude Code plugin:
-
-```bash
-claude plugins add SanctionedCodeList/python-docx-redline
-```
-
-Or via the SCL marketplace (includes law-tools, writing, office-bridge, and more):
-
-```bash
-claude plugins add SanctionedCodeList/SCL_marketplace
-```
+---
 
 ## Development
 
@@ -193,8 +202,22 @@ cd python-docx-redline
 pip install -e ".[dev]"
 pytest
 ```
+
+---
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| Text not found | May be fragmented across runs; library handles this automatically |
+| Formatting lost | Use `replace()` instead of modifying `para.text` directly |
+| Tracked changes not showing | Ensure `track=True` parameter is set |
+| Import errors | Ensure Python 3.10+ is installed |
+
+---
+
 ## Links
 
 - [GitHub](https://github.com/SanctionedCodeList/python-docx-redline)
 - [PyPI](https://pypi.org/project/python-docx-redline/)
-- [Documentation](docs/)
+- [SCL Marketplace](https://github.com/SanctionedCodeList/SCL_marketplace)
