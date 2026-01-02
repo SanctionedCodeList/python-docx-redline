@@ -1,4 +1,7 @@
-import type { DocumentInfo, ServerInfo } from './types.js';
+import type { AppType, SessionInfo, ServerInfo } from './types.js';
+
+// Re-export types for public API
+export type { AppType } from './types.js';
 
 // Re-export accessibility types for public API
 export type {
@@ -187,8 +190,66 @@ export interface WordDocument {
   getTextByRef(ref: Ref): Promise<string | undefined>;
 }
 
+// Base session interface for all apps (raw JS execution)
+export interface OfficeSession {
+  readonly id: string;
+  readonly app: AppType;
+  readonly filename: string;
+  readonly path: string;
+  readonly connectedAt: Date;
+  readonly status: 'connected' | 'disconnected';
+
+  /**
+   * Execute raw JavaScript code in the app's context.
+   */
+  executeJs<T = unknown>(code: string, options?: ExecuteOptions): Promise<T>;
+}
+
+// Excel-specific session
+export interface ExcelSession extends OfficeSession {
+  readonly app: 'excel';
+}
+
+// PowerPoint-specific session
+export interface PowerPointSession extends OfficeSession {
+  readonly app: 'powerpoint';
+}
+
+// Outlook-specific session
+export interface OutlookSession extends OfficeSession {
+  readonly app: 'outlook';
+}
+
+export interface SessionFilter {
+  app?: AppType;
+}
+
 export interface BridgeClient {
+  /**
+   * Get all connected sessions, optionally filtered by app.
+   */
+  sessions(filter?: SessionFilter): Promise<OfficeSession[]>;
+
+  /**
+   * Get connected Word documents (with full helper methods).
+   */
   documents(): Promise<WordDocument[]>;
+
+  /**
+   * Get connected Excel workbooks.
+   */
+  excel(): Promise<ExcelSession[]>;
+
+  /**
+   * Get connected PowerPoint presentations.
+   */
+  powerpoint(): Promise<PowerPointSession[]>;
+
+  /**
+   * Get connected Outlook sessions.
+   */
+  outlook(): Promise<OutlookSession[]>;
+
   close(): Promise<void>;
 }
 
@@ -203,17 +264,60 @@ export async function connect(options: ConnectOptions = {}): Promise<BridgeClien
     throw new Error(`Failed to connect to bridge server: ${infoRes.status}`);
   }
   const serverInfo = await infoRes.json() as ServerInfo;
-  console.log(`Connected to Office Bridge (${serverInfo.documents} documents)`);
+  console.log(`Connected to Office Bridge (${serverInfo.documents} sessions)`);
 
   return {
+    async sessions(filter?: SessionFilter): Promise<OfficeSession[]> {
+      const url = filter?.app
+        ? `${baseUrl}/sessions?app=${filter.app}`
+        : `${baseUrl}/sessions`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Failed to list sessions: ${res.status}`);
+      }
+      const data = await res.json() as { sessions: SessionInfo[] };
+
+      return data.sessions.map(info => createSessionHandle(baseUrl, info));
+    },
+
     async documents(): Promise<WordDocument[]> {
-      const res = await fetch(`${baseUrl}/documents`);
+      const res = await fetch(`${baseUrl}/sessions?app=word`);
       if (!res.ok) {
         throw new Error(`Failed to list documents: ${res.status}`);
       }
-      const data = await res.json() as { documents: DocumentInfo[] };
+      const data = await res.json() as { sessions: SessionInfo[] };
 
-      return data.documents.map(doc => createDocumentHandle(baseUrl, doc));
+      return data.sessions.map(info => createWordDocumentHandle(baseUrl, info));
+    },
+
+    async excel(): Promise<ExcelSession[]> {
+      const res = await fetch(`${baseUrl}/sessions?app=excel`);
+      if (!res.ok) {
+        throw new Error(`Failed to list Excel workbooks: ${res.status}`);
+      }
+      const data = await res.json() as { sessions: SessionInfo[] };
+
+      return data.sessions.map(info => createSessionHandle(baseUrl, info) as ExcelSession);
+    },
+
+    async powerpoint(): Promise<PowerPointSession[]> {
+      const res = await fetch(`${baseUrl}/sessions?app=powerpoint`);
+      if (!res.ok) {
+        throw new Error(`Failed to list PowerPoint presentations: ${res.status}`);
+      }
+      const data = await res.json() as { sessions: SessionInfo[] };
+
+      return data.sessions.map(info => createSessionHandle(baseUrl, info) as PowerPointSession);
+    },
+
+    async outlook(): Promise<OutlookSession[]> {
+      const res = await fetch(`${baseUrl}/sessions?app=outlook`);
+      if (!res.ok) {
+        throw new Error(`Failed to list Outlook sessions: ${res.status}`);
+      }
+      const data = await res.json() as { sessions: SessionInfo[] };
+
+      return data.sessions.map(info => createSessionHandle(baseUrl, info) as OutlookSession);
     },
 
     async close(): Promise<void> {
@@ -223,16 +327,16 @@ export async function connect(options: ConnectOptions = {}): Promise<BridgeClien
   };
 }
 
-function createDocumentHandle(baseUrl: string, info: DocumentInfo): WordDocument {
-  // Helper function to execute JS code via the bridge
-  async function executeJs<T = unknown>(code: string, options: ExecuteOptions = {}): Promise<T> {
+// Helper to create executeJs function for any session
+function createExecuteJs(baseUrl: string, sessionId: string) {
+  return async function executeJs<T = unknown>(code: string, options: ExecuteOptions = {}): Promise<T> {
     const timeout = options.timeout ?? 30000;
 
     const res = await fetch(`${baseUrl}/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        documentId: info.id,
+        sessionId,
         code,
         timeout,
       }),
@@ -250,7 +354,25 @@ function createDocumentHandle(baseUrl: string, info: DocumentInfo): WordDocument
     }
 
     return result.result as T;
-  }
+  };
+}
+
+// Generic session handle (works for any app)
+function createSessionHandle(baseUrl: string, info: SessionInfo): OfficeSession {
+  return {
+    id: info.id,
+    app: info.app,
+    filename: info.filename,
+    path: info.path,
+    connectedAt: new Date(info.connectedAt),
+    status: info.status,
+    executeJs: createExecuteJs(baseUrl, info.id),
+  };
+}
+
+// Word-specific document handle with full accessibility helpers
+function createWordDocumentHandle(baseUrl: string, info: SessionInfo): WordDocument {
+  const executeJs = createExecuteJs(baseUrl, info.id);
 
   return {
     id: info.id,

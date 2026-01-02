@@ -1,8 +1,12 @@
 // WebSocket message types
 
+// Supported Office applications
+export type AppType = 'word' | 'excel' | 'powerpoint' | 'outlook';
+
 export interface RegisterMessage {
   type: 'register';
   payload: {
+    app: AppType;
     filename: string;
     path: string;
   };
@@ -50,10 +54,11 @@ export interface ConsoleMessage {
 export type AddInMessage = RegisterMessage | ResultMessage | ConsoleMessage;
 export type BridgeMessage = RegisteredMessage | ExecuteMessage;
 
-// Document registry types
+// Session registry types (app-agnostic naming)
 
-export interface ConnectedDocument {
+export interface ConnectedSession {
   id: string;
+  app: AppType;
   filename: string;
   path: string;
   connectedAt: Date;
@@ -62,14 +67,19 @@ export interface ConnectedDocument {
   disconnectedAt?: Date;
 }
 
-export interface DocumentInfo {
+export interface SessionInfo {
   id: string;
+  app: AppType;
   filename: string;
   path: string;
   connectedAt: string;
   lastActivity: string;
   status: 'connected' | 'disconnected';
 }
+
+// Backward compatibility aliases
+export type ConnectedDocument = ConnectedSession;
+export type DocumentInfo = SessionInfo;
 
 // Server info response
 export interface ServerInfo {

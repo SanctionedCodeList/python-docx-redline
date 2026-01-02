@@ -165,6 +165,63 @@ header .subtitle {
     color: #666;
 }
 
+/* Settings Section */
+.settings-section {
+    margin-top: 16px;
+    padding: 12px 16px;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+}
+
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle-label {
+    font-size: 13px;
+    color: #444;
+}
+
+/* Toggle switch */
+.toggle-row input[type="checkbox"] {
+    display: none;
+}
+
+.toggle-slider {
+    position: relative;
+    width: 40px;
+    height: 22px;
+    background: #ccc;
+    border-radius: 11px;
+    transition: background 0.2s;
+}
+
+.toggle-slider::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.toggle-row input[type="checkbox"]:checked + .toggle-slider {
+    background: #0078d4;
+}
+
+.toggle-row input[type="checkbox"]:checked + .toggle-slider::after {
+    transform: translateX(18px);
+}
+
 /* Footer */
 footer {
     margin-top: 20px;

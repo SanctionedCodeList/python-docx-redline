@@ -1,5 +1,5 @@
 import type { WebSocket } from 'ws';
-import type { ConnectedDocument, DocumentInfo } from './types.js';
+import type { AppType, ConnectedSession, SessionInfo } from './types.js';
 
 // Pending execution in the queue
 interface PendingExecution {
@@ -10,8 +10,8 @@ interface PendingExecution {
   reject: (error: Error) => void;
 }
 
-export class DocumentRegistry {
-  private documents = new Map<string, ConnectedDocument>();
+export class SessionRegistry {
+  private sessions = new Map<string, ConnectedSession>();
   private socketToId = new Map<WebSocket, string>();
   private idToSocket = new Map<string, WebSocket>();
   private executionQueues = new Map<string, PendingExecution[]>();
@@ -19,9 +19,10 @@ export class DocumentRegistry {
 
   private readonly tombstoneTimeout = 5 * 60 * 1000; // 5 minutes
 
-  register(id: string, ws: WebSocket, filename: string, path: string): void {
-    const doc: ConnectedDocument = {
+  register(id: string, ws: WebSocket, app: AppType, filename: string, path: string): void {
+    const session: ConnectedSession = {
       id,
+      app,
       filename,
       path,
       connectedAt: new Date(),
@@ -29,26 +30,26 @@ export class DocumentRegistry {
       status: 'connected',
     };
 
-    this.documents.set(id, doc);
+    this.sessions.set(id, session);
     this.socketToId.set(ws, id);
     this.idToSocket.set(id, ws);
     this.executionQueues.set(id, []);
   }
 
-  unregister(ws: WebSocket): ConnectedDocument | undefined {
+  unregister(ws: WebSocket): ConnectedSession | undefined {
     const id = this.socketToId.get(ws);
     if (!id) return undefined;
 
-    const doc = this.documents.get(id);
-    if (doc) {
-      doc.status = 'disconnected';
-      doc.disconnectedAt = new Date();
+    const session = this.sessions.get(id);
+    if (session) {
+      session.status = 'disconnected';
+      session.disconnectedAt = new Date();
 
       // Schedule tombstone cleanup
       setTimeout(() => {
-        const current = this.documents.get(id);
+        const current = this.sessions.get(id);
         if (current?.status === 'disconnected') {
-          this.documents.delete(id);
+          this.sessions.delete(id);
           this.executionQueues.delete(id);
         }
       }, this.tombstoneTimeout);
@@ -62,20 +63,20 @@ export class DocumentRegistry {
     const active = this.activeExecutions.get(id);
 
     if (active) {
-      active.reject(new Error('Document disconnected'));
+      active.reject(new Error('Session disconnected'));
       this.activeExecutions.delete(id);
     }
 
     for (const pending of queue) {
-      pending.reject(new Error('Document disconnected'));
+      pending.reject(new Error('Session disconnected'));
     }
     this.executionQueues.set(id, []);
 
-    return doc;
+    return session;
   }
 
-  get(id: string): ConnectedDocument | undefined {
-    return this.documents.get(id);
+  get(id: string): ConnectedSession | undefined {
+    return this.sessions.get(id);
   }
 
   getSocket(id: string): WebSocket | undefined {
@@ -86,38 +87,41 @@ export class DocumentRegistry {
     return this.socketToId.get(ws);
   }
 
-  list(): DocumentInfo[] {
-    return Array.from(this.documents.values()).map((doc) => ({
-      id: doc.id,
-      filename: doc.filename,
-      path: doc.path,
-      connectedAt: doc.connectedAt.toISOString(),
-      lastActivity: doc.lastActivity.toISOString(),
-      status: doc.status,
-    }));
+  list(appFilter?: AppType): SessionInfo[] {
+    return Array.from(this.sessions.values())
+      .filter((session) => !appFilter || session.app === appFilter)
+      .map((session) => ({
+        id: session.id,
+        app: session.app,
+        filename: session.filename,
+        path: session.path,
+        connectedAt: session.connectedAt.toISOString(),
+        lastActivity: session.lastActivity.toISOString(),
+        status: session.status,
+      }));
   }
 
-  listConnected(): DocumentInfo[] {
-    return this.list().filter((doc) => doc.status === 'connected');
+  listConnected(appFilter?: AppType): SessionInfo[] {
+    return this.list(appFilter).filter((session) => session.status === 'connected');
   }
 
   updateActivity(id: string): void {
-    const doc = this.documents.get(id);
-    if (doc) {
-      doc.lastActivity = new Date();
+    const session = this.sessions.get(id);
+    if (session) {
+      session.lastActivity = new Date();
     }
   }
 
-  // Queue an execution for a document
+  // Queue an execution for a session
   async queueExecution(
     id: string,
     requestId: string,
     code: string,
     timeout: number
   ): Promise<unknown> {
-    const doc = this.documents.get(id);
-    if (!doc || doc.status !== 'connected') {
-      throw new Error(`Document ${id} not connected`);
+    const session = this.sessions.get(id);
+    if (!session || session.status !== 'connected') {
+      throw new Error(`Session ${id} not connected`);
     }
 
     return new Promise((resolve, reject) => {
@@ -195,3 +199,6 @@ export class DocumentRegistry {
     this.processQueue(id);
   }
 }
+
+// Backward compatibility alias
+export const DocumentRegistry = SessionRegistry;

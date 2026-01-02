@@ -11,13 +11,15 @@ echo ""
 echo "Installing bridge server dependencies..."
 npm install
 
-# Install add-in dependencies
-if [ -d "addin" ]; then
-  echo "Installing add-in dependencies..."
-  cd addin
-  npm install
-  cd ..
-fi
+# Install add-in dependencies for each app
+for app in word excel powerpoint outlook; do
+  if [ -d "addins/$app" ]; then
+    echo "Installing $app add-in dependencies..."
+    cd "addins/$app"
+    npm install
+    cd "$SCRIPT_DIR"
+  fi
+done
 
 # Install dev certificates for HTTPS
 echo "Installing Office Add-in dev certificates..."
@@ -27,5 +29,7 @@ echo ""
 echo "=== Setup Complete ==="
 echo ""
 echo "Next steps:"
-echo "1. Start the bridge server: ./server.sh"
-echo "2. Sideload the add-in in Word (Insert → Add-ins → My Add-ins)"
+echo "1. Start bridge server: ./server.sh &"
+echo "2. Start app dev server: cd addins/<app> && npm run dev-server &"
+echo "3. Sideload the add-in (see references/setup.md for instructions)"
+echo ""

@@ -88,6 +88,10 @@ let reconnectAttempts = 0;
 let reconnectTimeout: number | null = null;
 let documentId: string | null = null;
 
+// Settings
+let autoScrollEnabled = true;
+const STORAGE_KEY_AUTO_SCROLL = "office-bridge-auto-scroll";
+
 // Original console methods for forwarding
 const originalConsole = {
   log: console.log.bind(console),
@@ -102,6 +106,7 @@ let tokenInput: HTMLInputElement;
 let connectBtn: HTMLButtonElement;
 let documentIdDisplay: HTMLElement;
 let lastActivityDisplay: HTMLElement;
+let autoScrollToggle: HTMLInputElement;
 
 Office.onReady((info) => {
   if (info.host === Office.HostType.Word) {
@@ -112,6 +117,7 @@ Office.onReady((info) => {
     connectBtn = document.getElementById("connect-btn") as HTMLButtonElement;
     documentIdDisplay = document.getElementById("document-id") as HTMLElement;
     lastActivityDisplay = document.getElementById("last-activity") as HTMLElement;
+    autoScrollToggle = document.getElementById("auto-scroll-toggle") as HTMLInputElement;
 
     // Hide token input (no longer needed - localhost only auth)
     if (tokenInput) {
@@ -120,6 +126,13 @@ Office.onReady((info) => {
 
     // Set up event handlers
     connectBtn.onclick = handleConnect;
+
+    // Load and set up auto-scroll preference
+    loadAutoScrollPreference();
+    autoScrollToggle.onchange = () => {
+      autoScrollEnabled = autoScrollToggle.checked;
+      saveAutoScrollPreference();
+    };
 
     // Update initial UI
     updateUI();
@@ -147,6 +160,26 @@ function setupConsoleForwarding() {
     originalConsole.error(...args);
     sendConsoleMessage("error", args);
   };
+}
+
+function loadAutoScrollPreference() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY_AUTO_SCROLL);
+    if (stored !== null) {
+      autoScrollEnabled = stored === "true";
+    }
+    autoScrollToggle.checked = autoScrollEnabled;
+  } catch {
+    // localStorage may not be available
+  }
+}
+
+function saveAutoScrollPreference() {
+  try {
+    localStorage.setItem(STORAGE_KEY_AUTO_SCROLL, String(autoScrollEnabled));
+  } catch {
+    // localStorage may not be available
+  }
 }
 
 function sendConsoleMessage(level: string, args: unknown[]) {
@@ -363,7 +396,20 @@ async function executeCode(requestId: string, code: string) {
         })();
       `
       );
-      return await fn(context, Word, Office);
+      const userResult = await fn(context, Word, Office);
+
+      // Auto-scroll to where the selection ended up after execution
+      if (autoScrollEnabled) {
+        try {
+          const selection = context.document.getSelection();
+          selection.select();
+          await context.sync();
+        } catch {
+          // Ignore scroll errors - don't fail the execution
+        }
+      }
+
+      return userResult;
     });
 
     // Send success response
