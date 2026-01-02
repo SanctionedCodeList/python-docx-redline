@@ -16,35 +16,54 @@ Each Office app requires sideloading its manifest once per machine.
 
 ### macOS
 
+**Important:** Use `cp` to copy manifests, not symlinks. Symlinks don't work reliably on Mac.
+
 **Word:**
 ```bash
 mkdir -p ~/Library/Containers/com.microsoft.Word/Data/Documents/wef
-ln -sf "$(pwd)/office-bridge/addins/word/manifest.xml" \
-  ~/Library/Containers/com.microsoft.Word/Data/Documents/wef/19d3eb15-55fe-45a1-a33f-89b66b5aae3b.manifest.xml
+cp "$(pwd)/office-bridge/addins/word/manifest.xml" \
+  ~/Library/Containers/com.microsoft.Word/Data/Documents/wef/manifest.xml
 ```
 
 **Excel:**
 ```bash
 mkdir -p ~/Library/Containers/com.microsoft.Excel/Data/Documents/wef
-ln -sf "$(pwd)/office-bridge/addins/excel/manifest.xml" \
-  ~/Library/Containers/com.microsoft.Excel/Data/Documents/wef/a1b2c3d4-e5f6-7890-abcd-ef1234567890.manifest.xml
+cp "$(pwd)/office-bridge/addins/excel/manifest.xml" \
+  ~/Library/Containers/com.microsoft.Excel/Data/Documents/wef/manifest.xml
 ```
 
 **PowerPoint:**
 ```bash
 mkdir -p ~/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef
-ln -sf "$(pwd)/office-bridge/addins/powerpoint/manifest.xml" \
-  ~/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef/b2c3d4e5-f6a7-8901-bcde-f23456789012.manifest.xml
+cp "$(pwd)/office-bridge/addins/powerpoint/manifest.xml" \
+  ~/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef/manifest.xml
 ```
 
 **Outlook:**
 ```bash
 mkdir -p ~/Library/Containers/com.microsoft.Outlook/Data/Documents/wef
-ln -sf "$(pwd)/office-bridge/addins/outlook/manifest.xml" \
-  ~/Library/Containers/com.microsoft.Outlook/Data/Documents/wef/c3d4e5f6-a7b8-9012-cdef-345678901234.manifest.xml
+cp "$(pwd)/office-bridge/addins/outlook/manifest.xml" \
+  ~/Library/Containers/com.microsoft.Outlook/Data/Documents/wef/manifest.xml
 ```
 
+**Note:** After updating the add-in code, you must re-copy the manifest for changes to take effect.
+
 After sideloading, **quit the app completely** (Cmd+Q) and reopen.
+
+**Finding the add-in in the app:**
+- Go to **Home** tab → **Add-ins** (or **Insert** → **Add-ins** in some versions)
+- The "Office Bridge" add-in appears under the **Developer** or **Custom Add-ins** section
+- Click it to open the taskpane
+
+**Troubleshooting macOS sideloading:**
+- If the add-in doesn't appear, ensure the dev server is running (`npm run dev-server` in the add-in folder)
+- Check that the manifest.xml points to the correct localhost port (Word: 3000, Excel: 3001, PowerPoint: 3002, Outlook: 3003)
+- Try removing and re-adding the symlink if the add-in fails to load
+
+**Removing a sideloaded add-in:**
+```bash
+rm ~/Library/Containers/com.microsoft.<App>/Data/Documents/wef/*.manifest.xml
+```
 
 ### Windows
 
