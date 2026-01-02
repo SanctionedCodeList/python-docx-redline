@@ -1,6 +1,6 @@
 ---
 name: docx
-description: "Word document creation, editing, and manipulation with Python. Use for .docx files: creating documents, editing with or without tracked changes, comments, footnotes, Table of Contents, cross-references, text extraction, template population, CriticMarkup workflows. Two sub-skills: design/ for professional document writing, python/ for python-docx/python-docx-redline operations. For live editing in Microsoft Word via add-in, use the office-bridge skill instead."
+description: "Word document creation, editing, and manipulation with Python. Use for .docx files: creating documents, editing with or without tracked changes, comments, footnotes, Table of Contents, cross-references, text extraction, template population, CriticMarkup workflows. Two sub-skills: design/ for professional document writing, python/ for python-docx/python-docx-redline operations."
 ---
 
 # DOCX Skill
@@ -25,7 +25,7 @@ Report bugs, unexpected behavior, or feature requests as issues on the repositor
 |-------------------|-------|
 | **Write a professional document** (memo, report, proposal) | [design/](./design/SKILL.md) |
 | **Create or edit .docx files with Python** | [python/](./python/SKILL.md) |
-| **Edit live in Microsoft Word** (via add-in) | Use the `office-bridge` skill |
+| **Edit live in Microsoft Word** (via add-in) | Install [office-bridge](https://github.com/parkerhancock/office-bridge) plugin |
 
 ### Python Library Tasks
 
