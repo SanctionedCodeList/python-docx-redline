@@ -4017,6 +4017,77 @@ class Document:
             path, format=format, stop_on_error=stop_on_error, default_track=default_track
         )
 
+    def apply_edits_batch(
+        self,
+        edits: list,
+        continue_on_error: bool = True,
+        default_track: bool = True,
+        dry_run: bool = False,
+    ) -> "BatchResult":
+        """Apply multiple edits with partial success support and error reporting.
+
+        This enhanced batch method provides:
+        - Support for tuple input: (old_text, new_text)
+        - Support for Edit dataclass objects
+        - BatchResult with succeeded/failed lists
+        - Suggestions for failed edits (similar text that exists)
+        - Dry run mode to preview changes without applying
+
+        Args:
+            edits: List of edits in any of these formats:
+                - Tuple: (old_text, new_text) - applies as tracked replace
+                - Edit object: Edit(old="...", new="...")
+                - Dictionary: {"type": "replace", "find": "...", "replace": "..."}
+            continue_on_error: If True (default), continue processing after errors.
+                If False, stop on first error.
+            default_track: Default value for 'track' if not specified per-edit
+                (default: True for this method, making edits tracked by default)
+            dry_run: If True, validate edits without making actual changes.
+                Useful for checking what would succeed/fail before applying.
+
+        Returns:
+            BatchResult object with:
+            - succeeded: List of EditResult for successful edits
+            - failed: List of EditResult for failed edits with suggestions
+            - summary: One-line summary string
+            - Pretty-print output via str(results)
+
+        Example:
+            >>> edits = [
+            ...     ("would likely not infringe", "may present distinctions from"),
+            ...     ("very likely practiced", "well-documented"),
+            ...     ("nonexistent phrase", "replacement"),  # This one will fail
+            ... ]
+            >>> results = doc.apply_edits_batch(edits)
+            >>> print(results.summary)
+            "2/3 edits applied successfully"
+
+            >>> # Check what failed
+            >>> for fail in results.failed:
+            ...     print(f"Failed: {fail.old_text}")
+            ...     if fail.suggestions:
+            ...         print(f"  Did you mean: {fail.suggestions[0]}?")
+
+            >>> # Dry run to preview
+            >>> preview = doc.apply_edits_batch(edits, dry_run=True)
+            >>> if preview.all_succeeded:
+            ...     doc.apply_edits_batch(edits)  # Apply for real
+
+            >>> # Use as boolean
+            >>> if results:
+            ...     doc.save("output.docx")
+            ... else:
+            ...     print("Some edits failed!")
+        """
+        from .results import BatchResult
+
+        return self._batch_ops.apply_edits_batch(
+            edits,
+            continue_on_error=continue_on_error,
+            default_track=default_track,
+            dry_run=dry_run,
+        )
+
     def compare_to(
         self,
         modified: "Document",

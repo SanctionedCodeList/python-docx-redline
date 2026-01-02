@@ -7,16 +7,71 @@ extracted from the main Document class to improve separation of concerns.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 import yaml
 
 from ..errors import AmbiguousTextError, TextNotFoundError, ValidationError
-from ..results import EditResult
+from ..results import BatchResult, EditResult
+from ..suggestions import SuggestionGenerator
 
 if TYPE_CHECKING:
     from ..document import Document
+
+
+@dataclass
+class Edit:
+    """Represents a single edit operation for batch processing.
+
+    This dataclass provides a structured way to specify edits instead of
+    using dictionaries. It supports both simple find/replace operations
+    and more complex edit types.
+
+    Attributes:
+        old: The text to find/replace (required for replace operations)
+        new: The replacement text (required for replace operations)
+        edit_type: Type of operation (default: "replace")
+        track: Whether to track the change (default: True)
+        author: Optional author name for the change
+        scope: Optional scope to limit the search
+        regex: Whether old is a regex pattern (default: False)
+        occurrence: Which occurrence to target (default: "first")
+
+    Example:
+        >>> edit = Edit(old="old text", new="new text")
+        >>> results = doc.apply_edits_batch([edit])
+    """
+
+    old: str
+    new: str
+    edit_type: str = "replace"
+    track: bool = True
+    author: str | None = None
+    scope: str | None = None
+    regex: bool = False
+    occurrence: str | int = "first"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the Edit to a dictionary format."""
+        result: dict[str, Any] = {
+            "type": self.edit_type,
+            "find": self.old,
+            "replace": self.new,
+            "track": self.track,
+            "regex": self.regex,
+            "occurrence": self.occurrence,
+        }
+        if self.author:
+            result["author"] = self.author
+        if self.scope:
+            result["scope"] = self.scope
+        return result
+
+
+# Type alias for edit input formats
+EditInput = Union[tuple[str, str], Edit, dict[str, Any]]
 
 
 class BatchOperations:
@@ -126,6 +181,228 @@ class BatchOperations:
                     break
 
         return results
+
+    def apply_edits_batch(
+        self,
+        edits: list[EditInput],
+        continue_on_error: bool = True,
+        default_track: bool = True,
+        dry_run: bool = False,
+    ) -> BatchResult:
+        """Apply multiple edits with partial success support and error reporting.
+
+        This enhanced version of apply_edits provides:
+        - Support for tuple input: (old_text, new_text)
+        - Support for Edit dataclass objects
+        - BatchResult with succeeded/failed lists
+        - Suggestions for failed edits (similar text that exists)
+        - Dry run mode to preview changes
+
+        Args:
+            edits: List of edits in any of these formats:
+                - Tuple: (old_text, new_text) - applies as tracked replace
+                - Edit object: Edit(old="...", new="...")
+                - Dictionary: {"type": "replace", "find": "...", "replace": "..."}
+            continue_on_error: If True (default), continue processing after errors
+            default_track: Default value for 'track' if not specified (default: True)
+            dry_run: If True, validate edits without making changes
+
+        Returns:
+            BatchResult with succeeded and failed edit lists
+
+        Example:
+            >>> edits = [
+            ...     ("old phrase", "new phrase"),  # Simple tuple
+            ...     Edit(old="another", new="replacement"),  # Edit object
+            ...     {"type": "replace_tracked", "find": "x", "replace": "y"},  # Dict
+            ... ]
+            >>> results = doc.apply_edits_batch(edits)
+            >>> print(results)
+            # Shows summary with succeeded/failed counts
+            >>> if not results:
+            ...     print("Some edits failed:", results.failed)
+        """
+        # Normalize all edits to dictionary format
+        normalized_edits = self._normalize_edits(edits, default_track)
+
+        batch_result = BatchResult(dry_run=dry_run)
+
+        for i, (edit_dict, old_text, new_text) in enumerate(normalized_edits):
+            edit_type = edit_dict.get("type", "replace")
+
+            # For dry run, just validate without applying
+            if dry_run:
+                result = self._validate_edit(edit_type, edit_dict)
+                result.index = i
+                result.old_text = old_text
+                result.new_text = new_text
+            else:
+                try:
+                    result = self._apply_single_edit(edit_type, edit_dict, default_track)
+                    result.index = i
+                    result.old_text = old_text
+                    result.new_text = new_text
+                except Exception as e:
+                    result = EditResult(
+                        success=False,
+                        edit_type=edit_type,
+                        message=f"Error: {str(e)}",
+                        error=e,
+                        index=i,
+                        old_text=old_text,
+                        new_text=new_text,
+                    )
+
+            # Add suggestions for failed edits with TextNotFoundError
+            if not result.success and isinstance(result.error, TextNotFoundError):
+                result.suggestions = self._get_suggestions_for_error(old_text, result.error)
+
+            # Categorize result
+            if result.success:
+                batch_result.succeeded.append(result)
+            else:
+                batch_result.failed.append(result)
+                if not continue_on_error:
+                    break
+
+        return batch_result
+
+    def _normalize_edits(
+        self,
+        edits: list[EditInput],
+        default_track: bool,
+    ) -> list[tuple[dict[str, Any], str | None, str | None]]:
+        """Normalize various edit input formats to dictionary format.
+
+        Returns list of (edit_dict, old_text, new_text) tuples.
+        """
+        normalized = []
+
+        for edit in edits:
+            if isinstance(edit, tuple):
+                # Tuple format: (old, new) -> tracked replace
+                old_text, new_text = edit
+                edit_dict = {
+                    "type": "replace",
+                    "find": old_text,
+                    "replace": new_text,
+                    "track": default_track,
+                }
+                normalized.append((edit_dict, old_text, new_text))
+
+            elif isinstance(edit, Edit):
+                # Edit dataclass
+                edit_dict = edit.to_dict()
+                normalized.append((edit_dict, edit.old, edit.new))
+
+            elif isinstance(edit, dict):
+                # Dictionary format (existing)
+                old_text = edit.get("find") or edit.get("text")
+                new_text = edit.get("replace")
+                normalized.append((edit, old_text, new_text))
+
+            else:
+                raise ValidationError(
+                    f"Invalid edit format: expected tuple, Edit, or dict, got {type(edit)}"
+                )
+
+        return normalized
+
+    def _validate_edit(
+        self, edit_type: str, edit: dict[str, Any]
+    ) -> EditResult:
+        """Validate an edit without applying it (for dry run mode).
+
+        Checks if the text exists in the document without making changes.
+        """
+        # Get the search text
+        search_text = edit.get("find") or edit.get("text") or edit.get("after")
+
+        if not search_text:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message="No search text specified",
+                error=ValidationError("No search text specified"),
+            )
+
+        # Try to find the text in the document
+        try:
+            scope = edit.get("scope")
+            regex = edit.get("regex", False)
+            occurrence = edit.get("occurrence", "first")
+
+            # Use the document's text search to validate
+            paragraphs = self._document._get_paragraphs_for_scope(scope)
+            matches = self._document._text_search.find_text(
+                search_text, paragraphs, regex=regex
+            )
+
+            if not matches:
+                return EditResult(
+                    success=False,
+                    edit_type=edit_type,
+                    message=f"Text not found: '{search_text}'",
+                    error=TextNotFoundError(search_text, scope),
+                )
+
+            # Check for ambiguity
+            if len(matches) > 1 and occurrence == "first":
+                # Would succeed with first occurrence
+                pass
+            elif occurrence == "all":
+                pass
+            elif isinstance(occurrence, int) and occurrence > len(matches):
+                return EditResult(
+                    success=False,
+                    edit_type=edit_type,
+                    message=f"Occurrence {occurrence} not found (only {len(matches)} matches)",
+                    error=AmbiguousTextError(search_text, matches),
+                )
+
+            return EditResult(
+                success=True,
+                edit_type=edit_type,
+                message=f"(dry run) Would apply: {edit_type}",
+            )
+
+        except TextNotFoundError as e:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message=f"Text not found: {e}",
+                error=e,
+            )
+        except AmbiguousTextError as e:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message=f"Ambiguous text: {e}",
+                error=e,
+            )
+        except Exception as e:
+            return EditResult(
+                success=False,
+                edit_type=edit_type,
+                message=f"Validation error: {str(e)}",
+                error=e,
+            )
+
+    def _get_suggestions_for_error(
+        self, search_text: str | None, error: TextNotFoundError
+    ) -> list[str]:
+        """Get similar text suggestions for a TextNotFoundError."""
+        if not search_text:
+            return []
+
+        try:
+            paragraphs = self._document._get_paragraphs_for_scope(error.scope)
+            return SuggestionGenerator.find_similar_text(
+                search_text, paragraphs, max_suggestions=3
+            )
+        except Exception:
+            # If suggestion generation fails, just return empty list
+            return []
 
     def _apply_single_edit(
         self, edit_type: str, edit: dict[str, Any], default_track: bool = False

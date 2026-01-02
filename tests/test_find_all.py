@@ -522,3 +522,159 @@ def test_find_all_workflow_preview_before_replace() -> None:
             assert "production products" in match.context
     finally:
         doc_path.unlink()
+
+
+# =============================================================================
+# Location filtering tests
+# =============================================================================
+
+
+def test_find_all_scope_tables_only() -> None:
+    """Test find_all() with scope='tables' to search only in tables."""
+    doc_path = create_document_with_tables()
+    try:
+        doc = Document(doc_path)
+
+        # Search only in tables
+        matches = doc.find_all("keyword", scope="tables")
+
+        # Should find only 2 matches (in table cells)
+        assert len(matches) == 2
+
+        # All matches should be in tables
+        for match in matches:
+            assert "table" in match.location
+    finally:
+        doc_path.unlink()
+
+
+def test_find_all_scope_body_only() -> None:
+    """Test find_all() with scope='body' to search only in body text."""
+    doc_path = create_document_with_tables()
+    try:
+        doc = Document(doc_path)
+
+        # Search only in body (non-table text)
+        matches = doc.find_all("keyword", scope="body")
+
+        # Should find only 2 matches (in body paragraphs)
+        assert len(matches) == 2
+
+        # All matches should be in body
+        for match in matches:
+            assert match.location == "body"
+    finally:
+        doc_path.unlink()
+
+
+def test_find_all_scope_location_dict_tables() -> None:
+    """Test find_all() with scope={'location': 'tables'}."""
+    doc_path = create_document_with_tables()
+    try:
+        doc = Document(doc_path)
+
+        # Search only in tables using dict syntax
+        matches = doc.find_all("keyword", scope={"location": "tables"})
+
+        # Should find only 2 matches (in table cells)
+        assert len(matches) == 2
+
+        # All matches should be in tables
+        for match in matches:
+            assert "table" in match.location
+    finally:
+        doc_path.unlink()
+
+
+def test_find_all_scope_location_dict_body() -> None:
+    """Test find_all() with scope={'location': 'body'}."""
+    doc_path = create_document_with_tables()
+    try:
+        doc = Document(doc_path)
+
+        # Search only in body using dict syntax
+        matches = doc.find_all("keyword", scope={"location": "body"})
+
+        # Should find only 2 matches (in body paragraphs)
+        assert len(matches) == 2
+
+        # All matches should be in body
+        for match in matches:
+            assert match.location == "body"
+    finally:
+        doc_path.unlink()
+
+
+def test_find_all_scope_location_combined_with_contains() -> None:
+    """Test find_all() with combined scope filters."""
+    doc_path = Path(tempfile.mktemp(suffix=".docx"))
+
+    document_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>
+<w:p><w:r><w:t>Body text with keyword here in intro.</w:t></w:r></w:p>
+<w:p><w:r><w:t>Body text with keyword in section A.</w:t></w:r></w:p>
+<w:tbl>
+<w:tr>
+<w:tc><w:p><w:r><w:t>Table cell with keyword in intro text.</w:t></w:r></w:p></w:tc>
+</w:tr>
+<w:tr>
+<w:tc><w:p><w:r><w:t>Table cell with keyword in section A.</w:t></w:r></w:p></w:tc>
+</w:tr>
+</w:tbl>
+</w:body>
+</w:document>"""
+
+    with zipfile.ZipFile(doc_path, "w") as docx:
+        docx.writestr("word/document.xml", document_xml)
+        docx.writestr("[Content_Types].xml", '<?xml version="1.0"?><Types/>')
+        docx.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships/>')
+
+    try:
+        doc = Document(doc_path)
+
+        # Search in tables AND containing "intro"
+        matches = doc.find_all("keyword", scope={"location": "tables", "contains": "intro"})
+
+        # Should find only 1 match (table cell with intro)
+        assert len(matches) == 1
+        assert "intro" in matches[0].paragraph_text
+        assert "table" in matches[0].location
+
+        # Search in body AND containing "section A"
+        matches = doc.find_all("keyword", scope={"location": "body", "contains": "section A"})
+
+        # Should find only 1 match (body paragraph with section A)
+        assert len(matches) == 1
+        assert "section A" in matches[0].paragraph_text
+        assert matches[0].location == "body"
+    finally:
+        doc_path.unlink()
+
+
+def test_find_all_scope_invalid_location() -> None:
+    """Test find_all() with invalid location filter."""
+    doc_path = create_test_document("Some text.")
+    try:
+        doc = Document(doc_path)
+
+        # Invalid location should raise ValueError
+        with pytest.raises(ValueError, match="Invalid location filter"):
+            doc.find_all("text", scope={"location": "invalid_location"})
+    finally:
+        doc_path.unlink()
+
+
+def test_find_all_scope_location_no_matches() -> None:
+    """Test find_all() with location filter when no matches exist."""
+    doc_path = create_test_document("Body text only, no tables.")
+    try:
+        doc = Document(doc_path)
+
+        # Search in tables when there are none
+        matches = doc.find_all("text", scope="tables")
+
+        # Should find no matches
+        assert len(matches) == 0
+    finally:
+        doc_path.unlink()

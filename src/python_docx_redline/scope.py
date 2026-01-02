@@ -139,6 +139,8 @@ class ScopeEvaluator:
         Supported formats:
         - "section:Name": Match paragraphs in section with heading "Name"
         - "paragraph_containing:text": Explicit paragraph containing text
+        - "tables": Match paragraphs inside tables only
+        - "body": Match paragraphs outside tables only
         - "text": Default - paragraph containing text
 
         Args:
@@ -155,6 +157,13 @@ class ScopeEvaluator:
             text = s[21:]
             return ScopeEvaluator._create_text_filter(text)
 
+        # Location shortcuts
+        if s == "tables":
+            return ScopeEvaluator._create_location_filter("tables")
+
+        if s == "body":
+            return ScopeEvaluator._create_location_filter("body")
+
         # Default: paragraph containing the specified text
         return ScopeEvaluator._create_text_filter(s)
 
@@ -166,6 +175,7 @@ class ScopeEvaluator:
         - contains: Text that must be in the paragraph
         - section: Section heading name
         - not_contains: Text that must NOT be in the paragraph
+        - location: Filter by location ("tables", "body", "headers", "footers")
 
         Args:
             d: Dictionary with filter criteria
@@ -195,6 +205,13 @@ class ScopeEvaluator:
                 # This is a simplified implementation
                 section_name = d["section"]
                 if not ScopeEvaluator._is_in_section(para, section_name):
+                    return False
+
+            # Check 'location' filter
+            if "location" in d:
+                location = d["location"]
+                location_filter = ScopeEvaluator._create_location_filter(location)
+                if not location_filter(para):
                     return False
 
             return True
@@ -325,6 +342,115 @@ class ScopeEvaluator:
             or style_val == "Title"
             or style_lower.startswith("toc")
         )
+
+    @staticmethod
+    def _is_in_table(para: Any) -> bool:
+        """Check if a paragraph is inside a table cell.
+
+        Args:
+            para: The paragraph Element
+
+        Returns:
+            True if the paragraph is inside a table cell (w:tc)
+        """
+        parent = para.getparent()
+        while parent is not None:
+            if parent.tag == f"{{{WORD_NAMESPACE}}}tc":
+                return True
+            parent = parent.getparent()
+        return False
+
+    @staticmethod
+    def _is_in_header(para: Any) -> bool:
+        """Check if a paragraph is inside a header.
+
+        Args:
+            para: The paragraph Element
+
+        Returns:
+            True if the paragraph is inside a header (w:hdr)
+        """
+        parent = para.getparent()
+        while parent is not None:
+            if parent.tag == f"{{{WORD_NAMESPACE}}}hdr":
+                return True
+            parent = parent.getparent()
+        return False
+
+    @staticmethod
+    def _is_in_footer(para: Any) -> bool:
+        """Check if a paragraph is inside a footer.
+
+        Args:
+            para: The paragraph Element
+
+        Returns:
+            True if the paragraph is inside a footer (w:ftr)
+        """
+        parent = para.getparent()
+        while parent is not None:
+            if parent.tag == f"{{{WORD_NAMESPACE}}}ftr":
+                return True
+            parent = parent.getparent()
+        return False
+
+    @staticmethod
+    def _create_location_filter(location: str) -> Callable[[Any], bool]:
+        """Create a filter based on paragraph location.
+
+        Supported locations:
+        - "tables": Match paragraphs inside table cells
+        - "body": Match paragraphs outside tables (main body text)
+        - "headers": Match paragraphs inside headers
+        - "footers": Match paragraphs inside footers
+
+        Args:
+            location: The location filter ("tables", "body", "headers", "footers")
+
+        Returns:
+            A callable that filters paragraphs by location
+
+        Raises:
+            ValueError: If location is not a valid option
+        """
+        if location == "tables":
+
+            def tables_filter(para: Any) -> bool:
+                return ScopeEvaluator._is_in_table(para)
+
+            return tables_filter
+
+        elif location == "body":
+
+            def body_filter(para: Any) -> bool:
+                # Body means not in table, not in header, not in footer
+                return (
+                    not ScopeEvaluator._is_in_table(para)
+                    and not ScopeEvaluator._is_in_header(para)
+                    and not ScopeEvaluator._is_in_footer(para)
+                )
+
+            return body_filter
+
+        elif location == "headers":
+
+            def headers_filter(para: Any) -> bool:
+                return ScopeEvaluator._is_in_header(para)
+
+            return headers_filter
+
+        elif location == "footers":
+
+            def footers_filter(para: Any) -> bool:
+                return ScopeEvaluator._is_in_footer(para)
+
+            return footers_filter
+
+        else:
+            raise ValueError(
+                f"Invalid location filter: {location!r}. "
+                f"Valid options: 'tables', 'body', 'headers', 'footers'"
+            )
 
     @staticmethod
     def filter_paragraphs(

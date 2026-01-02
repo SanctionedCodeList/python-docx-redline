@@ -5,7 +5,7 @@ This module provides result types that track the success/failure of
 document editing operations.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -22,6 +22,10 @@ class EditResult:
         message: Human-readable message about the result
         span: Optional TextSpan indicating where the edit was applied
         error: Optional exception that occurred during the edit
+        index: Index of this edit in the batch (0-indexed)
+        old_text: The old/find text for the edit (if applicable)
+        new_text: The new/replace text for the edit (if applicable)
+        suggestions: List of suggested similar text matches (for failed edits)
     """
 
     success: bool
@@ -29,6 +33,10 @@ class EditResult:
     message: str
     span: "TextSpan | None" = None
     error: Exception | None = None
+    index: int = -1
+    old_text: str | None = None
+    new_text: str | None = None
+    suggestions: list[str] = field(default_factory=list)
 
     def __str__(self) -> str:
         """Get string representation of the result."""
@@ -151,3 +159,121 @@ class FormatResult:
             changes = ", ".join(f"{k}={v}" for k, v in self.changes_applied.items())
             return f"✓ Formatted '{self.text_matched}': {changes}"
         return f"○ No change to '{self.text_matched}' (already formatted)"
+
+
+@dataclass
+class BatchResult:
+    """Result of applying multiple edits in batch mode.
+
+    Provides organized access to succeeded and failed edits, along with
+    summary statistics and pretty-print output.
+
+    Attributes:
+        succeeded: List of EditResult objects for successful edits
+        failed: List of EditResult objects for failed edits
+        dry_run: Whether this was a dry run (no actual changes made)
+
+    Example:
+        >>> results = doc.apply_edits(edits, continue_on_error=True)
+        >>> print(results)
+        # 3 edits applied
+        # 1 edit failed:
+        #   [2] "nonexistent phrase" -> TextNotFoundError
+        #       Suggestions: "nonexistent phrases" (1 match)
+        >>> print(results.summary)
+        "3/4 edits applied successfully"
+    """
+
+    succeeded: list[EditResult] = field(default_factory=list)
+    failed: list[EditResult] = field(default_factory=list)
+    dry_run: bool = False
+
+    @property
+    def total(self) -> int:
+        """Total number of edits processed."""
+        return len(self.succeeded) + len(self.failed)
+
+    @property
+    def success_count(self) -> int:
+        """Number of successful edits."""
+        return len(self.succeeded)
+
+    @property
+    def failure_count(self) -> int:
+        """Number of failed edits."""
+        return len(self.failed)
+
+    @property
+    def all_succeeded(self) -> bool:
+        """Whether all edits succeeded."""
+        return len(self.failed) == 0 and len(self.succeeded) > 0
+
+    @property
+    def all_results(self) -> list[EditResult]:
+        """All results in original order by index."""
+        return sorted(self.succeeded + self.failed, key=lambda r: r.index)
+
+    @property
+    def summary(self) -> str:
+        """Get a one-line summary of the batch result."""
+        if self.dry_run:
+            prefix = "(dry run) "
+        else:
+            prefix = ""
+        if self.total == 0:
+            return f"{prefix}No edits to apply"
+        return f"{prefix}{self.success_count}/{self.total} edits applied successfully"
+
+    def __str__(self) -> str:
+        """Get pretty-printed representation of the result."""
+        lines = []
+
+        # Header
+        if self.dry_run:
+            lines.append("=== Batch Edit Results (DRY RUN) ===")
+        else:
+            lines.append("=== Batch Edit Results ===")
+
+        # Success summary
+        if self.succeeded:
+            lines.append(f"+ {len(self.succeeded)} edit(s) applied:")
+            for result in self.succeeded:
+                old_text = f'"{result.old_text}"' if result.old_text else ""
+                new_text = f' -> "{result.new_text}"' if result.new_text else ""
+                lines.append(f"  [{result.index}] {old_text}{new_text}")
+
+        # Failure summary
+        if self.failed:
+            lines.append(f"x {len(self.failed)} edit(s) failed:")
+            for result in self.failed:
+                old_text = f'"{result.old_text}"' if result.old_text else ""
+                error_type = type(result.error).__name__ if result.error else "Error"
+                lines.append(f"  [{result.index}] {old_text} -> {error_type}")
+                if result.suggestions:
+                    sug_str = ", ".join(f'"{s}"' for s in result.suggestions[:3])
+                    lines.append(f"      Suggestions: {sug_str}")
+
+        # Summary line
+        lines.append("")
+        lines.append(self.summary)
+
+        return "\n".join(lines)
+
+    def __repr__(self) -> str:
+        """Get detailed representation for debugging."""
+        return (
+            f"BatchResult(succeeded={len(self.succeeded)}, "
+            f"failed={len(self.failed)}, dry_run={self.dry_run})"
+        )
+
+    def __bool__(self) -> bool:
+        """Return True if all edits succeeded."""
+        return self.all_succeeded
+
+    def __len__(self) -> int:
+        """Return total number of edits processed."""
+        return self.total
+
+    def __iter__(self):
+        """Iterate over all results in original order."""
+        return iter(self.all_results)

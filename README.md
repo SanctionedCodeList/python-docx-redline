@@ -193,11 +193,6 @@ cd python-docx-redline
 pip install -e ".[dev]"
 pytest
 ```
-
-## License
-
-MIT License — see LICENSE file for details.
-
 ## Links
 
 - [GitHub](https://github.com/SanctionedCodeList/python-docx-redline)

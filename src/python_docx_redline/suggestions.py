@@ -8,7 +8,7 @@ helping users quickly identify and fix common issues.
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    pass
+    from lxml import etree
 
 
 class SuggestionGenerator:
@@ -121,3 +121,91 @@ class SuggestionGenerator:
             issues.append("Text contains line breaks")
 
         return issues
+
+    @staticmethod
+    def find_similar_text(
+        search_text: str,
+        paragraphs: list[Any],
+        max_suggestions: int = 3,
+        min_similarity: float = 0.6,
+    ) -> list[str]:
+        """Find similar text in the document for suggestion purposes.
+
+        Uses fuzzy matching to find text in the document that is similar to
+        the search text. This helps users identify typos or near-matches.
+
+        Args:
+            search_text: The text that was searched for
+            paragraphs: List of paragraph Elements to search in
+            max_suggestions: Maximum number of suggestions to return
+            min_similarity: Minimum similarity threshold (0.0 to 1.0)
+
+        Returns:
+            List of similar text strings found in the document
+
+        Example:
+            >>> # Document contains "production products"
+            >>> similar = SuggestionGenerator.find_similar_text(
+            ...     "producton products", paragraphs
+            ... )
+            >>> print(similar)
+            ['production products']
+        """
+        try:
+            from rapidfuzz import fuzz
+        except ImportError:
+            # If rapidfuzz is not available, return empty list
+            return []
+
+        if not search_text or not paragraphs:
+            return []
+
+        # Extract all text from paragraphs
+        doc_text = " ".join("".join(p.itertext()) for p in paragraphs)
+
+        # Skip if document is empty
+        if not doc_text.strip():
+            return []
+
+        # Use sliding window approach to find similar substrings
+        search_len = len(search_text)
+        min_len = max(1, int(search_len * 0.7))
+        max_len = int(search_len * 1.5)
+
+        candidates: list[tuple[str, float]] = []
+        seen: set[str] = set()
+
+        # Check windows of varying sizes
+        for window_len in range(min_len, min(max_len + 1, len(doc_text) + 1)):
+            for start in range(len(doc_text) - window_len + 1):
+                window = doc_text[start : start + window_len]
+
+                # Skip if already seen (normalized)
+                normalized = window.strip().lower()
+                if normalized in seen or not normalized:
+                    continue
+                seen.add(normalized)
+
+                # Calculate similarity
+                similarity = fuzz.ratio(search_text.lower(), normalized) / 100.0
+
+                if similarity >= min_similarity:
+                    # Store original text (trimmed)
+                    original = window.strip()
+                    candidates.append((original, similarity))
+
+        # Sort by similarity (descending) and take top suggestions
+        candidates.sort(key=lambda x: x[1], reverse=True)
+
+        # Remove duplicates while preserving order
+        unique_suggestions: list[str] = []
+        seen_lower: set[str] = set()
+        for text, _score in candidates:
+            text_lower = text.lower()
+            if text_lower not in seen_lower:
+                unique_suggestions.append(text)
+                seen_lower.add(text_lower)
+                if len(unique_suggestions) >= max_suggestions:
+                    break
+
+        return unique_suggestions
