@@ -51,7 +51,17 @@ export interface ConsoleMessage {
   };
 }
 
-export type AddInMessage = RegisterMessage | ResultMessage | ConsoleMessage;
+export interface PdfResultMessage {
+  type: 'pdfResult';
+  id: string;
+  success: boolean;
+  pdfBase64?: string;
+  error?: {
+    message: string;
+  };
+}
+
+export type AddInMessage = RegisterMessage | ResultMessage | ConsoleMessage | PdfResultMessage;
 export type BridgeMessage = RegisteredMessage | ExecuteMessage;
 
 // Session registry types (app-agnostic naming)

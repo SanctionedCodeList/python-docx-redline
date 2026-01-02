@@ -10,12 +10,21 @@ interface PendingExecution {
   reject: (error: Error) => void;
 }
 
+// Pending PDF export request
+interface PendingPdfExport {
+  requestId: string;
+  timeout: number;
+  resolve: (pdfBase64: string) => void;
+  reject: (error: Error) => void;
+}
+
 export class SessionRegistry {
   private sessions = new Map<string, ConnectedSession>();
   private socketToId = new Map<WebSocket, string>();
   private idToSocket = new Map<string, WebSocket>();
   private executionQueues = new Map<string, PendingExecution[]>();
   private activeExecutions = new Map<string, PendingExecution>();
+  private pendingPdfExports = new Map<string, PendingPdfExport>();
 
   private readonly tombstoneTimeout = 5 * 60 * 1000; // 5 minutes
 
@@ -197,6 +206,70 @@ export class SessionRegistry {
     this.activeExecutions.delete(id);
     this.updateActivity(id);
     this.processQueue(id);
+  }
+
+  // Queue a PDF export request
+  async queuePdfExport(
+    id: string,
+    requestId: string,
+    timeout: number
+  ): Promise<string> {
+    const session = this.sessions.get(id);
+    if (!session || session.status !== 'connected') {
+      throw new Error(`Session ${id} not connected`);
+    }
+
+    if (session.app !== 'word') {
+      throw new Error('PDF export is only supported for Word documents');
+    }
+
+    const ws = this.idToSocket.get(id);
+    if (!ws) {
+      throw new Error('WebSocket not found');
+    }
+
+    return new Promise((resolve, reject) => {
+      const pending: PendingPdfExport = { requestId, timeout, resolve, reject };
+      this.pendingPdfExports.set(requestId, pending);
+
+      // Send getPdf message to add-in
+      ws.send(
+        JSON.stringify({
+          type: 'getPdf',
+          id: requestId,
+        })
+      );
+
+      // Set up timeout
+      setTimeout(() => {
+        const pendingExport = this.pendingPdfExports.get(requestId);
+        if (pendingExport) {
+          pendingExport.reject(new Error('PDF export timeout'));
+          this.pendingPdfExports.delete(requestId);
+        }
+      }, timeout);
+    });
+  }
+
+  // Handle PDF result from add-in
+  handlePdfResult(
+    id: string,
+    requestId: string,
+    success: boolean,
+    pdfBase64?: string,
+    error?: Error
+  ): void {
+    const pending = this.pendingPdfExports.get(requestId);
+    if (!pending) return;
+
+    if (success && pdfBase64) {
+      pending.resolve(pdfBase64);
+    } else {
+      pending.reject(error || new Error('PDF export failed'));
+    }
+
+    this.pendingPdfExports.delete(requestId);
+    this.updateActivity(id);
   }
 }
 

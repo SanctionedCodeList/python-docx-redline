@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { v4 as uuidv4 } from 'uuid';
+import { pdf } from 'pdf-to-img';
 import { SessionRegistry } from './registry.js';
 import type { AddInMessage, AppType, ServerInfo, ConsoleMessage } from './types.js';
 
@@ -64,6 +65,56 @@ export async function serve(options: ServerOptions = {}): Promise<BridgeServer> 
     try {
       const result = await registry.queueExecution(id, uuidv4(), code, timeout);
       res.json({ success: true, result });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      res.status(500).json({ success: false, error: { message } });
+    }
+  });
+
+  // Get page images from a Word document
+  app.post('/page-images', async (req, res) => {
+    const { sessionId, scale = 1.5, pages } = req.body as {
+      sessionId: string;
+      scale?: number;
+      pages?: number[];
+    };
+
+    if (!sessionId) {
+      res.status(400).json({ success: false, error: { message: 'sessionId is required' } });
+      return;
+    }
+
+    try {
+      // Request PDF from the add-in
+      const pdfBase64 = await registry.queuePdfExport(sessionId, uuidv4(), 60000);
+
+      // Convert base64 to buffer
+      const pdfBuffer = Buffer.from(pdfBase64, 'base64');
+
+      // Convert PDF to images
+      const images: { page: number; width: number; height: number; data: string }[] = [];
+      let pageNum = 0;
+
+      // pdf() returns a Promise that resolves to an async iterable
+      const pdfDoc = await pdf(pdfBuffer, { scale });
+      for await (const image of pdfDoc) {
+        pageNum++;
+        // Filter by requested pages if specified
+        if (pages && !pages.includes(pageNum)) {
+          continue;
+        }
+
+        // image is a Buffer of PNG data
+        const base64 = image.toString('base64');
+        images.push({
+          page: pageNum,
+          width: 0, // pdf-to-img doesn't provide dimensions directly
+          height: 0,
+          data: `data:image/png;base64,${base64}`,
+        });
+      }
+
+      res.json({ success: true, images, totalPages: pageNum });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       res.status(500).json({ success: false, error: { message } });
@@ -150,6 +201,25 @@ export async function serve(options: ServerOptions = {}): Promise<BridgeServer> 
               }
               // Also log to server console
               console.log(`[${sessionId}] ${consoleMsg.level}: ${consoleMsg.message}`);
+            }
+            break;
+          }
+
+          case 'pdfResult': {
+            // Add-in sends PDF export result
+            const pdfMsg = message as unknown as { type: 'pdfResult'; id: string; success: boolean; pdfBase64?: string; error?: { message: string } };
+            const sessionId = registry.getIdBySocket(ws);
+            if (sessionId) {
+              const error = pdfMsg.error
+                ? new Error(pdfMsg.error.message)
+                : undefined;
+              registry.handlePdfResult(
+                sessionId,
+                pdfMsg.id,
+                pdfMsg.success,
+                pdfMsg.pdfBase64,
+                error
+              );
             }
             break;
           }

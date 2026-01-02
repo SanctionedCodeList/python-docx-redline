@@ -30,6 +30,18 @@ export interface ExecuteOptions {
   timeout?: number;  // Default: 30000 (30 seconds)
 }
 
+export interface PageImageOptions {
+  scale?: number;   // Default: 1.5 (higher = more detail)
+  pages?: number[]; // Specific pages to get (default: all)
+}
+
+export interface PageImage {
+  page: number;
+  width: number;
+  height: number;
+  data: string;  // data:image/png;base64,...
+}
+
 export interface ConsoleEntry {
   level: 'log' | 'warn' | 'error' | 'info';
   message: string;
@@ -188,6 +200,41 @@ export interface WordDocument {
    * ```
    */
   getTextByRef(ref: Ref): Promise<string | undefined>;
+
+  // =========================================================================
+  // Page Image Methods
+  // =========================================================================
+
+  /**
+   * Get all pages as images.
+   * Exports document to PDF and converts each page to a PNG image.
+   *
+   * @param options - Scale and page selection options
+   * @returns Array of page images with base64 data URLs
+   *
+   * @example
+   * ```typescript
+   * const pages = await doc.getPageImages();
+   * console.log(`Document has ${pages.length} pages`);
+   * // pages[0].data is "data:image/png;base64,..."
+   * ```
+   */
+  getPageImages(options?: PageImageOptions): Promise<PageImage[]>;
+
+  /**
+   * Get a single page as an image.
+   *
+   * @param pageNum - Page number (1-indexed)
+   * @param options - Scale options
+   * @returns Page image or undefined if page doesn't exist
+   *
+   * @example
+   * ```typescript
+   * const page = await doc.getPageImage(1);
+   * if (page) console.log('First page image:', page.data);
+   * ```
+   */
+  getPageImage(pageNum: number, options?: Omit<PageImageOptions, 'pages'>): Promise<PageImage | undefined>;
 }
 
 // Base session interface for all apps (raw JS execution)
@@ -466,6 +513,40 @@ function createWordDocumentHandle(baseUrl: string, info: SessionInfo): WordDocum
         return await DocTree.getTextByRef(context, ${refJson});
       `;
       return executeJs<string | undefined>(code);
+    },
+
+    // =========================================================================
+    // Page Image Methods
+    // =========================================================================
+
+    async getPageImages(options?: PageImageOptions): Promise<PageImage[]> {
+      const res = await fetch(`${baseUrl}/page-images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: info.id,
+          scale: options?.scale,
+          pages: options?.pages,
+        }),
+      });
+
+      if (!res.ok) {
+        const error = await res.text();
+        throw new Error(`Failed to get page images: ${error}`);
+      }
+
+      const result = await res.json() as { success: boolean; images?: PageImage[]; error?: { message: string } };
+
+      if (!result.success) {
+        throw new Error(result.error?.message ?? 'Failed to get page images');
+      }
+
+      return result.images ?? [];
+    },
+
+    async getPageImage(pageNum: number, options?: Omit<PageImageOptions, 'pages'>): Promise<PageImage | undefined> {
+      const pages = await this.getPageImages({ ...options, pages: [pageNum] });
+      return pages.find(p => p.page === pageNum);
     },
   };
 }

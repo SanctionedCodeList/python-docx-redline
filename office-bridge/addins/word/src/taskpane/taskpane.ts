@@ -370,6 +370,13 @@ async function handleMessage(msg: { type: string; id?: string; payload?: { id?: 
       }
       break;
 
+    case "getPdf":
+      if (msg.id) {
+        updateLastActivity("Exporting PDF...");
+        await exportPdf(msg.id);
+      }
+      break;
+
     case "ping":
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "pong" }));
@@ -444,6 +451,89 @@ async function executeCode(requestId: string, code: string) {
     }
     updateLastActivity("Code execution failed");
     originalConsole.error("Execution error:", err);
+  }
+}
+
+async function exportPdf(requestId: string) {
+  try {
+    // Get the document as PDF using Office.context.document.getFileAsync
+    const pdfBase64 = await new Promise<string>((resolve, reject) => {
+      Office.context.document.getFileAsync(
+        Office.FileType.Pdf,
+        { sliceSize: 65536 },
+        async (result) => {
+          if (result.status !== Office.AsyncResultStatus.Succeeded) {
+            reject(new Error(result.error?.message || "Failed to get PDF"));
+            return;
+          }
+
+          const file = result.value;
+          const sliceCount = file.sliceCount;
+          const slices: Uint8Array[] = [];
+
+          // Collect all slices
+          for (let i = 0; i < sliceCount; i++) {
+            const sliceData = await new Promise<Uint8Array>((resolveSlice, rejectSlice) => {
+              file.getSliceAsync(i, (sliceResult) => {
+                if (sliceResult.status !== Office.AsyncResultStatus.Succeeded) {
+                  rejectSlice(new Error(sliceResult.error?.message || "Failed to get slice"));
+                  return;
+                }
+                resolveSlice(new Uint8Array(sliceResult.value.data as ArrayBuffer));
+              });
+            });
+            slices.push(sliceData);
+          }
+
+          // Close the file
+          file.closeAsync(() => {});
+
+          // Combine slices and convert to base64
+          const totalLength = slices.reduce((sum, s) => sum + s.length, 0);
+          const combined = new Uint8Array(totalLength);
+          let offset = 0;
+          for (const slice of slices) {
+            combined.set(slice, offset);
+            offset += slice.length;
+          }
+
+          // Convert to base64
+          let binary = "";
+          for (let i = 0; i < combined.length; i++) {
+            binary += String.fromCharCode(combined[i]);
+          }
+          resolve(btoa(binary));
+        }
+      );
+    });
+
+    // Send success response
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: "pdfResult",
+          id: requestId,
+          success: true,
+          pdfBase64,
+        })
+      );
+    }
+    updateLastActivity("PDF exported successfully");
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: "pdfResult",
+          id: requestId,
+          success: false,
+          error: { message: errorMessage },
+        })
+      );
+    }
+    updateLastActivity("PDF export failed");
+    originalConsole.error("PDF export error:", err);
   }
 }
 
