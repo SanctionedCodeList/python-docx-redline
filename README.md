@@ -175,15 +175,21 @@ for m in matches:
 
 For AI-assisted document editing, install as a Claude Code plugin:
 
+```bash
+claude plugins add SanctionedCodeList/python-docx-redline
 ```
-/plugin install python-docx-redline@SanctionedCodeList/python-docx-redline
+
+Or via the SCL marketplace (includes law-tools, writing, office-bridge, and more):
+
+```bash
+claude plugins add SanctionedCodeList/SCL_marketplace
 ```
 
 ## Development
 
 ```bash
-git clone https://github.com/parkerhancock/python_docx_redline.git
-cd python_docx_redline
+git clone https://github.com/SanctionedCodeList/python-docx-redline.git
+cd python-docx-redline
 pip install -e ".[dev]"
 pytest
 ```
@@ -194,6 +200,6 @@ MIT License — see LICENSE file for details.
 
 ## Links
 
-- [GitHub](https://github.com/parkerhancock/python_docx_redline)
+- [GitHub](https://github.com/SanctionedCodeList/python-docx-redline)
 - [PyPI](https://pypi.org/project/python-docx-redline/)
 - [Documentation](docs/)
