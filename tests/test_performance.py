@@ -335,8 +335,8 @@ class TestAccessibilityTreePerformance:
         # Both modes should complete within target time (300ms for 100 pages)
         # Due to caching and JIT effects, timing can vary between runs
         # The key requirement is that both complete quickly
-        assert minimal_time < 0.3, f"Minimal mode too slow: {minimal_time*1000:.2f}ms"
-        assert standard_time < 0.3, f"Standard mode too slow: {standard_time*1000:.2f}ms"
+        assert minimal_time < 0.3, f"Minimal mode too slow: {minimal_time * 1000:.2f}ms"
+        assert standard_time < 0.3, f"Standard mode too slow: {standard_time * 1000:.2f}ms"
 
 
 # ============================================================================
@@ -381,12 +381,12 @@ class TestOutlineTreePerformance:
         # The key point is outline mode IS fast for large docs (under 100ms)
         assert (
             large_time < 0.1
-        ), f"Outline mode too slow for large doc: {large_time*1000:.2f}ms (target: <100ms)"
+        ), f"Outline mode too slow for large doc: {large_time * 1000:.2f}ms (target: <100ms)"
         # Just verify it's not 5x slower as expected
         scaling_factor = large_time / small_time if small_time > 0 else 0
         assert scaling_factor < 10, (
-            f"Outline mode scales poorly: small={small_time*1000:.2f}ms, "
-            f"large={large_time*1000:.2f}ms, factor={scaling_factor:.1f}x"
+            f"Outline mode scales poorly: small={small_time * 1000:.2f}ms, "
+            f"large={large_time * 1000:.2f}ms, factor={scaling_factor:.1f}x"
         )
 
 

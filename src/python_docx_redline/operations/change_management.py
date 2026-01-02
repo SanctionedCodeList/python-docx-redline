@@ -6,6 +6,7 @@ tracked changes in Word documents.
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any
 
@@ -616,6 +617,144 @@ class ChangeManagement:
                 count += 1
             except ValueError:
                 # Change may have already been rejected (e.g., nested structure)
+                pass
+
+        return count
+
+    # Accept/Reject by text content
+
+    def reject_changes_containing(
+        self,
+        text: str,
+        *,
+        change_type: str | None = None,
+        author: str | None = None,
+        match_case: bool = False,
+        regex: bool = False,
+    ) -> int:
+        """Reject tracked changes containing specified text.
+
+        Searches the text content of tracked changes and rejects those
+        containing the specified text. Useful for targeted rejection of
+        changes by content rather than by index/ID.
+
+        Args:
+            text: String to search for in change content.
+            change_type: Optional filter by change type. Valid values:
+                         "insertion", "deletion", "format_run", "format_paragraph",
+                         or None for all types.
+            author: Optional filter by author name.
+            match_case: If False (default), case-insensitive search.
+            regex: If True, treat text as a regex pattern.
+
+        Returns:
+            Number of changes rejected.
+
+        Example:
+            >>> # Reject deletions containing "VersusLaw"
+            >>> count = doc.reject_changes_containing("VersusLaw", change_type="deletion")
+            >>> print(f"Rejected {count} changes containing 'VersusLaw'")
+            >>>
+            >>> # Reject all changes containing "confidential" by any author
+            >>> count = doc.reject_changes_containing("confidential")
+            >>>
+            >>> # Reject changes matching a regex pattern
+            >>> count = doc.reject_changes_containing(r"Section \\d+", regex=True)
+        """
+        # Get all changes matching optional filters
+        changes = self._document.get_tracked_changes(change_type=change_type, author=author)
+
+        # Filter by text content
+        matching_changes = []
+        if regex:
+            flags = 0 if match_case else re.IGNORECASE
+            pattern = re.compile(text, flags)
+            for change in changes:
+                if change.text and pattern.search(change.text):
+                    matching_changes.append(change)
+        else:
+            search_text = text if match_case else text.lower()
+            for change in changes:
+                change_text = change.text if match_case else change.text.lower()
+                if search_text in change_text:
+                    matching_changes.append(change)
+
+        # Reject matching changes in reverse order to handle nested elements properly
+        count = 0
+        for change in reversed(matching_changes):
+            try:
+                self.reject_change(change.id)
+                count += 1
+            except ValueError:
+                # Change may have already been rejected (e.g., nested structure)
+                pass
+
+        return count
+
+    def accept_changes_containing(
+        self,
+        text: str,
+        *,
+        change_type: str | None = None,
+        author: str | None = None,
+        match_case: bool = False,
+        regex: bool = False,
+    ) -> int:
+        """Accept tracked changes containing specified text.
+
+        Searches the text content of tracked changes and accepts those
+        containing the specified text. Useful for targeted acceptance of
+        changes by content rather than by index/ID.
+
+        Args:
+            text: String to search for in change content.
+            change_type: Optional filter by change type. Valid values:
+                         "insertion", "deletion", "format_run", "format_paragraph",
+                         or None for all types.
+            author: Optional filter by author name.
+            match_case: If False (default), case-insensitive search.
+            regex: If True, treat text as a regex pattern.
+
+        Returns:
+            Number of changes accepted.
+
+        Example:
+            >>> # Accept insertions containing "approved"
+            >>> count = doc.accept_changes_containing("approved", change_type="insertion")
+            >>> print(f"Accepted {count} changes containing 'approved'")
+            >>>
+            >>> # Accept all changes containing specific clause text
+            >>> count = doc.accept_changes_containing("Section 2.1")
+            >>>
+            >>> # Accept changes matching a regex pattern
+            >>> count = doc.accept_changes_containing(r"v\\d+\\.\\d+", regex=True)
+        """
+        # Get all changes matching optional filters
+        changes = self._document.get_tracked_changes(change_type=change_type, author=author)
+
+        # Filter by text content
+        matching_changes = []
+        if regex:
+            flags = 0 if match_case else re.IGNORECASE
+            pattern = re.compile(text, flags)
+            for change in changes:
+                if change.text and pattern.search(change.text):
+                    matching_changes.append(change)
+        else:
+            search_text = text if match_case else text.lower()
+            for change in changes:
+                change_text = change.text if match_case else change.text.lower()
+                if search_text in change_text:
+                    matching_changes.append(change)
+
+        # Accept matching changes in reverse order to handle nested elements properly
+        count = 0
+        for change in reversed(matching_changes):
+            try:
+                self.accept_change(change.id)
+                count += 1
+            except ValueError:
+                # Change may have already been accepted (e.g., nested structure)
                 pass
 
         return count

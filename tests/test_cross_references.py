@@ -2835,7 +2835,9 @@ class TestInsertCrossReferenceToHeading:
             # Verify the bookmark references the correct heading
             bookmark = ops.get_bookmark(result)
             assert bookmark is not None
-            assert "Getting Started" in bookmark.text_preview or "Chapter 1" in bookmark.text_preview
+            assert (
+                "Getting Started" in bookmark.text_preview or "Chapter 1" in bookmark.text_preview
+            )
         finally:
             doc_path.unlink(missing_ok=True)
 
@@ -3024,7 +3026,7 @@ class TestCreateHeadingBookmark:
         doc_path = create_document_with_bookmarks()
         try:
             doc = Document(doc_path)
-            ops = CrossReferenceOperations(doc)
+            _ops = CrossReferenceOperations(doc)  # noqa: F841
 
             # Can't test this easily since we don't have a heading in this doc
             # but we can add a heading to the document
@@ -3147,7 +3149,9 @@ class TestHeadingReferenceRoundTrip:
 
             bookmark_id = matching_starts[0].get(f"{{{WORD_NS}}}id")
             bookmark_ends = list(doc2.xml_root.iter(f"{{{WORD_NS}}}bookmarkEnd"))
-            matching_ends = [be for be in bookmark_ends if be.get(f"{{{WORD_NS}}}id") == bookmark_id]
+            matching_ends = [
+                be for be in bookmark_ends if be.get(f"{{{WORD_NS}}}id") == bookmark_id
+            ]
             assert len(matching_ends) == 1
 
         finally:
@@ -5251,7 +5255,7 @@ class TestParseFieldInstruction:
             doc = Document(doc_path)
             ops = CrossReferenceOperations(doc)
 
-            result = ops._parse_field_instruction(" DATE \\@ \"MMMM\" ")
+            result = ops._parse_field_instruction(' DATE \\@ "MMMM" ')
 
             assert result["field_type"] == "UNKNOWN"
             assert result["bookmark"] == ""

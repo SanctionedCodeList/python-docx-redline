@@ -52,6 +52,20 @@ class TrackedChangeOperations:
         """
         self._document = document
 
+    def _record_change_ids(self, start_id: int, end_id: int) -> None:
+        """Record change IDs with the edit group registry if a group is active.
+
+        Args:
+            start_id: The first change ID created (inclusive)
+            end_id: The next_change_id after the operation (exclusive)
+        """
+        # Check if the document has an edit groups registry with an active group
+        if hasattr(self._document, "_edit_groups_instance"):
+            edit_groups = self._document._edit_groups_instance
+            if edit_groups.active_group is not None:
+                for change_id in range(start_id, end_id):
+                    edit_groups.add_change_id(change_id)
+
     def _select_matches(
         self, matches: list[TextSpan], occurrence: int | list[int] | str, text: str
     ) -> list[TextSpan]:
@@ -236,10 +250,16 @@ class TrackedChangeOperations:
         # Insert at each target match (process in reverse to preserve indices)
         for match in reversed(target_matches):
             if track:
+                # Capture change ID before operation for edit group tracking
+                start_id = self._document._xml_generator.next_change_id
+
                 # Tracked insertion: wrap in <w:ins>
                 insertion_xml = self._document._xml_generator.create_insertion(text, author)
                 elements = self._parse_xml_elements(insertion_xml)
                 insertion_element = elements[0]
+
+                # Record change IDs with edit group registry
+                self._record_change_ids(start_id, self._document._xml_generator.next_change_id)
             else:
                 # Untracked insertion: plain runs
                 # Get source run for formatting if available
@@ -321,12 +341,18 @@ class TrackedChangeOperations:
         # Delete each target match (process in reverse to preserve indices)
         for match in reversed(target_matches):
             if track:
+                # Capture change ID before operation for edit group tracking
+                start_id = self._document._xml_generator.next_change_id
+
                 # Tracked deletion: wrap in <w:del>
                 deletion_xml = self._document._xml_generator.create_deletion(match.text, author)
                 elements = self._parse_xml_elements(deletion_xml)
                 deletion_element = elements[0]
                 # Replace the matched text with deletion
                 self._replace_match_with_element(match, deletion_element)
+
+                # Record change IDs with edit group registry
+                self._record_change_ids(start_id, self._document._xml_generator.next_change_id)
             else:
                 # Untracked deletion: simply remove the matched runs
                 self._remove_match(match)
@@ -434,6 +460,9 @@ class TrackedChangeOperations:
                 self._check_and_warn_continuity(match, replacement_text, context_chars)
 
             if track:
+                # Capture change ID before operation for edit group tracking
+                start_id = self._document._xml_generator.next_change_id
+
                 # Determine effective minimal setting
                 use_minimal = minimal if minimal is not None else self._document._minimal_edits
 
@@ -448,6 +477,10 @@ class TrackedChangeOperations:
                         author,
                     )
                     if success:
+                        # Record change IDs with edit group registry
+                        self._record_change_ids(
+                            start_id, self._document._xml_generator.next_change_id
+                        )
                         continue  # Minimal edit applied successfully
                     else:
                         # Log fallback at INFO level
@@ -466,6 +499,9 @@ class TrackedChangeOperations:
                 elements = self._parse_xml_elements(f"{deletion_xml}\n    {insertion_xml}")
                 # Replace the matched text with deletion + insertion
                 self._replace_match_with_elements(match, elements)
+
+                # Record change IDs with edit group registry
+                self._record_change_ids(start_id, self._document._xml_generator.next_change_id)
             else:
                 # Untracked replace: just replace with plain runs
                 # Get source run for formatting
@@ -684,6 +720,9 @@ class TrackedChangeOperations:
         source_text = source_match.text
 
         if track:
+            # Capture change ID before operation for edit group tracking
+            start_id = self._document._xml_generator.next_change_id
+
             # Tracked move: create linked moveFrom/moveTo markers
             move_name = self._generate_move_name()
             move_to_elements, move_from_elements = self._create_move_elements(
@@ -698,6 +737,9 @@ class TrackedChangeOperations:
 
             # Replace source text with moveFrom markers
             self._replace_match_with_elements(source_match, move_from_elements)
+
+            # Record change IDs with edit group registry
+            self._record_change_ids(start_id, self._document._xml_generator.next_change_id)
         else:
             # Untracked move: delete from source and insert at destination
             # Get source run for formatting
@@ -829,6 +871,8 @@ class TrackedChangeOperations:
         The matched runs are removed and replaced with the new element.
 
         Handles runs that may be inside tracked change wrappers (w:ins, w:del).
+        When deleting text inside a wrapper, the replacement element (w:del)
+        must be placed at paragraph level, wrapping the original wrapper content.
 
         Args:
             match: TextSpan object representing the text to replace
@@ -848,14 +892,22 @@ class TrackedChangeOperations:
 
             # If the match is the entire run, replace the run
             if match.start_offset == 0 and match.end_offset == len(run_text):
-                try:
-                    run_index = list(actual_parent).index(run)
-                except ValueError:
-                    # Fallback to paragraph
-                    run_index = list(paragraph).index(run)
-                    actual_parent = paragraph
-                actual_parent.remove(run)
-                actual_parent.insert(run_index, replacement_element)
+                # Check if the parent is a tracked change wrapper
+                if self._is_tracked_change_wrapper(actual_parent):
+                    # The replacement element (e.g., w:del) must be placed at paragraph level
+                    # wrapping the original wrapper content
+                    self._replace_run_in_wrapper_with_element(
+                        paragraph, run, actual_parent, replacement_element
+                    )
+                else:
+                    try:
+                        run_index = list(actual_parent).index(run)
+                    except ValueError:
+                        # Fallback to paragraph
+                        run_index = list(paragraph).index(run)
+                        actual_parent = paragraph
+                    actual_parent.remove(run)
+                    actual_parent.insert(run_index, replacement_element)
             else:
                 # Match is partial - need to split the run
                 self._split_and_replace_in_run(
@@ -902,6 +954,198 @@ class TrackedChangeOperations:
             for i, elem in enumerate(new_elements):
                 actual_parent.insert(start_run_index + i, elem)
 
+    def _replace_run_in_wrapper_with_element(
+        self,
+        paragraph: Any,
+        run: Any,
+        wrapper: Any,
+        replacement_element: Any,
+    ) -> None:
+        """Replace a run inside a tracked change wrapper with a new element.
+
+        When a run inside a w:ins or w:del needs to be replaced with another
+        tracked change element (e.g., deleting text inside an insertion), the
+        replacement must be placed at paragraph level wrapping the original content.
+
+        For example, deleting "text" inside <w:ins><w:r><w:t>text</w:t></w:r></w:ins>
+        should produce:
+            <w:del>
+                <w:ins>
+                    <w:r><w:delText>text</w:delText></w:r>
+                </w:ins>
+            </w:del>
+
+        Args:
+            paragraph: The containing paragraph
+            run: The run being replaced
+            wrapper: The tracked change wrapper containing the run
+            replacement_element: The new element (e.g., w:del) to wrap the content
+        """
+        wrapper_children = list(wrapper)
+        run_index_in_wrapper = wrapper_children.index(run)
+
+        # Create an empty wrapper element with same attributes as replacement
+        # (we don't want the pre-generated content, just the wrapper attributes)
+        empty_replacement = self._create_empty_wrapper_like(replacement_element)
+
+        # Check if the run is the only child of the wrapper
+        if len(wrapper_children) == 1:
+            # Simple case: entire wrapper content is being replaced
+            # Find wrapper position in paragraph
+            wrapper_index = list(paragraph).index(wrapper)
+
+            # Move the wrapper (with its content) inside the empty replacement element
+            paragraph.remove(wrapper)
+
+            # The run inside the wrapper needs to have its content converted
+            # if the replacement is a w:del, convert w:t to w:delText
+            if self._is_deletion_wrapper(replacement_element):
+                self._convert_run_text_to_deltext(run)
+
+            empty_replacement.append(wrapper)
+            paragraph.insert(wrapper_index, empty_replacement)
+        else:
+            # Complex case: only part of the wrapper content is being replaced
+            # Need to split the wrapper
+            wrapper_index = list(paragraph).index(wrapper)
+
+            # Create elements for before, replacement, and after
+            elements_to_insert: list[Any] = []
+
+            # Content before the run stays in a cloned wrapper
+            if run_index_in_wrapper > 0:
+                before_wrapper = self._clone_wrapper(wrapper)
+                for i in range(run_index_in_wrapper):
+                    child_copy = etree.fromstring(etree.tostring(wrapper_children[i]))
+                    before_wrapper.append(child_copy)
+                elements_to_insert.append(before_wrapper)
+
+            # The run being replaced goes in empty_replacement wrapped in cloned wrapper
+            run_wrapper = self._clone_wrapper(wrapper)
+            run_copy = etree.fromstring(etree.tostring(run))
+            if self._is_deletion_wrapper(replacement_element):
+                self._convert_run_text_to_deltext(run_copy)
+            run_wrapper.append(run_copy)
+            empty_replacement.append(run_wrapper)
+            elements_to_insert.append(empty_replacement)
+
+            # Content after the run stays in a cloned wrapper
+            if run_index_in_wrapper < len(wrapper_children) - 1:
+                after_wrapper = self._clone_wrapper(wrapper)
+                for i in range(run_index_in_wrapper + 1, len(wrapper_children)):
+                    child_copy = etree.fromstring(etree.tostring(wrapper_children[i]))
+                    after_wrapper.append(child_copy)
+                elements_to_insert.append(after_wrapper)
+
+            # Remove original wrapper and insert new elements
+            paragraph.remove(wrapper)
+            for i, elem in enumerate(elements_to_insert):
+                paragraph.insert(wrapper_index + i, elem)
+
+    def _replace_run_in_wrapper_with_elements(
+        self,
+        paragraph: Any,
+        run: Any,
+        wrapper: Any,
+        replacement_elements: list[Any],
+    ) -> None:
+        """Replace a run inside a tracked change wrapper with multiple elements.
+
+        When a run inside a w:ins or w:del needs to be replaced with multiple
+        tracked change elements (e.g., replacing text inside an insertion with
+        a deletion + insertion pair), the tracked change elements must be placed
+        at paragraph level.
+
+        For replace_tracked on text inside <w:ins>:
+        - The w:del goes at paragraph level wrapping a copy of the w:ins with delText
+        - The w:ins for the new text goes at paragraph level
+
+        Args:
+            paragraph: The containing paragraph
+            run: The run being replaced
+            wrapper: The tracked change wrapper containing the run
+            replacement_elements: The new elements (e.g., [w:del, w:ins]) to insert
+        """
+        wrapper_children = list(wrapper)
+        run_index_in_wrapper = wrapper_children.index(run)
+        wrapper_index = list(paragraph).index(wrapper)
+
+        # Build the elements to insert at paragraph level
+        elements_to_insert: list[Any] = []
+
+        # Content before the run stays in a cloned wrapper
+        if run_index_in_wrapper > 0:
+            before_wrapper = self._clone_wrapper(wrapper)
+            for i in range(run_index_in_wrapper):
+                child_copy = etree.fromstring(etree.tostring(wrapper_children[i]))
+                before_wrapper.append(child_copy)
+            elements_to_insert.append(before_wrapper)
+
+        # Process each replacement element
+        for repl_elem in replacement_elements:
+            if self._is_tracked_change_wrapper(repl_elem):
+                # Tracked change elements need special handling:
+                # - w:del needs to wrap a copy of the original wrapper with the run
+                # - w:ins can be inserted directly at paragraph level
+                if self._is_deletion_wrapper(repl_elem):
+                    # Create empty del wrapper with same attributes
+                    empty_del = self._create_empty_wrapper_like(repl_elem)
+                    # Clone the original wrapper and put the run (with delText) inside
+                    run_wrapper = self._clone_wrapper(wrapper)
+                    run_copy = etree.fromstring(etree.tostring(run))
+                    self._convert_run_text_to_deltext(run_copy)
+                    run_wrapper.append(run_copy)
+                    empty_del.append(run_wrapper)
+                    elements_to_insert.append(empty_del)
+                else:
+                    # For w:ins elements, insert directly at paragraph level
+                    elements_to_insert.append(repl_elem)
+            else:
+                # Non-tracked-change elements can be inserted directly
+                elements_to_insert.append(repl_elem)
+
+        # Content after the run stays in a cloned wrapper
+        if run_index_in_wrapper < len(wrapper_children) - 1:
+            after_wrapper = self._clone_wrapper(wrapper)
+            for i in range(run_index_in_wrapper + 1, len(wrapper_children)):
+                child_copy = etree.fromstring(etree.tostring(wrapper_children[i]))
+                after_wrapper.append(child_copy)
+            elements_to_insert.append(after_wrapper)
+
+        # Remove original wrapper and insert new elements
+        paragraph.remove(wrapper)
+        for i, elem in enumerate(elements_to_insert):
+            paragraph.insert(wrapper_index + i, elem)
+
+    def _create_empty_wrapper_like(self, wrapper: Any) -> Any:
+        """Create an empty wrapper element with the same tag and attributes.
+
+        This is used when we need the wrapper structure (w:del, w:ins, etc.)
+        but not its pre-generated content.
+
+        Args:
+            wrapper: The wrapper element to copy tag and attributes from
+
+        Returns:
+            A new empty element with the same tag and attributes
+        """
+        new_wrapper = etree.Element(wrapper.tag)
+        for attr_name, attr_value in wrapper.attrib.items():
+            new_wrapper.set(attr_name, attr_value)
+        return new_wrapper
+
+    def _convert_run_text_to_deltext(self, run: Any) -> None:
+        """Convert w:t elements in a run to w:delText elements.
+
+        This is needed when text inside a w:ins is being deleted - the text
+        must be marked with w:delText to indicate it's deleted content.
+
+        Args:
+            run: The run element containing w:t elements to convert
+        """
+        for t_elem in run.findall(f".//{{{WORD_NAMESPACE}}}t"):
+            t_elem.tag = f"{{{WORD_NAMESPACE}}}delText"
+
     def _replace_match_with_elements(
         self, match: TextSpan, replacement_elements: list[Any]
     ) -> None:
@@ -910,6 +1154,9 @@ class TrackedChangeOperations:
         Used for replace_tracked which needs both deletion and insertion elements.
 
         Handles runs that may be inside tracked change wrappers (w:ins, w:del).
+        When the run is inside a wrapper and replacement_elements contain tracked
+        change elements (w:del, w:ins), those elements must be placed at
+        paragraph level, not inside the wrapper.
 
         Args:
             match: TextSpan object representing the text to replace
@@ -929,16 +1176,23 @@ class TrackedChangeOperations:
 
             # If the match is the entire run, replace the run
             if match.start_offset == 0 and match.end_offset == len(run_text):
-                try:
-                    run_index = list(actual_parent).index(run)
-                except ValueError:
-                    # Fallback to paragraph
-                    run_index = list(paragraph).index(run)
-                    actual_parent = paragraph
-                actual_parent.remove(run)
-                # Insert elements in order
-                for i, elem in enumerate(replacement_elements):
-                    actual_parent.insert(run_index + i, elem)
+                # Check if the parent is a tracked change wrapper
+                if self._is_tracked_change_wrapper(actual_parent):
+                    # Replacement elements must be placed at paragraph level
+                    self._replace_run_in_wrapper_with_elements(
+                        paragraph, run, actual_parent, replacement_elements
+                    )
+                else:
+                    try:
+                        run_index = list(actual_parent).index(run)
+                    except ValueError:
+                        # Fallback to paragraph
+                        run_index = list(paragraph).index(run)
+                        actual_parent = paragraph
+                    actual_parent.remove(run)
+                    # Insert elements in order
+                    for i, elem in enumerate(replacement_elements):
+                        actual_parent.insert(run_index + i, elem)
             else:
                 # Match is partial - need to split the run
                 self._split_and_replace_in_run_multiple(
@@ -1005,18 +1259,29 @@ class TrackedChangeOperations:
         return text_elements[0].text or "", len(text_elements)
 
     def _is_tracked_change_wrapper(self, elem: Any) -> bool:
-        """Check if an element is a tracked change wrapper (w:ins or w:del).
+        """Check if an element is a tracked change wrapper.
+
+        Tracked change wrappers include:
+        - w:ins (tracked insertion)
+        - w:del (tracked deletion)
+        - w:moveFrom (tracked move source)
+        - w:moveTo (tracked move destination)
 
         Args:
             elem: The element to check
 
         Returns:
-            True if the element is a w:ins or w:del element
+            True if the element is a tracked change wrapper
         """
         if elem is None:
             return False
         tag = elem.tag
-        return tag == f"{{{WORD_NAMESPACE}}}ins" or tag == f"{{{WORD_NAMESPACE}}}del"
+        return tag in (
+            f"{{{WORD_NAMESPACE}}}ins",
+            f"{{{WORD_NAMESPACE}}}del",
+            f"{{{WORD_NAMESPACE}}}moveFrom",
+            f"{{{WORD_NAMESPACE}}}moveTo",
+        )
 
     def _is_insertion_wrapper(self, elem: Any) -> bool:
         """Check if an element is a tracked insertion wrapper (w:ins).
@@ -1262,6 +1527,10 @@ class TrackedChangeOperations:
     ) -> None:
         """Split a run and replace a portion with a new element.
 
+        When the run is inside a tracked change wrapper and the replacement is
+        also a tracked change element, the replacement must be placed at
+        paragraph level with the matched portion wrapped appropriately.
+
         Args:
             paragraph: The paragraph containing the run
             run: The run to split
@@ -1275,10 +1544,207 @@ class TrackedChangeOperations:
 
         before_text = run_text[:start_offset]
         after_text = run_text[end_offset:]
-        new_elements = self._build_split_elements(
-            run, before_text, after_text, [replacement_element]
-        )
-        self._replace_run_with_elements(paragraph, run, new_elements)
+        matched_text = run_text[start_offset:end_offset]
+
+        # Check if run is inside a tracked change wrapper
+        actual_parent = run.getparent()
+        if (
+            actual_parent is not None
+            and self._is_tracked_change_wrapper(actual_parent)
+            and self._is_tracked_change_wrapper(replacement_element)
+        ):
+            # Special handling: replacement goes at paragraph level
+            self._split_run_in_wrapper_with_element(
+                paragraph,
+                run,
+                actual_parent,
+                before_text,
+                matched_text,
+                after_text,
+                replacement_element,
+            )
+        else:
+            # Standard handling: insert elements at run level
+            new_elements = self._build_split_elements(
+                run, before_text, after_text, [replacement_element]
+            )
+            self._replace_run_with_elements(paragraph, run, new_elements)
+
+    def _split_run_in_wrapper_with_element(
+        self,
+        paragraph: Any,
+        run: Any,
+        wrapper: Any,
+        before_text: str,
+        matched_text: str,
+        after_text: str,
+        replacement_element: Any,
+    ) -> None:
+        """Split a run inside a wrapper and place replacement at paragraph level.
+
+        This handles partial text matches within a run that's inside a tracked
+        change wrapper. The wrapper must be split to maintain proper structure:
+        - Before text stays in original wrapper (or cloned if needed)
+        - Matched text goes in replacement_element wrapping a cloned wrapper
+        - After text goes in a new cloned wrapper
+
+        Args:
+            paragraph: The containing paragraph
+            run: The run being split
+            wrapper: The tracked change wrapper containing the run
+            before_text: Text before the match
+            matched_text: The matched text being replaced
+            after_text: Text after the match
+            replacement_element: The new element (e.g., w:del)
+        """
+        wrapper_children = list(wrapper)
+        run_index_in_wrapper = wrapper_children.index(run)
+        wrapper_index = list(paragraph).index(wrapper)
+
+        # Create an empty wrapper element with same attributes as replacement
+        empty_replacement = self._create_empty_wrapper_like(replacement_element)
+
+        # Build the elements to insert at paragraph level
+        elements_to_insert: list[Any] = []
+
+        # Content before the run in wrapper stays (if any)
+        if run_index_in_wrapper > 0:
+            before_runs_wrapper = self._clone_wrapper(wrapper)
+            for i in range(run_index_in_wrapper):
+                child_copy = etree.fromstring(etree.tostring(wrapper_children[i]))
+                before_runs_wrapper.append(child_copy)
+            elements_to_insert.append(before_runs_wrapper)
+
+        # Before text from the split run (if any) - stays in wrapper
+        if before_text:
+            before_text_wrapper = self._clone_wrapper(wrapper)
+            before_run = self._create_text_run(before_text, run)
+            before_text_wrapper.append(before_run)
+            elements_to_insert.append(before_text_wrapper)
+
+        # Matched text goes in replacement wrapped in cloned wrapper
+        matched_wrapper = self._clone_wrapper(wrapper)
+        matched_run = self._create_text_run(matched_text, run)
+        if self._is_deletion_wrapper(replacement_element):
+            self._convert_run_text_to_deltext(matched_run)
+        matched_wrapper.append(matched_run)
+        empty_replacement.append(matched_wrapper)
+        elements_to_insert.append(empty_replacement)
+
+        # After text from the split run (if any) - in new wrapper
+        if after_text:
+            after_text_wrapper = self._clone_wrapper(wrapper)
+            after_run = self._create_text_run(after_text, run)
+            after_text_wrapper.append(after_run)
+            elements_to_insert.append(after_text_wrapper)
+
+        # Content after the run in wrapper (if any)
+        if run_index_in_wrapper < len(wrapper_children) - 1:
+            after_runs_wrapper = self._clone_wrapper(wrapper)
+            for i in range(run_index_in_wrapper + 1, len(wrapper_children)):
+                child_copy = etree.fromstring(etree.tostring(wrapper_children[i]))
+                after_runs_wrapper.append(child_copy)
+            elements_to_insert.append(after_runs_wrapper)
+
+        # Remove original wrapper and insert new elements
+        paragraph.remove(wrapper)
+        for i, elem in enumerate(elements_to_insert):
+            paragraph.insert(wrapper_index + i, elem)
+
+    def _split_run_in_wrapper_with_elements(
+        self,
+        paragraph: Any,
+        run: Any,
+        wrapper: Any,
+        before_text: str,
+        after_text: str,
+        replacement_elements: list[Any],
+    ) -> None:
+        """Split a run inside a wrapper and place multiple replacements at paragraph level.
+
+        Similar to _split_run_in_wrapper_with_element but handles multiple replacement
+        elements (e.g., for replace_tracked which produces both w:del and w:ins).
+
+        The structure produced is:
+        - Before text stays in original wrapper type
+        - Each tracked change replacement is placed at paragraph level
+        - w:del wraps a copy of the original wrapper with delText
+        - w:ins is inserted directly at paragraph level
+        - After text stays in original wrapper type
+
+        Args:
+            paragraph: The containing paragraph
+            run: The run being split
+            wrapper: The tracked change wrapper containing the run
+            before_text: Text before the match
+            after_text: Text after the match
+            replacement_elements: The new elements (e.g., [w:del, w:ins])
+        """
+        wrapper_children = list(wrapper)
+        run_index_in_wrapper = wrapper_children.index(run)
+        wrapper_index = list(paragraph).index(wrapper)
+
+        matched_text = self._get_run_text_content(run)[
+            len(before_text) : len(self._get_run_text_content(run)) - len(after_text)
+        ]
+
+        # Build the elements to insert at paragraph level
+        elements_to_insert: list[Any] = []
+
+        # Content before the run in wrapper stays (if any)
+        if run_index_in_wrapper > 0:
+            before_runs_wrapper = self._clone_wrapper(wrapper)
+            for i in range(run_index_in_wrapper):
+                child_copy = etree.fromstring(etree.tostring(wrapper_children[i]))
+                before_runs_wrapper.append(child_copy)
+            elements_to_insert.append(before_runs_wrapper)
+
+        # Before text from the split run (if any) - stays in wrapper
+        if before_text:
+            before_text_wrapper = self._clone_wrapper(wrapper)
+            before_run = self._create_text_run(before_text, run)
+            before_text_wrapper.append(before_run)
+            elements_to_insert.append(before_text_wrapper)
+
+        # Process each replacement element
+        for repl_elem in replacement_elements:
+            if self._is_tracked_change_wrapper(repl_elem):
+                if self._is_deletion_wrapper(repl_elem):
+                    # Create empty del wrapper with same attributes
+                    empty_del = self._create_empty_wrapper_like(repl_elem)
+                    # Clone the original wrapper and put the matched text (with delText) inside
+                    matched_wrapper = self._clone_wrapper(wrapper)
+                    matched_run = self._create_text_run(matched_text, run)
+                    self._convert_run_text_to_deltext(matched_run)
+                    matched_wrapper.append(matched_run)
+                    empty_del.append(matched_wrapper)
+                    elements_to_insert.append(empty_del)
+                else:
+                    # For w:ins elements, insert directly at paragraph level
+                    elements_to_insert.append(repl_elem)
+            else:
+                # Non-tracked-change elements can be inserted directly
+                elements_to_insert.append(repl_elem)
+
+        # After text from the split run (if any) - in new wrapper
+        if after_text:
+            after_text_wrapper = self._clone_wrapper(wrapper)
+            after_run = self._create_text_run(after_text, run)
+            after_text_wrapper.append(after_run)
+            elements_to_insert.append(after_text_wrapper)
+
+        # Content after the run in wrapper (if any)
+        if run_index_in_wrapper < len(wrapper_children) - 1:
+            after_runs_wrapper = self._clone_wrapper(wrapper)
+            for i in range(run_index_in_wrapper + 1, len(wrapper_children)):
+                child_copy = etree.fromstring(etree.tostring(wrapper_children[i]))
+                after_runs_wrapper.append(child_copy)
+            elements_to_insert.append(after_runs_wrapper)
+
+        # Remove original wrapper and insert new elements
+        paragraph.remove(wrapper)
+        for i, elem in enumerate(elements_to_insert):
+            paragraph.insert(wrapper_index + i, elem)
 
     def _split_and_replace_in_run_multiple(
         self,
@@ -1289,6 +1755,10 @@ class TrackedChangeOperations:
         replacement_elements: list[Any],
     ) -> None:
         """Split a run and replace a portion with multiple new elements.
+
+        When the run is inside a tracked change wrapper and replacement_elements
+        contain tracked change elements, those elements must be placed at
+        paragraph level with proper nesting.
 
         Args:
             paragraph: The paragraph containing the run
@@ -1303,10 +1773,33 @@ class TrackedChangeOperations:
 
         before_text = run_text[:start_offset]
         after_text = run_text[end_offset:]
-        new_elements = self._build_split_elements(
-            run, before_text, after_text, replacement_elements
+
+        # Check if run is inside a tracked change wrapper and any replacement
+        # elements are also tracked change wrappers
+        actual_parent = run.getparent()
+        has_tracked_replacement = any(
+            self._is_tracked_change_wrapper(elem) for elem in replacement_elements
         )
-        self._replace_run_with_elements(paragraph, run, new_elements)
+        if (
+            actual_parent is not None
+            and self._is_tracked_change_wrapper(actual_parent)
+            and has_tracked_replacement
+        ):
+            # Special handling: tracked change elements go at paragraph level
+            self._split_run_in_wrapper_with_elements(
+                paragraph,
+                run,
+                actual_parent,
+                before_text,
+                after_text,
+                replacement_elements,
+            )
+        else:
+            # Standard handling: insert elements at run level
+            new_elements = self._build_split_elements(
+                run, before_text, after_text, replacement_elements
+            )
+            self._replace_run_with_elements(paragraph, run, new_elements)
 
     def _replace_multirun_match_with_elements(
         self,

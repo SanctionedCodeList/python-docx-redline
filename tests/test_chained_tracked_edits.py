@@ -543,3 +543,398 @@ class TestSpanningMatches:
         finally:
             docx_path.unlink(missing_ok=True)
             output_path.unlink(missing_ok=True)
+
+
+class TestDelPlacementInsideIns:
+    """Test that w:del elements are correctly placed at paragraph level, not inside w:ins.
+
+    When deleting text that's inside a tracked insertion (w:ins), the w:del element
+    must be placed at the paragraph level, wrapping the w:ins, not inside it.
+
+    Correct structure:
+        <w:del>
+            <w:ins>
+                <w:r><w:delText>deleted text</w:delText></w:r>
+            </w:ins>
+        </w:del>
+
+    Incorrect structure (the bug):
+        <w:ins>
+            <w:del>
+                <w:r><w:delText>deleted text</w:delText></w:r>
+            </w:del>
+        </w:ins>
+
+    See: Issue docx_redline-djww
+    """
+
+    def test_delete_entire_insertion_places_del_at_paragraph_level(self):
+        """Test that deleting entire w:ins content places w:del at paragraph level."""
+        from lxml import etree
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:r><w:t xml:space="preserve">Start </w:t></w:r>
+  <w:ins w:id="0" w:author="Original Author" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>inserted text</w:t></w:r>
+  </w:ins>
+  <w:r><w:t xml:space="preserve"> end.</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            doc = Document(docx_path, author="Reviewer")
+            doc.delete_tracked("inserted text")
+            doc.save(output_path)
+
+            # Read and parse the output XML
+            with zipfile.ZipFile(output_path) as zf:
+                xml_content = zf.read("word/document.xml").decode("utf-8")
+
+            root = etree.fromstring(xml_content.encode("utf-8"))
+            namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+            # Check: w:del should NOT be inside w:ins
+            del_inside_ins = root.xpath(".//w:ins//w:del", namespaces=namespaces)
+            assert len(del_inside_ins) == 0, (
+                "Bug: w:del should not be inside w:ins. "
+                f"Found {len(del_inside_ins)} w:del elements inside w:ins"
+            )
+
+            # Check: w:del should be at paragraph level (direct child of w:p)
+            paragraph = root.find(".//w:p", namespaces)
+            del_at_para_level = paragraph.findall("w:del", namespaces)
+            assert len(del_at_para_level) > 0, "w:del should be at paragraph level"
+
+            # Check: w:ins should be inside w:del
+            ins_inside_del = root.xpath(".//w:del//w:ins", namespaces=namespaces)
+            assert len(ins_inside_del) > 0, "w:ins should be inside w:del for proper nesting"
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+    def test_delete_partial_insertion_places_del_at_paragraph_level(self):
+        """Test that partial deletion inside w:ins places w:del at paragraph level."""
+        from lxml import etree
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:r><w:t xml:space="preserve">Start </w:t></w:r>
+  <w:ins w:id="0" w:author="Original Author" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>the quick brown fox</w:t></w:r>
+  </w:ins>
+  <w:r><w:t xml:space="preserve"> end.</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            doc = Document(docx_path, author="Reviewer")
+            # Delete only "quick " from the inserted text
+            doc.delete_tracked("quick ")
+            doc.save(output_path)
+
+            # Read and parse the output XML
+            with zipfile.ZipFile(output_path) as zf:
+                xml_content = zf.read("word/document.xml").decode("utf-8")
+
+            root = etree.fromstring(xml_content.encode("utf-8"))
+            namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+            # Check: w:del should NOT be inside w:ins
+            del_inside_ins = root.xpath(".//w:ins//w:del", namespaces=namespaces)
+            assert len(del_inside_ins) == 0, (
+                "Bug: w:del should not be inside w:ins. "
+                f"Found {len(del_inside_ins)} w:del elements inside w:ins"
+            )
+
+            # Verify the document text is correct
+            doc2 = Document(output_path)
+            text = doc2.get_text()
+            assert "the " in text
+            assert "brown fox" in text
+            # "quick " should still be in the XML (as delText) but not in visible text
+            assert "quick" not in text or "quick" in xml_content
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+    def test_delete_text_inside_insertion_different_author(self):
+        """Test deletion inside w:ins with different author places w:del correctly."""
+        from lxml import etree
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:ins w:id="0" w:author="Author A" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>text by Author A</w:t></w:r>
+  </w:ins>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            # Different author (Author B) deletes text
+            doc = Document(docx_path, author="Author B")
+            doc.delete_tracked("text by Author A")
+            doc.save(output_path)
+
+            # Read and parse the output XML
+            with zipfile.ZipFile(output_path) as zf:
+                xml_content = zf.read("word/document.xml").decode("utf-8")
+
+            root = etree.fromstring(xml_content.encode("utf-8"))
+            namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+            # Check: w:del should NOT be inside w:ins
+            del_inside_ins = root.xpath(".//w:ins//w:del", namespaces=namespaces)
+            assert len(del_inside_ins) == 0, "w:del should not be inside w:ins"
+
+            # Check: Both authors should be preserved in the document
+            assert "Author A" in xml_content, "Original author should be preserved in w:ins"
+            assert "Author B" in xml_content, "New author should appear in w:del"
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+
+class TestReplacePlacementInsideIns:
+    """Test that replace_tracked elements are correctly placed at paragraph level.
+
+    When replacing text that's inside a tracked insertion (w:ins), both the w:del
+    and w:ins elements from the replacement must be placed at the paragraph level,
+    not inside the original w:ins.
+
+    See: Issue docx_redline-djww
+    """
+
+    def test_replace_entire_insertion_places_elements_at_paragraph_level(self):
+        """Test that replacing entire w:ins content places elements at paragraph level."""
+        from lxml import etree
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:r><w:t xml:space="preserve">Start </w:t></w:r>
+  <w:ins w:id="0" w:author="Original Author" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>inserted text</w:t></w:r>
+  </w:ins>
+  <w:r><w:t xml:space="preserve"> end.</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            doc = Document(docx_path, author="Reviewer")
+            doc.replace_tracked("inserted text", "new text")
+            doc.save(output_path)
+
+            # Read and parse the output XML
+            with zipfile.ZipFile(output_path) as zf:
+                xml_content = zf.read("word/document.xml").decode("utf-8")
+
+            root = etree.fromstring(xml_content.encode("utf-8"))
+            namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+            # Check: w:del should NOT be inside w:ins (except as proper nesting)
+            del_inside_ins_not_in_del = root.xpath(
+                ".//w:ins//w:del[not(ancestor::w:del)]", namespaces=namespaces
+            )
+            assert (
+                len(del_inside_ins_not_in_del) == 0
+            ), "Bug: w:del should not be inside w:ins without proper nesting"
+
+            # Check: w:del should be at paragraph level or properly nesting w:ins
+            del_at_para = root.xpath(".//w:p/w:del", namespaces=namespaces)
+            assert len(del_at_para) > 0, "w:del should be at paragraph level"
+
+            # Check: Original insertion should be preserved inside deletion
+            ins_inside_del = root.xpath(".//w:del//w:ins", namespaces=namespaces)
+            assert len(ins_inside_del) > 0, "Original w:ins should be inside w:del"
+
+            # Verify the document text is correct
+            doc2 = Document(output_path)
+            text = doc2.get_text()
+            assert "new text" in text
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+    def test_replace_partial_insertion_places_elements_at_paragraph_level(self):
+        """Test that partial replacement inside w:ins places elements at paragraph level."""
+        from lxml import etree
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:r><w:t xml:space="preserve">Start </w:t></w:r>
+  <w:ins w:id="0" w:author="Original Author" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>the quick brown fox</w:t></w:r>
+  </w:ins>
+  <w:r><w:t xml:space="preserve"> end.</w:t></w:r>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            doc = Document(docx_path, author="Reviewer")
+            # Replace only "brown" from the inserted text
+            doc.replace_tracked("brown", "red")
+            doc.save(output_path)
+
+            # Read and parse the output XML
+            with zipfile.ZipFile(output_path) as zf:
+                xml_content = zf.read("word/document.xml").decode("utf-8")
+
+            root = etree.fromstring(xml_content.encode("utf-8"))
+            namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+            # Check: w:del should NOT be directly inside w:ins (except proper nesting)
+            del_inside_ins_not_in_del = root.xpath(
+                ".//w:ins//w:del[not(ancestor::w:del)]", namespaces=namespaces
+            )
+            assert (
+                len(del_inside_ins_not_in_del) == 0
+            ), "Bug: w:del should not be inside w:ins without proper nesting"
+
+            # Check: w:del should be at paragraph level
+            del_at_para = root.xpath(".//w:p/w:del", namespaces=namespaces)
+            assert len(del_at_para) > 0, "w:del should be at paragraph level"
+
+            # Verify the document text is correct
+            doc2 = Document(output_path)
+            text = doc2.get_text()
+            assert "the quick" in text
+            assert "red" in text
+            assert "fox" in text
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+    def test_replace_inside_insertion_different_author(self):
+        """Test replacement inside w:ins with different author places elements correctly."""
+        from lxml import etree
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:w16du="http://schemas.microsoft.com/office/word/2023/wordml/word16du">
+<w:body>
+<w:p>
+  <w:ins w:id="0" w:author="Author A" w:date="2025-01-01T00:00:00Z">
+    <w:r><w:t>text by Author A</w:t></w:r>
+  </w:ins>
+</w:p>
+</w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output_path = docx_path.parent / "output.docx"
+
+        try:
+            # Different author (Author B) replaces text
+            doc = Document(docx_path, author="Author B")
+            doc.replace_tracked("text by Author A", "text by Author B")
+            doc.save(output_path)
+
+            # Read and parse the output XML
+            with zipfile.ZipFile(output_path) as zf:
+                xml_content = zf.read("word/document.xml").decode("utf-8")
+
+            root = etree.fromstring(xml_content.encode("utf-8"))
+            namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+            # Check: w:del should NOT be directly inside w:ins
+            del_inside_ins_not_in_del = root.xpath(
+                ".//w:ins//w:del[not(ancestor::w:del)]", namespaces=namespaces
+            )
+            assert len(del_inside_ins_not_in_del) == 0, "w:del should not be inside w:ins"
+
+            # Check: Both authors should be preserved in the document
+            assert "Author A" in xml_content, "Original author should be preserved in w:ins"
+            assert "Author B" in xml_content, "New author should appear in w:del and w:ins"
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+    def test_chained_replacements_produce_valid_structure(self):
+        """Test that chained replacements produce valid OOXML structure."""
+        from lxml import etree
+
+        doc_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body><w:p><w:r><w:t>The quick brown fox.</w:t></w:r></w:p></w:body>
+</w:document>"""
+
+        docx_path = create_test_docx(doc_xml)
+        output1 = docx_path.parent / "output1.docx"
+        output2 = docx_path.parent / "output2.docx"
+
+        try:
+            # Edit 1: brown -> red
+            doc = Document(docx_path, author="Reviewer")
+            doc.replace_tracked("brown", "red")
+            doc.save(output1)
+
+            # Edit 2: red -> blue (editing inside w:ins from previous edit)
+            doc2 = Document(output1, author="Reviewer")
+            doc2.replace_tracked("red", "blue")
+            doc2.save(output2)
+
+            # Read and parse the output XML
+            with zipfile.ZipFile(output2) as zf:
+                xml_content = zf.read("word/document.xml").decode("utf-8")
+
+            root = etree.fromstring(xml_content.encode("utf-8"))
+            namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+            # Check: No w:del should be incorrectly nested inside w:ins
+            del_inside_ins_not_in_del = root.xpath(
+                ".//w:ins//w:del[not(ancestor::w:del)]", namespaces=namespaces
+            )
+            assert (
+                len(del_inside_ins_not_in_del) == 0
+            ), "Bug: w:del should not be inside w:ins without proper nesting"
+
+            # Verify final result
+            doc3 = Document(output2)
+            text = doc3.get_text()
+            assert "blue" in text
+
+        finally:
+            docx_path.unlink(missing_ok=True)
+            output1.unlink(missing_ok=True)
+            output2.unlink(missing_ok=True)

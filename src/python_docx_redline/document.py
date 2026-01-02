@@ -7,6 +7,8 @@ inserting tracked changes, and saving the modified documents.
 
 import io
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
@@ -41,6 +43,7 @@ from .operations.cross_references import (
     CrossReferenceOperations,
     CrossReferenceTarget,
 )
+from .operations.edit_groups import EditGroupRegistry
 from .operations.formatting import FormatOperations
 from .operations.header_footer import HeaderFooterOperations
 from .operations.hyperlinks import HyperlinkInfo, HyperlinkOperations
@@ -2671,6 +2674,207 @@ class Document:
             >>> count = doc.reject_changes(change_type="deletion", author="John Doe")
         """
         return self._change_mgmt.reject_changes(change_type=change_type, author=author)
+
+    # Edit group operations
+
+    @property
+    def _edit_groups(self) -> EditGroupRegistry:
+        """Get the EditGroupRegistry instance (lazy initialization)."""
+        if not hasattr(self, "_edit_groups_instance"):
+            self._edit_groups_instance = EditGroupRegistry()
+        return self._edit_groups_instance
+
+    @contextmanager
+    def edit_group(self, name: str) -> Iterator[None]:
+        """Context manager for grouping related edits.
+
+        All tracked changes made within this context will be associated with
+        the named group. This enables batch operations like rejecting all
+        changes in a group at once.
+
+        Args:
+            name: Unique name for this edit group
+
+        Yields:
+            None
+
+        Raises:
+            ValueError: If another group is already active
+            ValueError: If a group with this name already exists
+
+        Example:
+            >>> with doc.edit_group('condensing round 1'):
+            ...     doc.replace_tracked('long text', 'short')
+            ...     doc.replace_tracked('another section', 'condensed')
+            >>> # Later, reject all changes in that group
+            >>> doc.reject_edit_group('condensing round 1')
+        """
+        self._edit_groups.start_group(name)
+        try:
+            yield
+        finally:
+            self._edit_groups.end_group()
+
+    def reject_edit_group(self, group_name: str) -> int:
+        """Reject all tracked changes in an edit group.
+
+        This method finds all change IDs associated with the named group
+        and rejects them in reverse order (to properly handle nested changes).
+
+        Args:
+            group_name: Name of the edit group to reject
+
+        Returns:
+            Number of changes successfully rejected
+
+        Raises:
+            ValueError: If no group with the given name exists
+
+        Example:
+            >>> with doc.edit_group('round1'):
+            ...     doc.replace_tracked('old', 'new')
+            ...     doc.insert_tracked(' extra', after='text')
+            >>> # Later, reject all changes from round1
+            >>> count = doc.reject_edit_group('round1')
+            >>> print(f"Rejected {count} changes")
+        """
+        ids = self._edit_groups.get_group_ids(group_name)
+        count = 0
+
+        # Reject in reverse order to handle nested elements properly
+        for change_id in reversed(ids):
+            try:
+                self._change_mgmt.reject_change(change_id)
+                count += 1
+            except ValueError:
+                # Change may have already been rejected or no longer exists
+                pass
+
+        self._edit_groups.mark_rejected(group_name)
+        return count
+
+    def accept_edit_group(self, group_name: str) -> int:
+        """Accept all tracked changes in an edit group.
+
+        This method finds all change IDs associated with the named group
+        and accepts them in reverse order (to properly handle nested changes).
+
+        Args:
+            group_name: Name of the edit group to accept
+
+        Returns:
+            Number of changes successfully accepted
+
+        Raises:
+            ValueError: If no group with the given name exists
+
+        Example:
+            >>> with doc.edit_group('round1'):
+            ...     doc.replace_tracked('old', 'new')
+            ...     doc.insert_tracked(' extra', after='text')
+            >>> # Later, accept all changes from round1
+            >>> count = doc.accept_edit_group('round1')
+            >>> print(f"Accepted {count} changes")
+        """
+        ids = self._edit_groups.get_group_ids(group_name)
+        count = 0
+
+        # Accept in reverse order to handle nested elements properly
+        for change_id in reversed(ids):
+            try:
+                self._change_mgmt.accept_change(change_id)
+                count += 1
+            except ValueError:
+                # Change may have already been accepted or no longer exists
+                pass
+
+        return count
+
+    # Accept/Reject by text content
+
+    def reject_changes_containing(
+        self,
+        text: str,
+        *,
+        change_type: str | None = None,
+        author: str | None = None,
+        match_case: bool = False,
+        regex: bool = False,
+    ) -> int:
+        """Reject tracked changes containing specified text.
+
+        Searches the text content of tracked changes and rejects those
+        containing the specified text. Useful for targeted rejection of
+        changes by content rather than by index/ID.
+
+        Args:
+            text: String to search for in change content.
+            change_type: Optional filter by change type. Valid values:
+                         "insertion", "deletion", "format_run", "format_paragraph",
+                         or None for all types.
+            author: Optional filter by author name.
+            match_case: If False (default), case-insensitive search.
+            regex: If True, treat text as a regex pattern.
+
+        Returns:
+            Number of changes rejected.
+
+        Example:
+            >>> # Reject deletions containing "VersusLaw"
+            >>> count = doc.reject_changes_containing("VersusLaw", change_type="deletion")
+            >>> print(f"Rejected {count} changes containing 'VersusLaw'")
+            >>>
+            >>> # Reject all changes containing "confidential" by any author
+            >>> count = doc.reject_changes_containing("confidential")
+            >>>
+            >>> # Reject changes matching a regex pattern
+            >>> count = doc.reject_changes_containing(r"Section \\d+", regex=True)
+        """
+        return self._change_mgmt.reject_changes_containing(
+            text, change_type=change_type, author=author, match_case=match_case, regex=regex
+        )
+
+    def accept_changes_containing(
+        self,
+        text: str,
+        *,
+        change_type: str | None = None,
+        author: str | None = None,
+        match_case: bool = False,
+        regex: bool = False,
+    ) -> int:
+        """Accept tracked changes containing specified text.
+
+        Searches the text content of tracked changes and accepts those
+        containing the specified text. Useful for targeted acceptance of
+        changes by content rather than by index/ID.
+
+        Args:
+            text: String to search for in change content.
+            change_type: Optional filter by change type. Valid values:
+                         "insertion", "deletion", "format_run", "format_paragraph",
+                         or None for all types.
+            author: Optional filter by author name.
+            match_case: If False (default), case-insensitive search.
+            regex: If True, treat text as a regex pattern.
+
+        Returns:
+            Number of changes accepted.
+
+        Example:
+            >>> # Accept insertions containing "approved"
+            >>> count = doc.accept_changes_containing("approved", change_type="insertion")
+            >>> print(f"Accepted {count} changes containing 'approved'")
+            >>>
+            >>> # Accept all changes containing specific clause text
+            >>> count = doc.accept_changes_containing("Section 2.1")
+            >>>
+            >>> # Accept changes matching a regex pattern
+            >>> count = doc.accept_changes_containing(r"v\\d+\\.\\d+", regex=True)
+        """
+        return self._change_mgmt.accept_changes_containing(
+            text, change_type=change_type, author=author, match_case=match_case, regex=regex
+        )
 
     @property
     def tracked_changes(self) -> list["TrackedChange"]:

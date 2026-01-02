@@ -258,4 +258,4 @@ for docx_file in Path("contracts/").glob("*.docx"):
 ## Reference
 
 - [CriticMarkup Specification](http://criticmarkup.com/)
-- [python-docx-redline Documentation](https://github.com/parkerhancock/python_docx_redline)
+- [python-docx-redline Documentation](https://github.com/SanctionedCodeList/python-docx-redline)

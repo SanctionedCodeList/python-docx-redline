@@ -1,7 +1,7 @@
 site_name: python-docx-redline
 site_description: High-level Python API for editing Word documents with tracked changes
-repo_url: https://github.com/parkerhancock/python-docx-redline
-repo_name: parkerhancock/python-docx-redline
+repo_url: https://github.com/SanctionedCodeList/python-docx-redline
+repo_name: SanctionedCodeList/python-docx-redline
 
 theme:
   name: material
@@ -67,6 +67,6 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/parkerhancock/python-docx-redline
+      link: https://github.com/SanctionedCodeList/python-docx-redline
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/python-docx-redline/

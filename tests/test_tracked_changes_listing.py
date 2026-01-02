@@ -827,3 +827,342 @@ class TestTrackedChangeWithInsertions:
 
         finally:
             docx_path.unlink()
+
+
+class TestRejectChangesContaining:
+    """Tests for reject_changes_containing() method."""
+
+    def test_reject_changes_containing_basic(self):
+        """Test basic text-based rejection of tracked changes."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # The first insertion contains " Added by Alice."
+            # Reject changes containing "Added by Alice"
+            count = doc.reject_changes_containing("Added by Alice")
+            assert count == 1
+
+            # Verify the change was rejected - should have 4 remaining
+            remaining = doc.get_tracked_changes()
+            assert len(remaining) == 4
+
+        finally:
+            docx_path.unlink()
+
+    def test_reject_changes_containing_case_insensitive(self):
+        """Test case-insensitive text search for rejection."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # The deletion contains "removed text" - test case insensitive search
+            count_lower = doc.reject_changes_containing("REMOVED")
+            # With case-insensitive search (default), should find it
+            assert count_lower == 1
+
+        finally:
+            docx_path.unlink()
+
+    def test_reject_changes_containing_case_sensitive(self):
+        """Test case-sensitive text search for rejection."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # The deletion contains "removed text" - uppercase should NOT match
+            count = doc.reject_changes_containing("REMOVED", match_case=True)
+            assert count == 0
+
+            # Correct case should match
+            count = doc.reject_changes_containing("removed", match_case=True)
+            assert count == 1
+
+        finally:
+            docx_path.unlink()
+
+    def test_reject_changes_containing_with_type_filter(self):
+        """Test rejection with change_type filter."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Count deletions before
+            deletions_before = len(doc.get_tracked_changes(change_type="deletion"))
+            assert deletions_before == 1
+
+            # Reject deletions containing "removed"
+            count = doc.reject_changes_containing("removed", change_type="deletion")
+            assert count == 1
+
+            # Deletions should be gone
+            deletions_after = len(doc.get_tracked_changes(change_type="deletion"))
+            assert deletions_after == 0
+
+            # Insertions should still exist
+            insertions = doc.get_tracked_changes(change_type="insertion")
+            assert len(insertions) == 2
+
+        finally:
+            docx_path.unlink()
+
+    def test_reject_changes_containing_with_author_filter(self):
+        """Test rejection with author filter."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Bob has a deletion with "removed text"
+            count = doc.reject_changes_containing("removed", author="Bob")
+            assert count == 1
+
+            # Alice doesn't have any changes with "removed"
+            # Reload doc to test
+            doc2 = Document(docx_path)
+            count = doc2.reject_changes_containing("removed", author="Alice")
+            assert count == 0
+
+        finally:
+            docx_path.unlink()
+
+    def test_reject_changes_containing_no_matches(self):
+        """Test rejection when no changes match the text."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Search for text that doesn't exist in any change
+            count = doc.reject_changes_containing("nonexistent text xyz")
+            assert count == 0
+
+            # All original changes should still exist
+            assert len(doc.get_tracked_changes()) == 5
+
+        finally:
+            docx_path.unlink()
+
+    def test_reject_changes_containing_insertion_text(self):
+        """Test rejection of insertions by text content."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Find insertions containing "Alice" in the text
+            # The first insertion has " Added by Alice."
+            count = doc.reject_changes_containing("Added by Alice", change_type="insertion")
+            assert count == 1
+
+            # Should have one fewer insertion
+            insertions = doc.get_tracked_changes(change_type="insertion")
+            assert len(insertions) == 1
+
+        finally:
+            docx_path.unlink()
+
+
+class TestAcceptChangesContaining:
+    """Tests for accept_changes_containing() method."""
+
+    def test_accept_changes_containing_basic(self):
+        """Test basic text-based acceptance of tracked changes."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Accept changes containing "insertions" (the third insertion)
+            count = doc.accept_changes_containing("insertions")
+            assert count == 1
+
+            # The insertion should be accepted (unwrapped)
+            remaining_insertions = doc.get_tracked_changes(change_type="insertion")
+            assert len(remaining_insertions) == 1  # Was 2, now 1
+
+        finally:
+            docx_path.unlink()
+
+    def test_accept_changes_containing_with_type_filter(self):
+        """Test acceptance with change_type filter."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Accept insertions containing "Alice"
+            count = doc.accept_changes_containing("Alice", change_type="insertion")
+            assert count == 1
+
+            # Should have one fewer insertion
+            insertions = doc.get_tracked_changes(change_type="insertion")
+            assert len(insertions) == 1
+
+            # Other change types should be unaffected
+            deletions = doc.get_tracked_changes(change_type="deletion")
+            assert len(deletions) == 1
+
+        finally:
+            docx_path.unlink()
+
+    def test_accept_changes_containing_case_insensitive(self):
+        """Test case-insensitive acceptance."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Search for uppercase version - should still match
+            count = doc.accept_changes_containing("MORE INSERTIONS")
+            assert count == 1
+
+        finally:
+            docx_path.unlink()
+
+    def test_accept_changes_containing_no_matches(self):
+        """Test acceptance when no changes match."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Search for non-existent text
+            count = doc.accept_changes_containing("xyz123nonexistent")
+            assert count == 0
+
+            # All changes should still exist
+            assert len(doc.get_tracked_changes()) == 5
+
+        finally:
+            docx_path.unlink()
+
+    def test_accept_changes_containing_with_author_and_type(self):
+        """Test acceptance with both author and type filters."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Accept Bob's deletion containing "removed"
+            count = doc.accept_changes_containing("removed", change_type="deletion", author="Bob")
+            assert count == 1
+
+            # Bob's deletion should be gone
+            bob_deletions = doc.get_tracked_changes(change_type="deletion", author="Bob")
+            assert len(bob_deletions) == 0
+
+        finally:
+            docx_path.unlink()
+
+
+class TestChangesContainingRegex:
+    """Tests for regex support in accept/reject_changes_containing() methods."""
+
+    def test_reject_changes_containing_regex_basic(self):
+        """Test basic regex pattern matching for rejection."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Match "Added by Alice" using regex pattern
+            count = doc.reject_changes_containing(r"Added by \w+", regex=True)
+            assert count == 1
+
+            # Verify the change was rejected
+            remaining = doc.get_tracked_changes()
+            assert len(remaining) == 4
+
+        finally:
+            docx_path.unlink()
+
+    def test_reject_changes_containing_regex_case_insensitive(self):
+        """Test regex with case-insensitive matching (default)."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Match "removed" with uppercase pattern - should work with case insensitive
+            count = doc.reject_changes_containing(r"REMOVED\s+\w+", regex=True)
+            assert count == 1
+
+        finally:
+            docx_path.unlink()
+
+    def test_reject_changes_containing_regex_case_sensitive(self):
+        """Test regex with case-sensitive matching."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Uppercase pattern should NOT match when case-sensitive
+            count = doc.reject_changes_containing(r"REMOVED\s+\w+", regex=True, match_case=True)
+            assert count == 0
+
+            # Correct case pattern should match
+            count = doc.reject_changes_containing(r"removed\s+\w+", regex=True, match_case=True)
+            assert count == 1
+
+        finally:
+            docx_path.unlink()
+
+    def test_reject_changes_containing_regex_with_type_filter(self):
+        """Test regex matching with change_type filter."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Match insertions containing any word with "tion" suffix
+            count = doc.reject_changes_containing(r"\w+tions?", regex=True, change_type="insertion")
+            # "more insertions" should match
+            assert count == 1
+
+            # Verify only insertion was affected
+            remaining_insertions = doc.get_tracked_changes(change_type="insertion")
+            assert len(remaining_insertions) == 1
+
+        finally:
+            docx_path.unlink()
+
+    def test_accept_changes_containing_regex_basic(self):
+        """Test basic regex pattern matching for acceptance."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Match insertions with "more" followed by any word
+            count = doc.accept_changes_containing(r"more\s+\w+", regex=True)
+            assert count == 1
+
+            # Verify change was accepted
+            remaining = doc.get_tracked_changes()
+            assert len(remaining) == 4
+
+        finally:
+            docx_path.unlink()
+
+    def test_accept_changes_containing_regex_no_matches(self):
+        """Test regex that matches nothing."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Pattern that won't match any change content
+            count = doc.accept_changes_containing(r"\d{10}", regex=True)
+            assert count == 0
+
+            # All changes should still exist
+            assert len(doc.get_tracked_changes()) == 5
+
+        finally:
+            docx_path.unlink()
+
+    def test_reject_changes_containing_regex_with_author_filter(self):
+        """Test regex with author filter combined."""
+        docx_path = create_test_docx(DOCUMENT_WITH_TRACKED_CHANGES)
+        try:
+            doc = Document(docx_path)
+
+            # Reject Bob's changes matching pattern
+            count = doc.reject_changes_containing(r"removed.*", regex=True, author="Bob")
+            assert count == 1
+
+            # Alice should not be affected
+            doc2 = Document(docx_path)
+            count = doc2.reject_changes_containing(r"removed.*", regex=True, author="Alice")
+            assert count == 0
+
+        finally:
+            docx_path.unlink()

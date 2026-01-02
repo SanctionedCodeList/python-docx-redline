@@ -1029,9 +1029,7 @@ class CrossReferenceOperations:
 
         return None
 
-    def _create_bookmark_at_paragraph(
-        self, name: str, para: etree._Element
-    ) -> None:
+    def _create_bookmark_at_paragraph(self, name: str, para: etree._Element) -> None:
         """Create a hidden _Ref bookmark at a paragraph.
 
         The bookmark wraps the entire paragraph content (all runs).
@@ -1194,9 +1192,7 @@ class CrossReferenceOperations:
         # Create a new _Ref bookmark at the paragraph
         bookmark_name = self._generate_ref_bookmark_name()
         self._create_bookmark_at_paragraph(bookmark_name, caption_para)
-        logger.info(
-            f"Created bookmark '{bookmark_name}' for {seq_id.lower()} '{identifier}'"
-        )
+        logger.info(f"Created bookmark '{bookmark_name}' for {seq_id.lower()} '{identifier}'")
 
         return bookmark_name, None
 
@@ -1378,7 +1374,7 @@ class CrossReferenceOperations:
         for sep in [":", "-", "."]:
             if sep in full_text:
                 idx = full_text.index(sep)
-                return full_text[idx + 1:].strip()
+                return full_text[idx + 1 :].strip()
 
         return ""
 
@@ -1637,11 +1633,13 @@ class CrossReferenceOperations:
 
         if not matches:
             from ..errors import TextNotFoundError
+
             scope_str = str(scope) if scope is not None and not isinstance(scope, str) else scope
             raise TextNotFoundError(anchor_text, scope_str)
 
         if len(matches) > 1:
             from ..errors import AmbiguousTextError
+
             raise AmbiguousTextError(anchor_text, matches)
 
         match = matches[0]
@@ -1719,6 +1717,7 @@ class CrossReferenceOperations:
         bookmark_name, error_msg = self._resolve_note_target(note_type, note_id_str)
         if error_msg is not None:
             from ..errors import CrossReferenceTargetNotFoundError
+
             raise CrossReferenceTargetNotFoundError(f"{note_type}:{note_id}", [])
 
         # Build switches for NOTEREF
@@ -1749,11 +1748,13 @@ class CrossReferenceOperations:
 
         if not matches:
             from ..errors import TextNotFoundError
+
             scope_str = str(scope) if scope is not None and not isinstance(scope, str) else scope
             raise TextNotFoundError(anchor_text, scope_str)
 
         if len(matches) > 1:
             from ..errors import AmbiguousTextError
+
             raise AmbiguousTextError(anchor_text, matches)
 
         match = matches[0]
@@ -1907,8 +1908,7 @@ class CrossReferenceOperations:
                 fld_char.set(w("dirty"), "true")
                 count += 1
                 logger.debug(
-                    f"Marked {parsed['field_type']} field to "
-                    f"'{parsed['bookmark']}' as dirty"
+                    f"Marked {parsed['field_type']} field to '{parsed['bookmark']}' as dirty"
                 )
 
         logger.info(f"Marked {count} cross-reference fields as dirty")

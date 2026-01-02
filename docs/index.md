@@ -37,5 +37,5 @@ doc.save("contract_edited.docx")
 
 ## Links
 
-- [GitHub Repository](https://github.com/parkerhancock/python-docx-redline)
+- [GitHub Repository](https://github.com/SanctionedCodeList/python-docx-redline)
 - [PyPI Package](https://pypi.org/project/python-docx-redline/)
