@@ -1,6 +1,6 @@
 ---
 name: docx
-description: "Word document creation, editing, and manipulation. Use for .docx files: creating documents, editing with or without tracked changes, comments, footnotes, Table of Contents, cross-references, text extraction, template population, CriticMarkup workflows, or live editing in Microsoft Word. Three sub-skills: design/ for professional document writing, python/ for python-docx/python-docx-redline operations, office-bridge/ for live Word editing via Office.js add-in."
+description: "Word document creation, editing, and manipulation with Python. Use for .docx files: creating documents, editing with or without tracked changes, comments, footnotes, Table of Contents, cross-references, text extraction, template population, CriticMarkup workflows. Two sub-skills: design/ for professional document writing, python/ for python-docx/python-docx-redline operations. For live editing in Microsoft Word via add-in, use the office-bridge skill instead."
 ---
 
 # DOCX Skill
@@ -25,32 +25,31 @@ Report bugs, unexpected behavior, or feature requests as issues on the repositor
 |-------------------|-------|
 | **Write a professional document** (memo, report, proposal) | [design/](./design/SKILL.md) |
 | **Create or edit .docx files with Python** | [python/](./python/SKILL.md) |
-| **Edit live in Microsoft Word** (via add-in) | [office-bridge/](./office-bridge/SKILL.md) |
+| **Edit live in Microsoft Word** (via add-in) | Use the `office-bridge` skill |
 
 ### Python Library Tasks
 
 | Task | Tool | Guide |
 |------|------|-------|
-| **Read/extract text** | pandoc or python-docx-redline | [reading.md](./reading.md) |
-| **Structured document view (YAML)** | AccessibilityTree | [accessibility.md](./accessibility.md) |
-| **Large document navigation** | OutlineTree | [accessibility.md](./accessibility.md) |
-| **Ref-based precise editing** | python-docx-redline refs | [accessibility.md](./accessibility.md) |
-| **Live Word editing (add-in)** | Office Bridge DocTree | [office-bridge/](./office-bridge/SKILL.md) |
-| **Create new document** | python-docx | [creation.md](./creation.md) |
-| **Generate from data/template** | DocxBuilder | [templating.md](./templating.md) |
-| **Edit existing document** | python-docx-redline | [editing.md](./editing.md) |
-| **Edit with tracked changes** | python-docx-redline (track=True) | [tracked-changes.md](./tracked-changes.md) |
-| **Delete entire section** | python-docx-redline delete_section() | [editing.md](./editing.md#section-operations) |
-| **Add comments** | python-docx-redline | [comments.md](./comments.md) |
-| **Footnotes/endnotes** | python-docx-redline | [footnotes.md](./footnotes.md) |
-| **Insert or edit hyperlinks** | python-docx-redline | [hyperlinks.md](./hyperlinks.md) |
+| **Read/extract text** | pandoc or python-docx-redline | [python/reading.md](./python/reading.md) |
+| **Structured document view (YAML)** | AccessibilityTree | [python/accessibility.md](./python/accessibility.md) |
+| **Large document navigation** | OutlineTree | [python/accessibility.md](./python/accessibility.md) |
+| **Ref-based precise editing** | python-docx-redline refs | [python/accessibility.md](./python/accessibility.md) |
+| **Create new document** | python-docx | [python/creation.md](./python/creation.md) |
+| **Generate from data/template** | DocxBuilder | [python/templating.md](./python/templating.md) |
+| **Edit existing document** | python-docx-redline | [python/editing.md](./python/editing.md) |
+| **Edit with tracked changes** | python-docx-redline (track=True) | [python/tracked-changes.md](./python/tracked-changes.md) |
+| **Delete entire section** | python-docx-redline delete_section() | [python/editing.md](./python/editing.md#section-operations) |
+| **Add comments** | python-docx-redline | [python/comments.md](./python/comments.md) |
+| **Footnotes/endnotes** | python-docx-redline | [python/footnotes.md](./python/footnotes.md) |
+| **Insert or edit hyperlinks** | python-docx-redline | [python/hyperlinks.md](./python/hyperlinks.md) |
 | **Table of Contents** | python-docx-redline | [toc.md](./toc.md) |
 | **Cross-references** | python-docx-redline | [cross-references.md](./cross-references.md) |
 | **Bookmarks** | python-docx-redline | [cross-references.md](./cross-references.md) |
-| **Create or manage styles** | python-docx-redline StyleManager | [styles.md](./styles.md) |
-| **CriticMarkup workflow** | python-docx-redline | [criticmarkup.md](./criticmarkup.md) |
-| **Use both libraries together** | from_python_docx / to_python_docx | [integration.md](./integration.md) |
-| **Complex XML manipulation** | Raw OOXML | [ooxml.md](./ooxml.md) |
+| **Create or manage styles** | python-docx-redline StyleManager | [python/styles.md](./python/styles.md) |
+| **CriticMarkup workflow** | python-docx-redline | [python/criticmarkup.md](./python/criticmarkup.md) |
+| **Use both libraries together** | from_python_docx / to_python_docx | [python/integration.md](./python/integration.md) |
+| **Complex XML manipulation** | Raw OOXML | [python/ooxml.md](./python/ooxml.md) |
 
 ## Quick Reference
 
@@ -70,22 +69,12 @@ doc.replace("30 days", "45 days", track=True)  # Tracked change
 doc.save("redlined.docx")
 ```
 
-### Office Bridge Quick Start
-
-```typescript
-await Word.run(async (context) => {
-  const tree = await DocTree.buildTree(context);
-  await DocTree.replaceByRef(context, "p:5", "New text", { track: true });
-});
-```
-
 ## Sub-Skills
 
 | Folder | Purpose |
 |--------|---------|
 | [design/](./design/SKILL.md) | Document design: action headings, pyramid structure, industry styles, AI antipatterns |
 | [python/](./python/SKILL.md) | Python libraries: python-docx (creation), python-docx-redline (editing, tracked changes) |
-| [office-bridge/](./office-bridge/SKILL.md) | Word add-in: live editing via Office.js with DocTree accessibility layer |
 
 ## Code Examples
 
@@ -195,21 +184,21 @@ Guidance on creating effective, professional documents:
 
 Detailed workflows for document manipulation:
 
-- **[accessibility.md](./accessibility.md)** — DocTree accessibility layer: YAML output, refs, OutlineTree for large docs
-- **[templating.md](./templating.md)** — DocxBuilder: generate documents from data with markdown support
-- **[creation.md](./creation.md)** — Creating new documents with style templates
-- **[reading.md](./reading.md)** — Text extraction, find_all(), document structure, tables
-- **[editing.md](./editing.md)** — All editing with python-docx-redline (both tracked and untracked)
-- **[tracked-changes.md](./tracked-changes.md)** — Tracked changes details: insert/delete/replace, regex, scopes, batch ops
-- **[comments.md](./comments.md)** — Adding comments, occurrence parameter, replies, resolution
-- **[footnotes.md](./footnotes.md)** — Footnotes/endnotes: CRUD, tracked changes, rich content, search
-- **[hyperlinks.md](./hyperlinks.md)** — Hyperlink operations: insert, edit, remove in body, headers, footers, footnotes
+- **[python/accessibility.md](./python/accessibility.md)** — DocTree accessibility layer: YAML output, refs, OutlineTree for large docs
+- **[python/templating.md](./python/templating.md)** — DocxBuilder: generate documents from data with markdown support
+- **[python/creation.md](./python/creation.md)** — Creating new documents with style templates
+- **[python/reading.md](./python/reading.md)** — Text extraction, find_all(), document structure, tables
+- **[python/editing.md](./python/editing.md)** — All editing with python-docx-redline (both tracked and untracked)
+- **[python/tracked-changes.md](./python/tracked-changes.md)** — Tracked changes details: insert/delete/replace, regex, scopes, batch ops
+- **[python/comments.md](./python/comments.md)** — Adding comments, occurrence parameter, replies, resolution
+- **[python/footnotes.md](./python/footnotes.md)** — Footnotes/endnotes: CRUD, tracked changes, rich content, search
+- **[python/hyperlinks.md](./python/hyperlinks.md)** — Hyperlink operations: insert, edit, remove in body, headers, footers, footnotes
 - **[toc.md](./toc.md)** — Table of Contents: insert, inspect, update, remove TOC
 - **[cross-references.md](./cross-references.md)** — Cross-references and bookmarks: reference headings, figures, tables, notes
-- **[styles.md](./styles.md)** — Style management: reading, creating, ensuring styles exist, formatting options
-- **[criticmarkup.md](./criticmarkup.md)** — Export/import with CriticMarkup, round-trip workflows
-- **[integration.md](./integration.md)** — python-docx integration: from_python_docx, to_python_docx, workflows
-- **[ooxml.md](./ooxml.md)** — Raw XML manipulation for complex scenarios
+- **[python/styles.md](./python/styles.md)** — Style management: reading, creating, ensuring styles exist, formatting options
+- **[python/criticmarkup.md](./python/criticmarkup.md)** — Export/import with CriticMarkup, round-trip workflows
+- **[python/integration.md](./python/integration.md)** — python-docx integration: from_python_docx, to_python_docx, workflows
+- **[python/ooxml.md](./python/ooxml.md)** — Raw XML manipulation for complex scenarios
 
 ---
 
