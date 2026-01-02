@@ -41,16 +41,16 @@ cp "$(pwd)/office-bridge/addins/powerpoint/manifest.xml" \
 
 **Outlook (Different Process):**
 
-Outlook does NOT use the wef folder. Instead, sideload via the web-based Add-Ins dialog:
+Outlook does NOT use the wef folder. Instead, sideload from the desktop app:
 
-1. Open https://aka.ms/olksideload in your browser
-2. Sign in if prompted - the "Add-Ins for Outlook" dialog appears
+1. In Outlook, go to **...** (More actions) menu or **Home** tab
+2. Select **Get Add-ins**
 3. Select **My add-ins** → scroll to **Custom Addins** section
 4. Click **Add a custom add-in** → **Add from File**
 5. Select `office-bridge/addins/outlook/manifest.xml`
 6. Accept the prompts
 
-The add-in syncs to your desktop Outlook automatically.
+Alternative: Use https://aka.ms/olksideload in your browser if the desktop option isn't available.
 
 **Note (Word/Excel/PowerPoint):** After updating the add-in code, you must re-copy the manifest for changes to take effect.
 
