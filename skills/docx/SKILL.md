@@ -25,7 +25,7 @@ Report bugs, unexpected behavior, or feature requests as issues on the repositor
 |-------------------|-------|
 | **Write a professional document** (memo, report, proposal) | [design/](./design/SKILL.md) |
 | **Create or edit .docx files with Python** | [python/](./python/SKILL.md) |
-| **Edit live in Microsoft Word** (via add-in) | Install [office-bridge](https://github.com/parkerhancock/office-bridge) plugin |
+| **Edit live in Microsoft Word** (via add-in) | Install [office-bridge](https://github.com/SanctionedCodeList/office-bridge) plugin |
 
 ### Python Library Tasks
 
