@@ -42,6 +42,16 @@ export interface PageImage {
   data: string;  // data:image/png;base64,...
 }
 
+export interface SlideImageOptions {
+  width?: number;   // Target width in pixels
+  height?: number;  // Target height in pixels (default: 600)
+}
+
+export interface SlideImage {
+  slide: number;
+  data: string;  // data:image/png;base64,...
+}
+
 export interface ConsoleEntry {
   level: 'log' | 'warn' | 'error' | 'info';
   message: string;
@@ -260,6 +270,35 @@ export interface ExcelSession extends OfficeSession {
 // PowerPoint-specific session
 export interface PowerPointSession extends OfficeSession {
   readonly app: 'powerpoint';
+
+  /**
+   * Get all slides as images.
+   *
+   * @param options - Size options
+   * @returns Array of slide images with base64 data URLs
+   *
+   * @example
+   * ```typescript
+   * const slides = await ppt.getSlideImages();
+   * console.log(`Presentation has ${slides.length} slides`);
+   * ```
+   */
+  getSlideImages(options?: SlideImageOptions): Promise<SlideImage[]>;
+
+  /**
+   * Get a single slide as an image.
+   *
+   * @param slideNum - Slide number (1-indexed)
+   * @param options - Size options
+   * @returns Slide image or undefined if slide doesn't exist
+   *
+   * @example
+   * ```typescript
+   * const slide = await ppt.getSlideImage(1);
+   * if (slide) console.log('First slide image:', slide.data);
+   * ```
+   */
+  getSlideImage(slideNum: number, options?: SlideImageOptions): Promise<SlideImage | undefined>;
 }
 
 // Outlook-specific session
@@ -354,7 +393,7 @@ export async function connect(options: ConnectOptions = {}): Promise<BridgeClien
       }
       const data = await res.json() as { sessions: SessionInfo[] };
 
-      return data.sessions.map(info => createSessionHandle(baseUrl, info) as PowerPointSession);
+      return data.sessions.map(info => createPowerPointSessionHandle(baseUrl, info));
     },
 
     async outlook(): Promise<OutlookSession[]> {
@@ -547,6 +586,84 @@ function createWordDocumentHandle(baseUrl: string, info: SessionInfo): WordDocum
     async getPageImage(pageNum: number, options?: Omit<PageImageOptions, 'pages'>): Promise<PageImage | undefined> {
       const pages = await this.getPageImages({ ...options, pages: [pageNum] });
       return pages.find(p => p.page === pageNum);
+    },
+  };
+}
+
+function createPowerPointSessionHandle(baseUrl: string, info: SessionInfo): PowerPointSession {
+  const executeJs = createExecuteJs(baseUrl, info.id);
+
+  return {
+    id: info.id,
+    app: 'powerpoint',
+    filename: info.filename,
+    path: info.path,
+    connectedAt: new Date(info.connectedAt),
+    status: info.status,
+
+    executeJs,
+
+    // =========================================================================
+    // Slide Image Methods
+    // =========================================================================
+
+    async getSlideImages(options?: SlideImageOptions): Promise<SlideImage[]> {
+      const height = options?.height ?? 600;
+      const width = options?.width;
+
+      const optionsJson = JSON.stringify({ height, width });
+      const code = `
+        const options = ${optionsJson};
+        const presentation = context.presentation;
+        const slideCount = presentation.slides.getCount();
+        await context.sync();
+
+        const images = [];
+        for (let i = 0; i < slideCount.value; i++) {
+          const slide = presentation.slides.getItemAt(i);
+          const imageOpts = {};
+          if (options.height) imageOpts.height = options.height;
+          if (options.width) imageOpts.width = options.width;
+          const imageResult = slide.getImageAsBase64(imageOpts);
+          await context.sync();
+          images.push({
+            slide: i + 1,
+            data: 'data:image/png;base64,' + imageResult.value
+          });
+        }
+        return images;
+      `;
+      return executeJs<SlideImage[]>(code);
+    },
+
+    async getSlideImage(slideNum: number, options?: SlideImageOptions): Promise<SlideImage | undefined> {
+      const height = options?.height ?? 600;
+      const width = options?.width;
+
+      const optionsJson = JSON.stringify({ height, width, slideNum });
+      const code = `
+        const options = ${optionsJson};
+        const presentation = context.presentation;
+        const slideCount = presentation.slides.getCount();
+        await context.sync();
+
+        if (options.slideNum < 1 || options.slideNum > slideCount.value) {
+          return undefined;
+        }
+
+        const slide = presentation.slides.getItemAt(options.slideNum - 1);
+        const imageOpts = {};
+        if (options.height) imageOpts.height = options.height;
+        if (options.width) imageOpts.width = options.width;
+        const imageResult = slide.getImageAsBase64(imageOpts);
+        await context.sync();
+
+        return {
+          slide: options.slideNum,
+          data: 'data:image/png;base64,' + imageResult.value
+        };
+      `;
+      return executeJs<SlideImage | undefined>(code);
     },
   };
 }
