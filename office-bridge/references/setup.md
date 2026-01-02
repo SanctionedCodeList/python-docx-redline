@@ -39,21 +39,34 @@ cp "$(pwd)/office-bridge/addins/powerpoint/manifest.xml" \
   ~/Library/Containers/com.microsoft.Powerpoint/Data/Documents/wef/manifest.xml
 ```
 
-**Outlook:**
-```bash
-mkdir -p ~/Library/Containers/com.microsoft.Outlook/Data/Documents/wef
-cp "$(pwd)/office-bridge/addins/outlook/manifest.xml" \
-  ~/Library/Containers/com.microsoft.Outlook/Data/Documents/wef/manifest.xml
-```
+**Outlook (Different Process):**
 
-**Note:** After updating the add-in code, you must re-copy the manifest for changes to take effect.
+Outlook does NOT use the wef folder. Instead, sideload via the web-based Add-Ins dialog:
+
+1. Open https://aka.ms/olksideload in your browser
+2. Sign in if prompted - the "Add-Ins for Outlook" dialog appears
+3. Select **My add-ins** → scroll to **Custom Addins** section
+4. Click **Add a custom add-in** → **Add from File**
+5. Select `office-bridge/addins/outlook/manifest.xml`
+6. Accept the prompts
+
+The add-in syncs to your desktop Outlook automatically.
+
+**Note (Word/Excel/PowerPoint):** After updating the add-in code, you must re-copy the manifest for changes to take effect.
 
 After sideloading, **quit the app completely** (Cmd+Q) and reopen.
 
 **Finding the add-in in the app:**
+
+*Word/Excel/PowerPoint:*
 - Go to **Home** tab → **Add-ins** (or **Insert** → **Add-ins** in some versions)
 - The "Office Bridge" add-in appears under the **Developer** or **Custom Add-ins** section
 - Click it to open the taskpane
+
+*Outlook:*
+- Open or compose an email/appointment
+- Look for "Show Bridge" button in the ribbon (Home tab)
+- Or check the **...** (More actions) menu
 
 **Troubleshooting macOS sideloading:**
 - If the add-in doesn't appear, ensure the dev server is running (`npm run dev-server` in the add-in folder)
@@ -61,9 +74,16 @@ After sideloading, **quit the app completely** (Cmd+Q) and reopen.
 - Try removing and re-adding the symlink if the add-in fails to load
 
 **Removing a sideloaded add-in:**
+
+*Word/Excel/PowerPoint:*
 ```bash
 rm ~/Library/Containers/com.microsoft.<App>/Data/Documents/wef/*.manifest.xml
 ```
+
+*Outlook:*
+1. Go to https://aka.ms/olksideload
+2. In **Custom Addins** section, click **...** next to the add-in
+3. Select **Remove**
 
 ### Windows
 
