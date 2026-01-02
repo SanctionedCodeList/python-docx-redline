@@ -230,3 +230,26 @@ Requires LibreOffice and poppler. Run `../install.sh` or see [scripts/README.md]
 | [integration.md](./integration.md) | python-docx integration workflows |
 | [accessibility.md](./accessibility.md) | AccessibilityTree for agent workflows |
 | [ooxml.md](./ooxml.md) | Raw XML manipulation for complex scenarios |
+
+## Reporting Issues
+
+If you encounter library bugs or want to request new features, use the GitHub CLI:
+
+```bash
+# Report a bug
+gh issue create --repo SanctionedCodeList/python-docx-redline --title "Bug: [description]" --body "## Problem
+[Describe the issue]
+
+## python-docx-redline version
+[Output of pip show python-docx-redline]
+
+## Code to reproduce
+\`\`\`python
+[Minimal example]
+\`\`\`"
+
+# Check existing issues first
+gh issue list --repo SanctionedCodeList/python-docx-redline
+```
+
+This helps improve the library for all users.

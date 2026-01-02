@@ -203,3 +203,20 @@ Detailed workflows for document manipulation:
 ---
 
 Remember: Claude is capable of creating documents that rival top-tier consulting and legal firms. Lead with your answer, use action headings, and execute every detail with intention. The goal isn't a "good enough" document—it's one that drives decisions.
+
+## Reporting Issues
+
+If you encounter bugs, unexpected behavior with tracked changes, or want to request new features, use the GitHub CLI:
+
+```bash
+# Report a bug
+gh issue create --repo SanctionedCodeList/python-docx-redline --title "Bug: [description]" --body "## Problem\n[Describe the issue]\n\n## python-docx-redline version\n[Output of pip show python-docx-redline]\n\n## Code to reproduce\n\`\`\`python\n[Minimal code example]\n\`\`\`\n\n## Attach .docx file if relevant"
+
+# Request a feature
+gh issue create --repo SanctionedCodeList/python-docx-redline --title "Feature: [description]" --body "## Use case\n[Why this is needed]\n\n## Proposed API\n\`\`\`python\n[How you'd like to call it]\n\`\`\`"
+
+# Check existing issues first
+gh issue list --repo SanctionedCodeList/python-docx-redline
+```
+
+This helps improve the library for all users.
