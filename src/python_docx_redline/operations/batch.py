@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
@@ -71,7 +71,7 @@ class Edit:
 
 
 # Type alias for edit input formats
-EditInput = Union[tuple[str, str], Edit, dict[str, Any]]
+EditInput = tuple[str, str] | Edit | dict[str, Any]
 
 
 class BatchOperations:
@@ -308,9 +308,7 @@ class BatchOperations:
 
         return normalized
 
-    def _validate_edit(
-        self, edit_type: str, edit: dict[str, Any]
-    ) -> EditResult:
+    def _validate_edit(self, edit_type: str, edit: dict[str, Any]) -> EditResult:
         """Validate an edit without applying it (for dry run mode).
 
         Checks if the text exists in the document without making changes.
@@ -334,9 +332,7 @@ class BatchOperations:
 
             # Use the document's text search to validate
             paragraphs = self._document._get_paragraphs_for_scope(scope)
-            matches = self._document._text_search.find_text(
-                search_text, paragraphs, regex=regex
-            )
+            matches = self._document._text_search.find_text(search_text, paragraphs, regex=regex)
 
             if not matches:
                 return EditResult(
@@ -397,9 +393,7 @@ class BatchOperations:
 
         try:
             paragraphs = self._document._get_paragraphs_for_scope(error.scope)
-            return SuggestionGenerator.find_similar_text(
-                search_text, paragraphs, max_suggestions=3
-            )
+            return SuggestionGenerator.find_similar_text(search_text, paragraphs, max_suggestions=3)
         except Exception:
             # If suggestion generation fails, just return empty list
             return []

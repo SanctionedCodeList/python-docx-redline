@@ -55,7 +55,7 @@ from .operations.tables import TableOperations
 from .operations.toc import TOC, TOCOperations
 from .operations.tracked_changes import TrackedChangeOperations
 from .package import OOXMLPackage
-from .results import ComparisonStats, EditResult, FormatResult
+from .results import BatchResult, ComparisonStats, EditResult, FormatResult
 from .scope import NoteScope, ScopeEvaluator, parse_note_scope
 from .styles import StyleManager
 from .text_search import TextSearch, TextSpan
@@ -4023,7 +4023,7 @@ class Document:
         continue_on_error: bool = True,
         default_track: bool = True,
         dry_run: bool = False,
-    ) -> "BatchResult":
+    ) -> BatchResult:
         """Apply multiple edits with partial success support and error reporting.
 
         This enhanced batch method provides:
@@ -4079,7 +4079,6 @@ class Document:
             ... else:
             ...     print("Some edits failed!")
         """
-        from .results import BatchResult
 
         return self._batch_ops.apply_edits_batch(
             edits,

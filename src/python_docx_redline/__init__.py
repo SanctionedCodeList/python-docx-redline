@@ -42,6 +42,8 @@ __all__ = [
     "RejectResult",
     "FormatResult",
     "ComparisonStats",
+    "BatchResult",
+    "Edit",
     "Paragraph",
     "Section",
     "Comment",
@@ -133,6 +135,9 @@ from .ooxml_validator import (
     validate_with_ooxml_validator,
 )
 
+# Import batch Edit class
+from .operations.batch import Edit
+
 # Import package class
 from .package import OOXMLPackage
 
@@ -148,7 +153,14 @@ from .rendering import (
 )
 
 # Import result types
-from .results import AcceptResult, ComparisonStats, EditResult, FormatResult, RejectResult
+from .results import (
+    AcceptResult,
+    BatchResult,
+    ComparisonStats,
+    EditResult,
+    FormatResult,
+    RejectResult,
+)
 
 # Import scope evaluation
 from .scope import ScopeEvaluator

@@ -8,7 +8,7 @@ helping users quickly identify and fix common issues.
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from lxml import etree
+    pass
 
 
 class SuggestionGenerator:
